@@ -17,10 +17,14 @@ try:
     pyautogui = importlib.import_module("pyautogui")
     pytesseract = importlib.import_module("pytesseract")
     ImageGrab = importlib.import_module("PIL.ImageGrab")
+    Image = importlib.import_module("PIL.Image")
+    ImageOps = importlib.import_module("PIL.ImageOps")
 except Exception:  # pragma: no cover - optional OCR dependencies
     pyautogui = None
     pytesseract = None
     ImageGrab = None
+    Image = None
+    ImageOps = None
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
 
@@ -984,17 +988,18 @@ class FH6TrackerGUI(tk.Tk):
             return
         self.last_credit_scan_time = now
 
+        region_set = self.get_credit_region() is not None
         text = self._ocr_credit_text()
-        if not text or not text.strip():
+        if (not text or not text.strip()) and not region_set:
             return
 
-        change = detect_credit_change_from_text(text, self.last_credit_balance)
-        balance = parse_credit_balance_from_text(text)
+        change = detect_credit_change_from_text(text, self.last_credit_balance) if text else None
+        balance = parse_credit_balance_from_text(text) if text else None
         # When the user has boxed a tight region around just the number, the captured
-        # text usually has no "CR"/"Credits" keyword, so fall back to reading the number
-        # directly from that region.
-        if balance is None and self.get_credit_region() is not None:
-            balance = parse_balance_number_only(text)
+        # text usually has no "CR"/"Credits" keyword, so fall back to a numeric-only OCR
+        # pass over that region and treat the number itself as the balance.
+        if balance is None and region_set:
+            balance = self._read_region_balance()
 
         if balance is not None:
             if self.last_credit_balance is None:
@@ -1139,14 +1144,42 @@ class FH6TrackerGUI(tk.Tk):
             return None
         return None
 
-    def _ocr_credit_text(self, region=None):
+    def _upscale_for_ocr(self, image):
+        """Enlarge a small capture so Tesseract reads small HUD digits reliably."""
+        if Image is None:
+            return image
+        try:
+            width, height = image.size
+        except Exception:
+            return image
+        if not height or width * height > 1_200_000:
+            return image
+        image = image.convert("L")
+        if ImageOps is not None:
+            # A quiet border keeps glyphs off the capture edge; Tesseract mangles
+            # characters that touch the border (e.g. reading "50" as "VU").
+            image = ImageOps.expand(image, border=16, fill=255)
+        if height < 120:
+            scale = min(4, max(2, round(120 / height)))
+            new_width, new_height = image.size
+            image = image.resize((new_width * scale, new_height * scale), Image.LANCZOS)
+        return image
+
+    def _ocr_credit_text(self, region=None, numeric=False):
         image = self._grab_credit_image(region=region)
         if image is None:
             return ""
+        # A digit-only whitelist on a single line makes Tesseract far more accurate on
+        # stylised HUD numbers (e.g. it stops reading a "7" as "/").
+        config = "--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM" if numeric else ""
         try:
-            return pytesseract.image_to_string(image)
+            return pytesseract.image_to_string(self._upscale_for_ocr(image), config=config)
         except Exception:
             return ""
+
+    def _read_region_balance(self, region=None):
+        """Read just the number from a boxed credit region using the numeric OCR pass."""
+        return parse_balance_number_only(self._ocr_credit_text(region=region, numeric=True))
 
     def test_credit_ocr(self):
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
@@ -1159,6 +1192,8 @@ class FH6TrackerGUI(tk.Tk):
         text = self._ocr_credit_text(region=region)
         raw = " ".join(text.split())[:200]
         balance = parse_credit_balance_from_text(text)
+        if balance is None and region is not None:
+            balance = self._read_region_balance(region=region)
         if balance is not None:
             messagebox.showinfo("OCR test", f"Detected balance: {format_credits(balance)} ({balance:,})\n\nRaw text: {raw}")
         else:
