@@ -1,11 +1,11 @@
 import csv
 import io
-import json
 import os
 import socket
-import struct
 import time
 from datetime import datetime, timezone
+
+import car_lookup
 
 # Voice logging and recording libraries
 try:
@@ -30,8 +30,7 @@ else:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UDP_IP = "0.0.0.0"
 UDP_PORT = 9999
-REF_FILE = os.path.join(BASE_DIR, "fh6_id_reference.json")
-OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
+OWNED_FILE = car_lookup.OWNED_FILE
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 
 # Hotkey set to F4
@@ -52,32 +51,13 @@ if not TEST_MODE:
     sock.bind((UDP_IP, UDP_PORT))
 
 
-def load_json_file(path, default):
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as handle:
-            try:
-                return json.load(handle)
-            except json.JSONDecodeError:
-                return default
-    return default
-
-
-# Load reference map safely
-id_reference = load_json_file(REF_FILE, {})
-
-# Load or create owned garage tracker
-owned_garage = load_json_file(OWNED_FILE, {"owned": []})
-if "owned" not in owned_garage:
-    owned_garage["owned"] = []
+# Load reference map (ordinal -> canonical name) and the master-name index once.
+id_reference = car_lookup.load_reference()
+canonical_index = car_lookup.build_canonical_index()
 
 
 def save_owned_car(car_name):
-    if car_name not in owned_garage["owned"]:
-        owned_garage["owned"].append(car_name)
-        with open(OWNED_FILE, "w", encoding="utf-8") as handle:
-            json.dump(owned_garage, handle, indent=4)
-        return True
-    return False
+    return car_lookup.add_owned_car(car_name)
 
 
 def append_telemetry_row(rpm, speed_mph, car_id, car_name):
@@ -131,18 +111,16 @@ def log_car_voice():
         car_name = recognizer.recognize_google(audio).strip()
 
         if car_name:
+            canonical = car_lookup.save_mapping(active_car_id, car_name)
+            current_mapped_car_name = canonical
+            id_reference[active_car_id] = canonical
             print(f" [✅] Heard: {car_name}")
-            current_mapped_car_name = car_name
+            print(f" [💾] Linked Raw ID {active_car_id} -> '{canonical}' in reference database.")
 
-            id_reference[active_car_id] = car_name
-            with open(REF_FILE, "w", encoding="utf-8") as handle:
-                json.dump(id_reference, handle, indent=4)
-            print(f" [💾] Linked Raw ID {active_car_id} -> '{car_name}' in reference database.")
-
-            if save_owned_car(car_name):
-                print(f" [💾] Added '{car_name}' to owned garage list!")
+            if save_owned_car(canonical):
+                print(f" [💾] Added '{canonical}' to owned garage list!")
             else:
-                print(f" [ℹ️] '{car_name}' is already marked as owned.")
+                print(f" [ℹ️] '{canonical}' is already marked as owned.")
 
     except sr.UnknownValueError:
         print(" [❌] Voice capture failure: speech wasn't clearly understood.")
@@ -186,17 +164,16 @@ else:
         while True:
             data, _ = sock.recvfrom(1024)
 
-            if len(data) < 324:
+            parsed = car_lookup.parse_packet(data)
+            if parsed is None:
                 continue
 
-            current_rpm = struct.unpack("f", data[16:20])[0]
-            speed_mps = struct.unpack("f", data[256:260])[0]
-            speed_mph = speed_mps * 2.23694
-
-            car_ordinal = struct.unpack("i", data[192:196])[0]
+            current_rpm = parsed["rpm"]
+            speed_mph = parsed["speed_mph"]
+            car_ordinal = parsed["car_ordinal"]
             car_id_str = str(car_ordinal)
 
-            if car_ordinal == 0:
+            if not car_lookup.is_real_ordinal(car_ordinal):
                 print(" Waiting for gameplay to start (In Menus/Loading)...       ", end="\r")
                 continue
 
@@ -208,8 +185,9 @@ else:
                     current_mapped_car_name = "Unknown Vehicle"
 
             if not voice_override_active:
-                if car_id_str in id_reference:
-                    current_mapped_car_name = id_reference[car_id_str]
+                mapped_name = id_reference.get(car_id_str)
+                if mapped_name:
+                    current_mapped_car_name = car_lookup.resolve_canonical_name(mapped_name, canonical_index)
 
                     if save_owned_car(current_mapped_car_name):
                         print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")

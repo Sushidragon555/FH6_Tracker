@@ -10,6 +10,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
+import car_lookup
 from import_owned_cars import load_owned_cars_from_file, parse_owned_cars_text, save_owned_cars
 
 try:
@@ -321,6 +322,9 @@ class FH6TrackerGUI(tk.Tk):
         self.session_state = self.load_session_state()
         self.last_credit_balance = None
         self.last_credit_scan_time = 0
+        self.known_owned = set(load_json_file(OWNED_FILE, {"owned": []}).get("owned", []))
+        self.detected_car_id = None
+        self._notice_after_id = None
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
@@ -340,6 +344,10 @@ class FH6TrackerGUI(tk.Tk):
 
         self.status_var = tk.StringVar(value="Status: Stopped")
         ttk.Label(header, textvariable=self.status_var, foreground="#1f6feb").grid(row=0, column=1, sticky="e")
+
+        self.notice_var = tk.StringVar(value="")
+        self.notice_label = ttk.Label(header, textvariable=self.notice_var, foreground="#137333", font=("Segoe UI", 11, "bold"))
+        self.notice_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         controls = ttk.Frame(self)
         controls.grid(row=1, column=0, sticky="ew", pady=(0, 10))
@@ -492,6 +500,14 @@ class FH6TrackerGUI(tk.Tk):
             ttk.Label(self.live_tab, text="Automatic credit balance tracking is active when the game balance is visible.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
         ttk.Label(self.live_tab, text="Press F4 and say the car name to save it to your owned list.").grid(row=4, column=0, sticky="w", padx=10, pady=(4, 0))
 
+        detect_frame = ttk.LabelFrame(self.live_tab, text="Auto Garage Detection")
+        detect_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
+        detect_frame.columnconfigure(0, weight=1)
+        self.detection_status_var = tk.StringVar(value="Start the tracker and drive a car in Forza to auto-detect it.")
+        ttk.Label(detect_frame, textvariable=self.detection_status_var, wraplength=760, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
+        self.tag_detected_button = ttk.Button(detect_frame, text="Tag Detected Car", command=self.tag_detected_car)
+        self.tag_detected_button.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
+
     def build_stats_tab(self):
         self.stats_tab.columnconfigure(0, weight=1)
         self.stats_tab.rowconfigure(1, weight=1)
@@ -620,16 +636,141 @@ class FH6TrackerGUI(tk.Tk):
             self.vars["speed_var"].set(f"{latest.get('speed_mph', '-')} MPH")
             self.vars["car_id_var"].set(latest.get("car_id", "-"))
             self.vars["car_name_var"].set(latest.get("car_name", "-"))
+            self.auto_register_from_telemetry(latest)
         else:
             self.vars["rpm_var"].set("-")
             self.vars["speed_var"].set("-")
             self.vars["car_id_var"].set("-")
             self.vars["car_name_var"].set("-")
+            self.detected_car_id = None
+            self.detection_status_var.set("Start the tracker and drive a car in Forza to auto-detect it.")
 
         self.detect_credit_popup_change()
 
         session_credits = self.get_session_credits()
         self.vars["session_credits_var"].set(format_credits(session_credits))
+
+    def auto_register_from_telemetry(self, latest):
+        car_id = latest.get("car_id")
+        if not car_lookup.is_real_ordinal(car_id):
+            self.detected_car_id = None
+            self.detection_status_var.set("Waiting for gameplay... (in a menu or loading)")
+            return
+
+        self.detected_car_id = str(car_id)
+        car_name = car_lookup.lookup_car_name(car_id)
+        if car_name:
+            if car_lookup.add_owned_car(car_name):
+                self.on_new_owned_car(car_name)
+            self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — owned \u2713")
+        else:
+            self.detection_status_var.set(
+                f"Detected an unknown car (ID {car_id}). Click \u201cTag Detected Car\u201d to link it to your garage."
+            )
+
+    def on_new_owned_car(self, car_name):
+        self.known_owned.add(car_name)
+        self.show_notice(f"\u2713 You now own: {car_name}")
+
+    def show_notice(self, text):
+        self.notice_var.set(text)
+        if self._notice_after_id is not None:
+            try:
+                self.after_cancel(self._notice_after_id)
+            except Exception:
+                pass
+        self._notice_after_id = self.after(10000, lambda: self.notice_var.set(""))
+
+    def tag_detected_car(self):
+        car_id = self.detected_car_id
+        if not car_lookup.is_real_ordinal(car_id):
+            messagebox.showinfo(
+                "No car detected",
+                "No car is being detected yet. Start the tracker and drive a car in Forza, then try again.",
+            )
+            return
+
+        existing = car_lookup.lookup_car_name(car_id)
+        prompt = f"Detected car ID {car_id}."
+        if existing:
+            prompt += f"\nCurrently linked to: {existing}.\nPick a car to re-link it, or Cancel to keep it."
+        else:
+            prompt += "\nPick the car you are driving to link it to this ID."
+
+        chosen = self._choose_master_car("Tag Detected Car", prompt, preselect=existing)
+        if not chosen:
+            return
+
+        car_lookup.save_mapping(car_id, chosen)
+        newly_added = car_lookup.add_owned_car(chosen)
+        if newly_added:
+            self.on_new_owned_car(chosen)
+        else:
+            self.show_notice(f"Linked ID {car_id} to {chosen}")
+        self.refresh_all()
+
+    def _choose_master_car(self, title, prompt, preselect=None):
+        master_db = load_json_file(MASTER_FILE, {})
+        all_cars = sorted(name for name in master_db if name and name != "Year Make Model")
+        if not all_cars:
+            messagebox.showwarning("No car list", "The master car list is empty.")
+            return None
+
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.geometry("520x460")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(2, weight=1)
+
+        ttk.Label(dialog, text=prompt, wraplength=490, justify="left").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
+
+        search_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=search_var).grid(row=1, column=0, sticky="ew", padx=10)
+
+        listbox = tk.Listbox(dialog, font=("Consolas", 10))
+        listbox.grid(row=2, column=0, sticky="nsew", padx=10, pady=8)
+        scrollbar = ttk.Scrollbar(dialog, orient="vertical", command=listbox.yview)
+        scrollbar.grid(row=2, column=1, sticky="ns", pady=8)
+        listbox.configure(yscrollcommand=scrollbar.set)
+
+        result = {"car": None}
+
+        def populate(*_):
+            terms = [t for t in search_var.get().lower().split() if t]
+            listbox.delete(0, tk.END)
+            for car in all_cars:
+                lowered = car.lower()
+                if all(term in lowered for term in terms):
+                    listbox.insert(tk.END, car)
+            if preselect and preselect in all_cars and not terms:
+                try:
+                    idx = list(listbox.get(0, tk.END)).index(preselect)
+                    listbox.selection_set(idx)
+                    listbox.see(idx)
+                except ValueError:
+                    pass
+
+        def confirm(*_):
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showinfo("Pick a car", "Select a car from the list first.", parent=dialog)
+                return
+            result["car"] = listbox.get(selection[0])
+            dialog.destroy()
+
+        search_var.trace_add("write", populate)
+        listbox.bind("<Double-1>", confirm)
+
+        button_row = ttk.Frame(dialog)
+        button_row.grid(row=3, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
+        ttk.Button(button_row, text="Cancel", command=dialog.destroy).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(button_row, text="Link Car", command=confirm).grid(row=0, column=1)
+
+        populate()
+        dialog.wait_window()
+        return result["car"]
 
     def refresh_stats_panel(self):
         master_db = load_json_file(MASTER_FILE, {})
