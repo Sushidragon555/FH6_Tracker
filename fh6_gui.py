@@ -240,7 +240,15 @@ def is_forza_process_name(name):
 def get_running_process_names():
     if os.name == "nt":
         try:
-            completed = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True, check=False, timeout=10)
+            # CREATE_NO_WINDOW keeps this from flashing a console window every refresh.
+            completed = subprocess.run(
+                ["tasklist", "/fo", "csv", "/nh"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
         except (OSError, subprocess.SubprocessError):
             return []
         if completed.returncode != 0:
