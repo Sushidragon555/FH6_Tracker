@@ -660,7 +660,8 @@ class FH6TrackerGUI(tk.Tk):
         self.detected_car_id = str(car_id)
         car_name = car_lookup.lookup_car_name(car_id)
         if car_name:
-            if car_lookup.add_owned_car(car_name):
+            car_lookup.add_owned_car(car_name)
+            if car_name not in self.known_owned:
                 self.on_new_owned_car(car_name)
             self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — owned \u2713")
         else:
@@ -702,8 +703,8 @@ class FH6TrackerGUI(tk.Tk):
             return
 
         car_lookup.save_mapping(car_id, chosen)
-        newly_added = car_lookup.add_owned_car(chosen)
-        if newly_added:
+        car_lookup.add_owned_car(chosen)
+        if chosen not in self.known_owned:
             self.on_new_owned_car(chosen)
         else:
             self.show_notice(f"Linked ID {car_id} to {chosen}")
