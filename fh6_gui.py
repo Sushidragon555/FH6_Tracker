@@ -80,6 +80,26 @@ def parse_credit_balance_from_text(text):
     return None
 
 
+def parse_balance_number_only(text):
+    """Return the most plausible standalone number in ``text``.
+
+    Used when the user has boxed a tight region around just the credit number, so the
+    captured text is often only digits (e.g. "1,050,000" or "1.05M") with no
+    "CR"/"Credits" keyword. We pick the largest number-like token, which for a boxed
+    balance is the balance itself.
+    """
+    if not text:
+        return None
+    best = None
+    for match in re.finditer(r"[0-9][0-9,\.]*\s*[kKmM]?", text):
+        value = parse_credit_number(match.group(0).strip())
+        if value is None:
+            continue
+        if best is None or value > best:
+            best = value
+    return best
+
+
 def detect_credit_change_from_text(text, previous_balance=None):
     if not text:
         return None
@@ -333,6 +353,8 @@ class FH6TrackerGUI(tk.Tk):
         self.session_state = self.load_session_state()
         self.last_credit_balance = None
         self.last_credit_scan_time = 0
+        self._pending_balance = None
+        self._pending_balance_count = 0
         self.forza_running_prev = None
         self.known_owned = set(load_json_file(OWNED_FILE, {"owned": []}).get("owned", []))
         self.detected_car_id = None
@@ -693,6 +715,10 @@ class FH6TrackerGUI(tk.Tk):
     def _ocr_interval_seconds(self):
         return self._performance_preset()["ocr_seconds"]
 
+    def _reset_pending_balance(self):
+        self._pending_balance = None
+        self._pending_balance_count = 0
+
     def refresh_loop(self):
         self.refresh_all()
         self.after(self._refresh_interval_ms(), self.refresh_loop)
@@ -964,14 +990,33 @@ class FH6TrackerGUI(tk.Tk):
 
         change = detect_credit_change_from_text(text, self.last_credit_balance)
         balance = parse_credit_balance_from_text(text)
+        # When the user has boxed a tight region around just the number, the captured
+        # text usually has no "CR"/"Credits" keyword, so fall back to reading the number
+        # directly from that region.
+        if balance is None and self.get_credit_region() is not None:
+            balance = parse_balance_number_only(text)
 
         if balance is not None:
             if self.last_credit_balance is None:
                 self.last_credit_balance = balance
+                self._reset_pending_balance()
+                return
+            if balance == self.last_credit_balance:
+                self._reset_pending_balance()
+                return
+            # The reading changed. Require it to repeat on consecutive scans before acting
+            # so a single garbled OCR frame can't inject a phantom credit gain.
+            if balance == self._pending_balance:
+                self._pending_balance_count += 1
+            else:
+                self._pending_balance = balance
+                self._pending_balance_count = 1
+            if self._pending_balance_count < 2:
                 return
             if balance > self.last_credit_balance:
                 self.update_session_credits(balance - self.last_credit_balance)
             self.last_credit_balance = balance
+            self._reset_pending_balance()
             return
 
         if change is None or change <= 0:
