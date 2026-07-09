@@ -147,6 +147,12 @@ if OPTIONAL_IMPORT_ERROR:
     print(f" Optional dependency warning: {OPTIONAL_IMPORT_ERROR}")
 
 last_id = None
+last_log_time = 0.0
+# Forza streams ~60 packets/sec. Writing every one thrashes the disk and grows
+# telemetry_log.csv without bound, which is the main cause of in-game stutter while
+# the tracker runs. We log at most once per second (plus immediately on a car change),
+# which keeps the GUI's 1s live view fresh while cutting disk writes ~60x.
+LOG_INTERVAL_SECONDS = 1.0
 
 # ==========================================
 # MAIN TELEMETRY LOOP
@@ -179,7 +185,8 @@ else:
 
             active_car_id = car_id_str
 
-            if last_id != car_id_str:
+            car_changed = last_id != car_id_str
+            if car_changed:
                 last_id = car_id_str
                 if not voice_override_active:
                     current_mapped_car_name = "Unknown Vehicle"
@@ -189,12 +196,17 @@ else:
                 if mapped_name:
                     current_mapped_car_name = car_lookup.resolve_canonical_name(mapped_name, canonical_index)
 
-                    if save_owned_car(current_mapped_car_name):
+                    # The owned list only changes when a new car appears, so touch it on
+                    # car changes instead of on every packet (avoids re-reading the JSON 60x/sec).
+                    if car_changed and save_owned_car(current_mapped_car_name):
                         print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
                 else:
                     current_mapped_car_name = "Unknown Vehicle"
 
-            append_telemetry_row(int(current_rpm), int(speed_mph), car_id_str, current_mapped_car_name)
+            now = time.monotonic()
+            if car_changed or (now - last_log_time) >= LOG_INTERVAL_SECONDS:
+                last_log_time = now
+                append_telemetry_row(int(current_rpm), int(speed_mph), car_id_str, current_mapped_car_name)
             print(f" [LIVE] RPM: {int(current_rpm):<5} | Speed: {int(speed_mph):<3} MPH | Raw ID: {car_id_str:<10} | Name: {current_mapped_car_name:<30}", end="\r")
 
     except KeyboardInterrupt:

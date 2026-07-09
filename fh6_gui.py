@@ -1132,12 +1132,34 @@ class FH6TrackerGUI(tk.Tk):
         return datetime.now(timezone.utc).isoformat()
 
     def read_latest_telemetry_row(self):
+        # Read only the header and the tail of the file rather than loading the whole
+        # CSV every second; telemetry_log.csv can grow large, and parsing it in full on
+        # each 1s refresh would get slower over time and add avoidable overhead.
         if not os.path.exists(LOG_FILE):
             return None
-        with open(LOG_FILE, "r", newline="", encoding="utf-8") as handle:
-            reader = csv.DictReader(handle)
-            rows = list(reader)
-        return rows[-1] if rows else None
+        try:
+            with open(LOG_FILE, "rb") as handle:
+                header_bytes = handle.readline()
+                if not header_bytes:
+                    return None
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                read_size = min(size, 4096)
+                handle.seek(size - read_size)
+                tail_bytes = handle.read()
+            header = header_bytes.decode("utf-8", "replace")
+            tail = tail_bytes.decode("utf-8", "replace")
+            fieldnames = next(csv.reader([header]))
+            lines = [line for line in tail.splitlines() if line.strip()]
+            if not lines:
+                return None
+            last = lines[-1]
+            if last.strip() == header.strip():
+                return None
+            values = next(csv.reader([last]))
+            return dict(zip(fieldnames, values))
+        except (OSError, csv.Error, StopIteration):
+            return None
 
     def add_car_manual(self):
         car_name = self.add_car_var.get().strip()
