@@ -221,6 +221,8 @@ def load_settings():
         "auto_start_forza": settings.get("auto_start_forza", False),
         "launch_tracker_on_start": settings.get("launch_tracker_on_start", False),
         "theme": settings.get("theme", "light"),
+        "credit_ocr_enabled": settings.get("credit_ocr_enabled", False),
+        "credit_region": settings.get("credit_region"),
     }
 
 
@@ -322,6 +324,7 @@ class FH6TrackerGUI(tk.Tk):
         self.session_state = self.load_session_state()
         self.last_credit_balance = None
         self.last_credit_scan_time = 0
+        self.forza_running_prev = None
         self.known_owned = set(load_json_file(OWNED_FILE, {"owned": []}).get("owned", []))
         self.detected_car_id = None
         self._notice_after_id = None
@@ -364,6 +367,12 @@ class FH6TrackerGUI(tk.Tk):
         self.auto_start_var = tk.BooleanVar(value=self.settings.get("auto_start_forza", False))
         self.launch_tracker_var = tk.BooleanVar(value=self.settings.get("launch_tracker_on_start", False))
         self.theme_var = tk.StringVar(value=self.settings.get("theme", "light"))
+        self.credit_ocr_var = tk.BooleanVar(value=self.settings.get("credit_ocr_enabled", False))
+        region = self.settings.get("credit_region") or [0, 0, 0, 0]
+        self.credit_x_var = tk.StringVar(value=str(region[0]))
+        self.credit_y_var = tk.StringVar(value=str(region[1]))
+        self.credit_w_var = tk.StringVar(value=str(region[2]))
+        self.credit_h_var = tk.StringVar(value=str(region[3]))
         ttk.Button(controls, text="Save Settings", command=self.save_auto_start_setting).grid(row=0, column=2, padx=(8, 8), sticky="w")
 
         self.add_car_var = tk.StringVar()
@@ -495,9 +504,9 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=2, column=0, sticky="w", padx=10, pady=(6, 0))
         if pyautogui is None or pytesseract is None or ImageGrab is None:
-            ttk.Label(self.live_tab, text="Credit balance OCR is unavailable until OCR packages are installed.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
+            ttk.Label(self.live_tab, text="Automatic credit tracking needs OCR packages — see Settings → Automatic Credit Tracking.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
         else:
-            ttk.Label(self.live_tab, text="Automatic credit balance tracking is active when the game balance is visible.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
+            ttk.Label(self.live_tab, text="Automatic credit tracking runs when enabled in Settings and Forza is open (a new session starts each time the game opens).").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
         ttk.Label(self.live_tab, text="Press F4 and say the car name to save it to your owned list.").grid(row=4, column=0, sticky="w", padx=10, pady=(4, 0))
 
         detect_frame = ttk.LabelFrame(self.live_tab, text="Auto Garage Detection")
@@ -552,6 +561,33 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(settings_frame, text="Theme:").grid(row=2, column=0, sticky="w", padx=8, pady=6)
         ttk.Combobox(settings_frame, textvariable=self.theme_var, values=["light", "dark"], state="readonly", width=12).grid(row=2, column=1, sticky="w", padx=(4, 8), pady=6)
         ttk.Button(settings_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=3, column=0, sticky="w", padx=8, pady=(6, 8))
+
+        ocr_frame = ttk.LabelFrame(self.settings_tab, text="Automatic Credit Tracking (OCR)")
+        ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        ocr_frame.columnconfigure(5, weight=1)
+
+        ttk.Checkbutton(ocr_frame, text="Auto-track credits by reading the on-screen balance while Forza is open", variable=self.credit_ocr_var).grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=6)
+
+        ttk.Label(ocr_frame, text="Credit area (pixels):").grid(row=1, column=0, sticky="w", padx=8, pady=4)
+        ttk.Label(ocr_frame, text="X").grid(row=1, column=1, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.credit_x_var, width=7).grid(row=1, column=2, padx=(2, 8))
+        ttk.Label(ocr_frame, text="Y").grid(row=1, column=3, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.credit_y_var, width=7).grid(row=1, column=4, padx=(2, 8))
+        ttk.Label(ocr_frame, text="W").grid(row=2, column=1, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.credit_w_var, width=7).grid(row=2, column=2, padx=(2, 8))
+        ttk.Label(ocr_frame, text="H").grid(row=2, column=3, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.credit_h_var, width=7).grid(row=2, column=4, padx=(2, 8))
+
+        ttk.Button(ocr_frame, text="Capture Area", command=self.capture_credit_area).grid(row=1, column=5, sticky="w", padx=8)
+        ttk.Button(ocr_frame, text="Test OCR", command=self.test_credit_ocr).grid(row=2, column=5, sticky="w", padx=8)
+        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=3, column=0, sticky="w", padx=8, pady=(6, 8))
+
+        if pyautogui is None or pytesseract is None or ImageGrab is None:
+            ocr_status = "OCR packages not installed. Run: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program."
+        else:
+            ocr_status = "OCR ready. Leave W/H at 0 to scan the full screen, or use Capture Area to box the credit number for faster, more reliable reads."
+        self.ocr_status_var = tk.StringVar(value=ocr_status)
+        ttk.Label(ocr_frame, textvariable=self.ocr_status_var, wraplength=760, justify="left", foreground="#8a6d00").grid(row=4, column=0, columnspan=6, sticky="w", padx=8, pady=(0, 8))
 
     def build_logs_tab(self):
         self.logs_tab.columnconfigure(0, weight=1)
@@ -621,6 +657,7 @@ class FH6TrackerGUI(tk.Tk):
         self.after(1000, self.refresh_loop)
 
     def refresh_all(self):
+        self.update_forza_session_state()
         self.refresh_collection()
         self.refresh_live_data()
         self.refresh_stats_panel()
@@ -870,19 +907,18 @@ class FH6TrackerGUI(tk.Tk):
     def detect_credit_popup_change(self):
         if pyautogui is None or pytesseract is None or ImageGrab is None:
             return
+        if not self.settings.get("credit_ocr_enabled", False):
+            return
 
         now = time.monotonic()
         if now - self.last_credit_scan_time < 3:
             return
+        if not (has_running_forza_process() or has_running_forza_window()):
+            return
         self.last_credit_scan_time = now
 
-        try:
-            screenshot = pyautogui.screenshot()
-            text = pytesseract.image_to_string(screenshot)
-        except Exception:
-            return
-
-        if not text.strip():
+        text = self._ocr_credit_text()
+        if not text or not text.strip():
             return
 
         change = detect_credit_change_from_text(text, self.last_credit_balance)
@@ -892,14 +928,12 @@ class FH6TrackerGUI(tk.Tk):
             if self.last_credit_balance is None:
                 self.last_credit_balance = balance
                 return
-            if balance != self.last_credit_balance:
-                delta = balance - self.last_credit_balance
-                if delta != 0:
-                    self.update_session_credits(delta)
-                self.last_credit_balance = balance
+            if balance > self.last_credit_balance:
+                self.update_session_credits(balance - self.last_credit_balance)
+            self.last_credit_balance = balance
             return
 
-        if change is None:
+        if change is None or change <= 0:
             return
 
         if self.last_credit_balance is None:
@@ -921,11 +955,6 @@ class FH6TrackerGUI(tk.Tk):
             json.dump(self.session_state, handle, indent=4)
 
     def get_session_credits(self):
-        if not self.session_state.get("session_started", False):
-            self.session_state["session_started"] = True
-            self.session_state["session_start_time"] = self.current_timestamp()
-            self.session_state["session_credits"] = 0
-            self.save_session_state()
         return self.session_state.get("session_credits", 0)
 
     def add_session_credits(self):
@@ -959,6 +988,144 @@ class FH6TrackerGUI(tk.Tk):
         }
         self.save_session_state()
         self.refresh_live_data()
+
+    def start_new_session(self, auto=False):
+        self.session_state = {
+            "session_started": True,
+            "session_start_time": self.current_timestamp(),
+            "session_credits": 0,
+        }
+        self.save_session_state()
+        self.last_credit_balance = None
+        if auto:
+            self.show_notice("New Forza session started — tracking credits from now.")
+
+    def end_session(self, auto=False):
+        total = self.session_state.get("session_credits", 0)
+        self.session_state["session_started"] = False
+        self.save_session_state()
+        if auto:
+            self.show_notice(f"Forza closed — this session earned {format_credits(total)} credits.")
+
+    def update_forza_session_state(self):
+        running_now = has_running_forza_process() or has_running_forza_window()
+        if self.forza_running_prev is None:
+            self.forza_running_prev = running_now
+            return
+        if running_now and not self.forza_running_prev:
+            self.start_new_session(auto=True)
+        elif not running_now and self.forza_running_prev:
+            self.end_session(auto=True)
+        self.forza_running_prev = running_now
+
+    def _read_region_fields(self):
+        try:
+            x = int(self.credit_x_var.get() or 0)
+            y = int(self.credit_y_var.get() or 0)
+            w = int(self.credit_w_var.get() or 0)
+            h = int(self.credit_h_var.get() or 0)
+        except (ValueError, AttributeError):
+            return None
+        if w > 0 and h > 0:
+            return [x, y, w, h]
+        return None
+
+    def get_credit_region(self):
+        region = self.settings.get("credit_region")
+        if region and len(region) == 4 and int(region[2]) > 0 and int(region[3]) > 0:
+            return tuple(int(v) for v in region)
+        return None
+
+    def _grab_credit_image(self, region=None):
+        if region is None:
+            region = self.get_credit_region()
+        try:
+            if ImageGrab is not None:
+                if region:
+                    x, y, w, h = region
+                    return ImageGrab.grab(bbox=(x, y, x + w, y + h))
+                return ImageGrab.grab()
+            if pyautogui is not None:
+                if region:
+                    return pyautogui.screenshot(region=tuple(region))
+                return pyautogui.screenshot()
+        except Exception:
+            return None
+        return None
+
+    def _ocr_credit_text(self, region=None):
+        image = self._grab_credit_image(region=region)
+        if image is None:
+            return ""
+        try:
+            return pytesseract.image_to_string(image)
+        except Exception:
+            return ""
+
+    def test_credit_ocr(self):
+        if pytesseract is None or (ImageGrab is None and pyautogui is None):
+            messagebox.showwarning(
+                "OCR unavailable",
+                "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
+            )
+            return
+        region = self._read_region_fields()
+        text = self._ocr_credit_text(region=region)
+        raw = " ".join(text.split())[:200]
+        balance = parse_credit_balance_from_text(text)
+        if balance is not None:
+            messagebox.showinfo("OCR test", f"Detected balance: {format_credits(balance)} ({balance:,})\n\nRaw text: {raw}")
+        else:
+            messagebox.showinfo("OCR test", f"No credit balance found in the captured area.\n\nRaw text: {raw or '(nothing detected)'}")
+
+    def capture_credit_area(self):
+        try:
+            overlay = tk.Toplevel(self)
+            overlay.attributes("-fullscreen", True)
+            overlay.attributes("-alpha", 0.25)
+            overlay.configure(bg="black", cursor="crosshair")
+            canvas = tk.Canvas(overlay, bg="black", highlightthickness=0)
+            canvas.pack(fill="both", expand=True)
+            ttk.Label(overlay, text="Drag a box around your credit balance, then release. Press Esc to cancel.").place(x=20, y=20)
+            state = {"start": None, "rect": None, "cstart": (0, 0)}
+
+            def on_press(event):
+                state["start"] = (event.x_root, event.y_root)
+                state["cstart"] = (event.x, event.y)
+                if state["rect"]:
+                    canvas.delete(state["rect"])
+                state["rect"] = canvas.create_rectangle(event.x, event.y, event.x, event.y, outline="#00ff00", width=2)
+
+            def on_drag(event):
+                if state["rect"]:
+                    cx, cy = state["cstart"]
+                    canvas.coords(state["rect"], cx, cy, event.x, event.y)
+
+            def on_release(event):
+                if not state["start"]:
+                    overlay.destroy()
+                    return
+                x0, y0 = state["start"]
+                x1, y1 = event.x_root, event.y_root
+                overlay.destroy()
+                x, y = int(min(x0, x1)), int(min(y0, y1))
+                w, h = int(abs(x1 - x0)), int(abs(y1 - y0))
+                if w > 4 and h > 4:
+                    self.credit_x_var.set(str(x))
+                    self.credit_y_var.set(str(y))
+                    self.credit_w_var.set(str(w))
+                    self.credit_h_var.set(str(h))
+
+            def on_cancel(_event):
+                overlay.destroy()
+
+            canvas.bind("<ButtonPress-1>", on_press)
+            canvas.bind("<B1-Motion>", on_drag)
+            canvas.bind("<ButtonRelease-1>", on_release)
+            overlay.bind("<Escape>", on_cancel)
+            overlay.focus_force()
+        except Exception as exc:
+            messagebox.showerror("Capture failed", f"Could not open the capture overlay: {exc}\nEnter the X/Y/W/H values manually instead.")
 
     def current_timestamp(self):
         from datetime import datetime, timezone
@@ -1078,6 +1245,8 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["auto_start_forza"] = bool(self.auto_start_var.get())
         self.settings["launch_tracker_on_start"] = bool(self.launch_tracker_var.get())
         self.settings["theme"] = self.theme_var.get() or "light"
+        self.settings["credit_ocr_enabled"] = bool(self.credit_ocr_var.get())
+        self.settings["credit_region"] = self._read_region_fields()
         save_settings(self.settings)
         self.apply_theme(self.settings["theme"])
         if self.settings.get("auto_start_forza") and not self.tracker_running and (has_running_forza_window() or has_running_forza_process()):
