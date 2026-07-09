@@ -150,9 +150,10 @@ last_id = None
 last_log_time = 0.0
 # Forza streams ~60 packets/sec. Writing every one thrashes the disk and grows
 # telemetry_log.csv without bound, which is the main cause of in-game stutter while
-# the tracker runs. We log at most once per second (plus immediately on a car change),
-# which keeps the GUI's 1s live view fresh while cutting disk writes ~60x.
-LOG_INTERVAL_SECONDS = 1.0
+# the tracker runs. We log at most once per interval (plus immediately on a car change),
+# which keeps the GUI's live view fresh while cutting disk writes drastically. The
+# interval follows the Performance setting chosen in the GUI (read once at startup).
+LOG_INTERVAL_SECONDS = car_lookup.get_performance_preset()["log_seconds"]
 
 # ==========================================
 # MAIN TELEMETRY LOOP

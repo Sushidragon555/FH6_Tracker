@@ -13,6 +13,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REF_FILE = os.path.join(BASE_DIR, "fh6_id_reference.json")
 MASTER_FILE = os.path.join(BASE_DIR, "fh6_master_list.json")
 OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
+SETTINGS_FILE = os.path.join(BASE_DIR, "gui_settings.json")
+
+# Performance presets shared by the GUI and the tracker process. Higher intervals mean
+# fewer screen grabs / disk writes / UI redraws per second, which frees up the CPU/GPU for
+# the game (higher in-game FPS) at the cost of a slightly less frequently updated dashboard.
+#   refresh_ms  - how often the GUI redraws its live data
+#   ocr_seconds - how often the credit-balance OCR screen grab runs
+#   log_seconds - how often the tracker writes a telemetry row to disk
+PERFORMANCE_PRESETS = {
+    "Quality": {"refresh_ms": 1000, "ocr_seconds": 3, "log_seconds": 1.0},
+    "Balanced": {"refresh_ms": 2000, "ocr_seconds": 6, "log_seconds": 2.0},
+    "Performance": {"refresh_ms": 4000, "ocr_seconds": 12, "log_seconds": 5.0},
+}
+DEFAULT_PERFORMANCE_MODE = "Balanced"
 
 # Byte offset of the CarOrdinal field (a signed 32-bit int) inside a Forza Horizon
 # "Data Out" UDP telemetry packet. It lives in the fixed "sled" section, so unlike the
@@ -47,6 +61,14 @@ def parse_packet(data):
     speed_mps = struct.unpack("f", data[SPEED_OFFSET:SPEED_OFFSET + 4])[0]
     car_ordinal = struct.unpack("i", data[CAR_ORDINAL_OFFSET:CAR_ORDINAL_OFFSET + 4])[0]
     return {"rpm": rpm, "speed_mph": speed_mps * MPS_TO_MPH, "car_ordinal": car_ordinal}
+
+
+def get_performance_preset(mode=None):
+    """Return the performance preset dict for ``mode`` (or the saved/default mode)."""
+    if mode is None:
+        settings = load_json_file(SETTINGS_FILE, {})
+        mode = settings.get("performance_mode", DEFAULT_PERFORMANCE_MODE)
+    return PERFORMANCE_PRESETS.get(mode, PERFORMANCE_PRESETS[DEFAULT_PERFORMANCE_MODE])
 
 
 def load_json_file(path, default):

@@ -223,6 +223,7 @@ def load_settings():
         "theme": settings.get("theme", "light"),
         "credit_ocr_enabled": settings.get("credit_ocr_enabled", False),
         "credit_region": settings.get("credit_region"),
+        "performance_mode": settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE),
     }
 
 
@@ -340,7 +341,7 @@ class FH6TrackerGUI(tk.Tk):
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
         self.refresh_all()
-        self.after(1000, self.refresh_loop)
+        self.after(self._refresh_interval_ms(), self.refresh_loop)
         self.after(2000, self._check_forza_auto_start)
 
     def create_widgets(self):
@@ -381,6 +382,7 @@ class FH6TrackerGUI(tk.Tk):
         self.credit_y_var = tk.StringVar(value=str(region[1]))
         self.credit_w_var = tk.StringVar(value=str(region[2]))
         self.credit_h_var = tk.StringVar(value=str(region[3]))
+        self.performance_var = tk.StringVar(value=self.settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE))
         ttk.Button(controls, text="Save Settings", command=self.save_auto_start_setting).grid(row=0, column=2, padx=(8, 8), sticky="w")
 
         self.add_car_var = tk.StringVar()
@@ -568,7 +570,29 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Label(settings_frame, text="Theme:").grid(row=2, column=0, sticky="w", padx=8, pady=6)
         ttk.Combobox(settings_frame, textvariable=self.theme_var, values=["light", "dark"], state="readonly", width=12).grid(row=2, column=1, sticky="w", padx=(4, 8), pady=6)
-        ttk.Button(settings_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=3, column=0, sticky="w", padx=8, pady=(6, 8))
+
+        ttk.Label(settings_frame, text="Performance:").grid(row=3, column=0, sticky="w", padx=8, pady=6)
+        ttk.Combobox(
+            settings_frame,
+            textvariable=self.performance_var,
+            values=list(car_lookup.PERFORMANCE_PRESETS.keys()),
+            state="readonly",
+            width=12,
+        ).grid(row=3, column=1, sticky="w", padx=(4, 8), pady=6)
+        ttk.Label(
+            settings_frame,
+            text=(
+                "Higher performance = fewer screen reads, disk writes and UI updates, which "
+                "frees resources for the game (higher FPS).\n"
+                "Quality: smoothest dashboard (updates every 1s).  "
+                "Balanced: recommended.  "
+                "Performance: best in-game FPS (dashboard updates every ~4s)."
+            ),
+            wraplength=760,
+            justify="left",
+            foreground="#555555",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
+        ttk.Button(settings_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=5, column=0, sticky="w", padx=8, pady=(6, 8))
 
         ocr_frame = ttk.LabelFrame(self.settings_tab, text="Automatic Credit Tracking (OCR)")
         ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -660,9 +684,18 @@ class FH6TrackerGUI(tk.Tk):
         self.owned_frame.columnconfigure(0, weight=1)
         self.owned_frame.rowconfigure(0, weight=1)
 
+    def _performance_preset(self):
+        return car_lookup.get_performance_preset(self.settings.get("performance_mode"))
+
+    def _refresh_interval_ms(self):
+        return self._performance_preset()["refresh_ms"]
+
+    def _ocr_interval_seconds(self):
+        return self._performance_preset()["ocr_seconds"]
+
     def refresh_loop(self):
         self.refresh_all()
-        self.after(1000, self.refresh_loop)
+        self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
         self.update_forza_session_state()
@@ -919,7 +952,7 @@ class FH6TrackerGUI(tk.Tk):
             return
 
         now = time.monotonic()
-        if now - self.last_credit_scan_time < 3:
+        if now - self.last_credit_scan_time < self._ocr_interval_seconds():
             return
         if not (has_running_forza_process() or has_running_forza_window()):
             return
@@ -1272,13 +1305,20 @@ class FH6TrackerGUI(tk.Tk):
         self.refresh_all()
 
     def save_auto_start_setting(self):
+        previous_mode = self.settings.get("performance_mode")
         self.settings["auto_start_forza"] = bool(self.auto_start_var.get())
         self.settings["launch_tracker_on_start"] = bool(self.launch_tracker_var.get())
         self.settings["theme"] = self.theme_var.get() or "light"
         self.settings["credit_ocr_enabled"] = bool(self.credit_ocr_var.get())
         self.settings["credit_region"] = self._read_region_fields()
+        self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
         save_settings(self.settings)
         self.apply_theme(self.settings["theme"])
+        # The tracker process reads the logging interval once at startup, so restart it to
+        # pick up a changed performance mode.
+        if self.settings["performance_mode"] != previous_mode and self.tracker_running:
+            self.stop_tracker()
+            self.after(500, self.start_tracker)
         if self.settings.get("auto_start_forza") and not self.tracker_running and (has_running_forza_window() or has_running_forza_process()):
             self.start_tracker()
         else:
