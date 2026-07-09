@@ -1,0 +1,619 @@
+Year	Make	Model	Class	Type	Country	Value (Cr)	Rarity	Source	Source Info
+1968	Abarth	595 Esseesse	D 100	Cult Cars	Italy	25,000	Common	Autoshow, Wheelspin	
+2016	Abarth	695 Biposto	B 540	Hot Hatch	Italy	250,000	Common	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1980	Abarth	Fiat 131	D 399	Classic Rally	Italy	125,000	Common	Autoshow, Wheelspin	
+2023	Acura	Integra A-Spec	C 484	Hot Hatch	USA	36,000	Rare	Autoshow, Wheelspin	
+2001	Acura	Integra Type R	C 471	Retro Hot Hatch	USA	65,000	Common	Autoshow, Wheelspin	
+2022	Acura	NSX Type S	S1 734	Modern Supercars	USA	193,000	Epic	Seasonal	Not in Autoshow, from Mech My Day Wristband Event
+2002	Acura	RSX Type S	C 462	Retro Hot Hatch	USA	18,000	Common	Autoshow, Wheelspin	
+1992	Alfa Romeo	155 Q4	C 439	Retro Super Saloons	Italy	30,000	Epic	Autoshow	
+1968	Alfa Romeo	33 Stradale	B 593	Classic Racers	Italy	3,500,000	Legendary	Autoshow, Wheelspin	
+2014	Alfa Romeo	4C	A 644	Modern Sports Cars	Italy	73,000	Epic	Autoshow	
+2007	Alfa Romeo	8C Competizione	A 635	GT Cars	Italy	312,000	Epic	Autoshow, Wheelspin	
+2021	Alfa Romeo	Giulia GTAm	S1 717	Modern Super Saloons	Italy			Autoshow DLC	Italian Passion Car Pack
+2017	Alfa Romeo	Giulia Quadrifoglio	A 667	Modern Super Saloons	Italy	45,000	Rare	Autoshow, Wheelspin	
+1965	Alfa Romeo	Giulia Sprint GTA Stradale	D 379	Rare Classics	Italy	343,000	Rare	Autoshow, Wheelspin	
+1965	Alfa Romeo	Giulia TZ2	B 532	Classic Racers	Italy			Collection Journal, Seasonal	Not in Autoshow
+1990	Alfa Romeo	SE 048SP	R 978	Retro Racers	Italy			Autoshow DLC	Italian Passion Car Pack
+2021	Alumicraft	#122 Class 1 Buggy	B 571	Unlimited Buggies	USA	160,000	Epic	Autoshow, Wheelspin	
+2022	Alumicraft	#6165 Trick Truck	C 485	Unlimited Offroad	USA	300,000	Epic	Autoshow, Wheelspin	
+2015	Alumicraft	Class 10 Race Car	B 532	Unlimited Buggies	USA	45,000	Epic	Autoshow, Wheelspin	
+2554	AMG Transport Dynamics	M12S Warthog CST	A 663	Unlimited Offroad	USA	850,000	Legendary	Autoshow, Collection Journal	
+2019	Apollo	Intensa Emozione	R 916	Extreme Track Toys	Germany			Wheelspin, Seasonal	Not in Autoshow
+2013	Ariel	Atom 500 V8	S2 825	Extreme Track Toys	UK	190,000	Epic	Autoshow, Wheelspin	
+2016	Ariel	Nomad	A 601	Unlimited Buggies	UK	54,000	Rare	Autoshow, Collection Journal, Wheelspin	
+2017	Aston Martin	DB11	A 679	Super GT	UK	175,000	Epic	Autoshow, Wheelspin	
+1964	Aston Martin	DB5	C 416	Rare Classics	UK	500,000	Epic	Autoshow	
+2019	Aston Martin	DBS Superleggera	S1 736	Super GT	UK			Wheelspin, Seasonal	Not in Autoshow
+2021	Aston Martin	DBX	A 618	Sports Utility Heroes	UK	250,000	Rare	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2019	Aston Martin	Valhalla Concept Car	R 960	Hypercars	UK			Wheelspin, Seasonal	Not in Autoshow
+2023	Aston Martin	Valkyrie	R 924	Hypercars	UK	2,750,000	Legendary	Autoshow, Wheelspin	
+2022	Aston Martin	Valkyrie AMR Pro	R 989	Extreme Track Toys	UK	4,200,000	Legendary	Autoshow, Collection Journal, Wheelspin	
+2019	Aston Martin	Vantage	A 696	GT Cars	UK	250,000	Epic	Autoshow	
+2016	Aston Martin	Vulcan	S2 884	Extreme Track Toys	UK	2,300,000	Legendary	Autoshow, Wheelspin, Loyalty	
+2017	Aston Martin	Vulcan AMR Pro	S2 898	Extreme Track Toys	UK	3,000,000	Legendary	Autoshow, Wheelspin	
+1986	Audi	#2 Audi Sport Quattro S1	S1 726	Rally Monsters	Germany	750,000	Legendary	Autoshow, Wheelspin	
+2023	Audi	R8 Coupé V10 GT RWD	S1 769	Modern Supercars	Germany	250,000	Epic	Autoshow DLC	Car Pass 6/18/26
+2013	Audi	R8 Coupé V10 Plus 5.2 FSI Quattro	A 694	Modern Supercars	Germany			Collection Journal, Seasonal	Not in Autoshow
+2009	Audi	R8 LMS	S2 810	Extreme Track Toys	Germany	900,000	Rare	Autoshow, Wheelspin	
+2020	Audi	R8 V10 Performance	S1 738	Modern Supercars	Germany	281,000	Rare	Autoshow, Wheelspin	
+2016	Audi	R8 V10 Plus	S1 731	Modern Supercars	Germany	160,000	Epic	Autoshow, Wheelspin	
+2020	Audi	RS 3 Sedan	A 617	Modern Super Saloons	Germany	52,000	Rare	Autoshow, Wheelspin	
+2011	Audi	RS 3 Sportback	B 565	Super Hot Hatch	Germany	20,000	Common	Autoshow, Wheelspin	
+2006	Audi	RS 4	B 593	Modern Super Saloons	Germany	75,000	Rare	Autoshow, Wheelspin	
+2001	Audi	RS 4 Avant	B 544	Retro Super Saloons	Germany	175,000	Common	Autoshow, Wheelspin	
+2013	Audi	RS 4 Avant	A 607	Modern Super Saloons	Germany	30,000	Rare	Autoshow, Wheelspin	
+2018	Audi	RS 4 Avant	A 637	Modern Super Saloons	Germany	50,000	Rare	Autoshow, Wheelspin	
+2011	Audi	RS 5 Coupé	A 613	Modern Super Saloons	Germany	25,000	Rare	Autoshow, Wheelspin	
+2003	Audi	RS 6	B 556	Retro Super Saloons	Germany	35,000	Rare	Autoshow, Wheelspin	
+2009	Audi	RS 6	B 598	Modern Super Saloons	Germany	42,000	Epic	Autoshow, Wheelspin	
+2015	Audi	RS 6 Avant	A 640	Modern Super Saloons	Germany	60,000	Rare	Autoshow, Wheelspin	
+2021	Audi	RS 6 Avant	A 650	Modern Super Saloons	Germany	83,000	Rare	Autoshow, Wheelspin	
+2013	Audi	RS 7 Sportback	A 619	Modern Super Saloons	Germany	55,000	Epic	Autoshow, Wheelspin	
+2021	Audi	RS 7 Sportback	A 655	Modern Super Saloons	Germany	80,000	Rare	Autoshow, Wheelspin	
+2021	Audi	RS e-tron GT	A 677	Modern Super Saloons	Germany	95,000	Epic	Autoshow, Wheelspin	
+2015	Audi	S1	B 527	Hot Hatch	Germany	21,000	Common	Autoshow, Wheelspin	
+1984	Audi	Sport Quattro	B 526	Retro Rally	Germany			Wheelspin, Seasonal	Not in Autoshow
+2010	Audi	TT RS Coupé	B 593	Modern Sports Cars	Germany	35,000	Rare	Autoshow, Wheelspin	
+1965	Austin-Healey	3000 Mk III	D 352	Classic Sports Cars	UK	75,000	Common	Autoshow, Wheelspin	
+1993	Autozam	AZ-1	D 342	Eclectic Domestics	Japan	38,000	Rare	Autoshow, Wheelspin	
+2014	BAC	Mono	S1 766	Track Toys	UK	196,000	Epic	Autoshow, Wheelspin	
+2016	Bentley	Bentayga	A 612	Sports Utility Heroes	UK			Wheelspin, Seasonal	Not in Autoshow
+2021	Bentley	Continental GT Convertible	A 649	GT Cars	UK	170,000	Rare	Autoshow, Collection Journal, Wheelspin	
+1973	BMW	2002 Turbo	C 424	Classic Sports Cars	Germany	127,000	Legendary	Autoshow, Wheelspin	
+1995	BMW	850CSi	C 493	Retro Sports Cars	Germany	135,000	Rare	Autoshow, Wheelspin	
+2015	BMW	i8	A 665	Modern Sports Cars	Germany	70,000	Rare	Autoshow, Wheelspin	
+1957	BMW	Isetta 300 Export	D 100	Cult Cars	Germany	84,000	Common	Autoshow, Wheelspin	
+2022	BMW	iX xDrive50	B 595	Sports Utility Heroes	Germany	37,000	Rare	Autoshow, Wheelspin	
+1981	BMW	M1	B 510	Retro Supercars	Germany	600,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+2023	BMW	M2	A 647	Modern Super Saloons	Germany	67,000	Rare	Autoshow, Wheelspin	
+2020	BMW	M2 Competition Coupé	A 656	Modern Super Saloons	Germany	250,000	Epic	Wheelspin, Seasonal	Not in Autoshow, from Horizon Invitational Wristband Event
+2023	BMW	M2 Forza Edition	A 700	Track Toys	Germany			Collection Journal, Seasonal	Not in Autoshow
+1988	BMW	M3	C 474	Retro Super Saloons	Germany	250,000	Rare	Autoshow, Wheelspin	
+1997	BMW	M3	B 549	Retro Super Saloons	Germany	30,000	Common	Autoshow, Wheelspin	
+2005	BMW	M3	B 554	Retro Super Saloons	Germany	35,000	Common	Autoshow, Wheelspin	
+2008	BMW	M3	A 608	Modern Super Saloons	Germany	43,000	Common	Autoshow, Wheelspin	
+2010	BMW	M3 GTS	A 678	Track Toys	Germany	198,000	Epic	Autoshow, Wheelspin	
+2021	BMW	M4 Competition Coupé	A 666	Modern Super Saloons	Germany	64,000	Rare	Autoshow, Wheelspin	
+2021	BMW	M4 Competition Coupé Welcome Pack	S1 800	Modern Super Saloons	Germany	150,000	Legendary	Autoshow DLC	Welcome Pack
+2014	BMW	M4 Coupé	A 679	Modern Super Saloons	Germany	55,000	Rare	Autoshow, Wheelspin	
+2016	BMW	M4 GTS	S1 711	Track Toys	Germany	125,000	Epic	Autoshow, Wheelspin	
+1988	BMW	M5	C 470	Retro Super Saloons	Germany	70,000	Rare	Autoshow, Wheelspin	
+1995	BMW	M5	B 516	Retro Super Saloons	Germany	48,000	Rare	Autoshow, Wheelspin	
+2003	BMW	M5	B 580	Retro Super Saloons	Germany	47,000	Common	Autoshow, Wheelspin	
+2009	BMW	M5	B 595	Modern Super Saloons	Germany	54,000	Rare	Autoshow, Wheelspin	
+2012	BMW	M5	A 652	Modern Super Saloons	Germany	40,000	Rare	Autoshow, Wheelspin	
+2022	BMW	M5 CS	S1 731	Modern Super Saloons	Germany	150,000	Rare	Autoshow, Wheelspin	
+2020	BMW	M8 Competition Coupé	A 684	GT Cars	Germany	100,000	Rare	Autoshow, Wheelspin	
+2011	BMW	X5 M	B 546	Sports Utility Heroes	Germany	24,000	Common	Autoshow, Wheelspin	
+2024	BMW	X6 M Competition	A 672	Sports Utility Heroes	Germany	140,000	Epic	Autoshow, Wheelspin	
+2008	BMW	Z4 M Coupé	B 579	Modern Sports Cars	Germany	63,000	Rare	Autoshow, Wheelspin	
+2019	BMW	Z4 Roadster	A 634	Modern Sports Cars	Germany	38,000	Common	Autoshow, Collection Journal, Wheelspin	
+1987	Buick	Regal GNX	C 454	Retro Muscle	USA	255,000	Epic	Autoshow	
+2016	Cadillac	ATS-V	A 601	Modern Muscle	USA	41,000	Common	Autoshow, Wheelspin	
+2022	Cadillac	CT4-V Blackwing	A 650	Modern Muscle	USA	55,000	Rare	Autoshow, Wheelspin	
+2022	Cadillac	CT5-V Blackwing	S1 701	Modern Muscle	USA	90,000	Rare	Autoshow, Wheelspin	
+2016	Cadillac	CTS-V Sedan	A 648	Modern Muscle	USA	60,000	Common	Autoshow, Wheelspin	
+2013	Cadillac	XTS Limousine	D 381	Modern Super Saloons	USA	44,000	Rare	Autoshow, Wheelspin	
+2018	Can-Am	Maverick X RS Turbo R	B 568	UTVs	Canada	16,000	Common	Autoshow, Wheelspin	
+2019	Casey Currie Motorsports	#4402 Ultra 4 'Trophy Jeep'	A 641	Unlimited Offroad	USA			Wheelspin, Seasonal	Not in Autoshow
+1955	Chevrolet	150 Utility Sedan	D 221	Rods and Customs	USA	140,000	Common	Autoshow, Wheelspin	
+1957	Chevrolet	Bel Air	D 320	Rods and Customs	USA	69,000	Rare	Autoshow, Wheelspin	
+1969	Chevrolet	Camaro Super Sport Coupe	C 471	Classic Muscle	USA	75,000	Rare	Autoshow, Wheelspin	
+2015	Chevrolet	Camaro Z/28	A 695	Track Toys	USA	65,000	Rare	Autoshow, Wheelspin	
+1970	Chevrolet	Camaro Z28	C 430	Classic Muscle	USA	55,000	Rare	Autoshow, Wheelspin	
+1979	Chevrolet	Camaro Z28	D 364	Classic Muscle	USA	20,000	Rare	Autoshow, Wheelspin	
+2017	Chevrolet	Camaro ZL1	S1 727	Modern Muscle	USA	55,000	Rare	Autoshow, Wheelspin	
+2018	Chevrolet	Camaro ZL1 1LE	S1 728	Track Toys	USA	70,000	Rare	Autoshow, Wheelspin	
+1970	Chevrolet	Chevelle Super Sport 454	C 424	Classic Muscle	USA	90,000	Rare	Autoshow, Wheelspin	
+1953	Chevrolet	Corvette	D 270	Classic Sports Cars	USA	269,000	Legendary	Autoshow, Wheelspin	
+1960	Chevrolet	Corvette	C 428	Classic Sports Cars	USA			Wheelspin, Seasonal	Not in Autoshow
+2024	Chevrolet	Corvette E-Ray	S1 737	Modern Supercars	USA	114,000	Epic	Autoshow, Wheelspin, Loyalty	
+1967	Chevrolet	Corvette Stingray 427	B 510	Classic Muscle	USA			Collection Journal, Seasonal	Not in Autoshow
+2020	Chevrolet	Corvette Stingray Coupe	A 700	Modern Supercars	USA	65,000	Rare	Autoshow, Wheelspin	
+2002	Chevrolet	Corvette Z06	A 602	Retro Muscle	USA	33,000	Common	Autoshow, Wheelspin	
+2015	Chevrolet	Corvette Z06	S1 755	Modern Muscle	USA	100,000	Rare	Autoshow, Wheelspin	
+2023	Chevrolet	Corvette Z06	S1 763	Track Toys	USA	155,000	Epic	Autoshow, Wheelspin	
+1970	Chevrolet	Corvette ZR-1	C 497	Classic Muscle	USA	250,000	Epic	Autoshow, Wheelspin	
+1995	Chevrolet	Corvette ZR-1	B 576	Retro Muscle	USA	76,000	Common	Autoshow, Wheelspin	
+2009	Chevrolet	Corvette ZR1	S1 712	Modern Muscle	USA	125,000	Rare	Autoshow, Wheelspin	
+2019	Chevrolet	Corvette ZR1	S1 778	Track Toys	USA			Wheelspin, Seasonal	Not in Autoshow
+1970	Chevrolet	El Camino Super Sport 454	C 430	Utility Heroes	USA	36,000	Rare	Autoshow, Wheelspin	
+1996	Chevrolet	Impala Super Sport	C 407	Retro Muscle	USA	30,000	Common	Autoshow, Wheelspin	
+1964	Chevrolet	Impala Super Sport 409	C 427	Rods and Customs	USA	70,000	Common	Autoshow, Wheelspin	
+1972	Chevrolet	K-10 Custom	D 268	Pickups & 4x4s	USA	49,000	Common	Autoshow, Wheelspin	
+1988	Chevrolet	Monte Carlo Super Sport	D 282	Retro Muscle	USA	30,000	Common	Autoshow, Wheelspin	
+1969	Chevrolet	Nova Super Sport 396	C 431	Classic Muscle	USA	40,000	Common	Autoshow, Wheelspin	
+2020	Chevrolet	Silverado LT Trail Boss	C 449	Pickups & 4x4s	USA	43,000	Rare	Autoshow, Wheelspin	
+1970	Datsun	510	D 143	Classic Sports Cars	Japan	86,000	Common	Autoshow, Wheelspin	
+1972	Datsun	#269 Attacking the Clock Racing 240Z 'All Carbon Hill Climb Beast'	R 951	Extreme Track Toys	Japan	185,000	Epic	Autoshow DLC	Car Pass 6/4/26
+1969	Datsun	2000 Roadster	D 323	Classic Sports Cars	Japan	250,000	Common	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2018	DeBerti	Chevrolet Silverado 1500 Drift Truck	S1 707	Drift Cars	USA	250,000	Epic	Autoshow, Wheelspin	
+2019	DeBerti	Ford Super Duty F-250 Lariat 'Transformer'	B 548	Unlimited Offroad	USA	275,000	Epic	Autoshow, Wheelspin	
+2013	DeBerti	Jeep Wrangler Unlimited	A 645	Unlimited Offroad	USA	150,000	Epic	Autoshow, Wheelspin	
+2019	DeBerti	Toyota Tacoma TRD ‘The Performance Truck’	S1 717	Drift Cars	USA	250,000	Common	Autoshow, Wheelspin	
+1982	DeLorean	DMC-12	D 357	Retro Sports Cars	USA	72,000	Legendary	Autoshow, Wheelspin	
+1970	Dodge	Challenger R/T	C 443	Classic Muscle	USA			Wheelspin, Seasonal	Not in Autoshow
+2018	Dodge	Challenger SRT Demon	A 678	Modern Muscle	USA	90,000	Rare	Autoshow, Collection Journal, Wheelspin	
+2015	Dodge	Challenger SRT Hellcat	A 631	Modern Muscle	USA	53,000	Rare	Autoshow, Wheelspin	
+2022	Dodge	Challenger SRT Super Stock	A 695	Modern Muscle	USA	87,000	Rare	Autoshow, Wheelspin	
+1969	Dodge	Charger Daytona HEMI	C 479	Classic Muscle	USA	541,000	Epic	Autoshow, Collection Journal, Wheelspin	
+1969	Dodge	Charger R/T	C 417	Classic Muscle	USA	224,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+2015	Dodge	Charger SRT Hellcat	A 637	Modern Muscle	USA	44,000	Rare	Autoshow, Wheelspin	
+1970	Dodge	Coronet Super Bee	C 455	Classic Muscle	USA	175,000	Rare	Autoshow, Wheelspin	
+1968	Dodge	Dart HEMI Super Stock	B 540	Classic Muscle	USA	300,000	Legendary	Wheelspin, Seasonal	Not in Autoshow
+2021	Dodge	Durango SRT Hellcat	A 628	Sports Utility Heroes	USA			Collection Journal, Seasonal	Not in Autoshow
+2006	Dodge	Ram SRT-10	B 547	Modern Muscle	USA			Seasonal	Not in Autoshow
+2016	Dodge	Viper ACR	S1 786	Track Toys	USA			Wheelspin, Seasonal	Not in Autoshow
+1999	Dodge	Viper GTS ACR	B 598	Retro Muscle	USA	68,000	Legendary	Autoshow	
+1999	Dodge	Viper GTS ACR Forza Edition	A 700	Unlimited Offroad	USA	500,000	Forza Edition	Autoshow DLC	VIP
+2008	Dodge	Viper SRT-10 ACR	S1 735	Track Toys	USA	115,000	Rare	Autoshow, Wheelspin	
+1967	Ferrari	#24 Ferrari Spa 330 P4	A 684	Classic Racers	Italy	70,000,000	Legendary	Autoshow, Wheelspin	
+1962	Ferrari	250 GT Berlinetta Lusso	C 475	Rare Classics	Italy	1,400,000	Legendary	Autoshow, Collection Journal	
+1962	Ferrari	250 GTO	C 494	Classic Racers	Italy	48,000,000	Legendary	Autoshow, Wheelspin	
+1967	Ferrari	275 GTB4 Spider	C 490	Rare Classics	Italy			Autoshow DLC	Italian Passion Car Pack
+1984	Ferrari	288 GTO	A 643	Retro Supercars	Italy			Wheelspin, Seasonal	Not in Autoshow
+2022	Ferrari	296 GTB	S2 811	Modern Supercars	Italy	380,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2007	Ferrari	430 Scuderia	S1 702	Modern Supercars	Italy	355,000	Epic	Autoshow, Wheelspin	
+2009	Ferrari	458 Italia	S1 721	Modern Supercars	Italy	210,000	Epic	Autoshow, Wheelspin	
+2013	Ferrari	458 Speciale	S1 768	Track Toys	Italy	500,000	Epic	Autoshow, Wheelspin	
+2015	Ferrari	488 GTB	S1 770	Modern Supercars	Italy	250,000	Epic	Autoshow, Wheelspin	
+2019	Ferrari	488 Pista	S2 803	Track Toys	Italy	716,000	Epic	Autoshow, Wheelspin	
+1970	Ferrari	512 S	S1 774	Classic Racers	Italy	3,600,000	Legendary	Autoshow, Wheelspin	
+1992	Ferrari	512 TR	A 615	Retro Supercars	Italy			Wheelspin, Seasonal	Not in Autoshow
+2010	Ferrari	599XX	S2 840	Extreme Track Toys	Italy	2,000,000	Legendary	Autoshow, Wheelspin	
+2012	Ferrari	599XX Evolution	S2 894	Extreme Track Toys	Italy			Wheelspin, Seasonal	Not in Autoshow
+2017	Ferrari	812 Superfast	S1 780	Super GT	Italy	395,000	Legendary	Autoshow, Wheelspin	
+1969	Ferrari	Dino 246 GT	C 428	Rare Classics	Italy	390,000	Epic	Autoshow, Wheelspin	
+2002	Ferrari	Enzo Ferrari	S1 755	Retro Supercars	Italy	3,500,000	Legendary	Autoshow	
+2015	Ferrari	F12tdf	S1 788	Super GT	Italy	500,000	Epic	Autoshow, Wheelspin	
+1994	Ferrari	F355 Berlinetta	B 588	Retro Supercars	Italy	250,000	Epic	Wheelspin, Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1987	Ferrari	F40	A 678	Retro Supercars	Italy	2,000,000	Legendary	Autoshow, Collection Journal	
+1989	Ferrari	F40 Competizione	R 948	Retro Racers	Italy	3,200,000	Legendary	Autoshow, Wheelspin	
+1995	Ferrari	F50	A 678	Retro Supercars	Italy	4,500,000	Legendary	Autoshow, Wheelspin	
+1996	Ferrari	F50 GT	R 949	Extreme Track Toys	Italy			Collection Journal, Seasonal	Not in Autoshow
+2019	Ferrari	F8 Tributo	S2 802	Modern Supercars	Italy			Wheelspin, Seasonal	Not in Autoshow
+2025	Ferrari	F80	R 920	Hypercars	Italy			Autoshow DLC	Italian Passion Car Pack
+2005	Ferrari	FXX	S2 900	Extreme Track Toys	Italy	2,500,000	Legendary	Autoshow, Wheelspin	
+2014	Ferrari	FXX K	R 936	Extreme Track Toys	Italy	4,300,000	Legendary	Autoshow, Wheelspin	
+2018	Ferrari	FXX-K Evo	R 957	Extreme Track Toys	Italy	4,500,000	Legendary	Autoshow, Wheelspin	
+2018	Ferrari	FXX-K Evo Welcome Pack	R 998	Extreme Track Toys	Italy	250,000	Legendary	Autoshow DLC	Welcome Pack
+2017	Ferrari	J50	S1 772	Modern Supercars	Italy	2,500,000	Rare	Autoshow, Wheelspin	
+2017	Ferrari	J50 Preorder Car	S1 800	Modern Supercars	Italy	309,000	Legendary	Autoshow DLC	Preorder Bonus
+2013	Ferrari	LaFerrari	S2 857	Hypercars	Italy	3,000,000	Legendary	Autoshow, Wheelspin	
+2019	Ferrari	Monza SP2	S1 773	Super GT	Italy	2,500,000	Legendary	Autoshow, Wheelspin	
+2018	Ferrari	Portofino	S1 714	Super GT	Italy	200,000	Epic	Autoshow, Wheelspin	
+2020	Ferrari	Roma	S1 735	Super GT	Italy	250,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2020	Ferrari	SF90 Stradale	S2 851	Hypercars	Italy	575,000	Legendary	Autoshow, Wheelspin	
+2014	Ford	#11 Rockstar F-150 Trophy Truck	A 613	Unlimited Offroad	USA	450,000	Epic	Autoshow, Wheelspin	
+2017	Ford	#14 Rahal Letterman Lanigan Racing Fiesta	S1 772	Rally Monsters	USA	150,000	Epic	Autoshow, Collection Journal	
+1966	Ford	#2 GT40 Mk II	A 666	Classic Racers	USA	13,200,000	Legendary	Autoshow, Wheelspin	
+2020	Ford	#2069 Ford Performance Bronco R	C 441	Offroad	USA	450,000	Epic	Autoshow, Wheelspin	
+2017	Ford	#25 'Brocky' Ultra4 Bronco RTR	A 644	Unlimited Offroad	USA	75,000	Epic	Autoshow, Collection Journal	
+2001	Ford	#4 Ford Focus RS	A 639	Rally Monsters	USA	415,000	Rare	Autoshow, Wheelspin	
+1977	Ford	#5 Escort RS1800 Mk II	B 544	Classic Rally	USA	185,000	Epic	Autoshow, Wheelspin	
+2022	Ford	Bronco Raptor	C 473	Pickups & 4x4s	USA	50,000	Epic	Autoshow, Wheelspin	
+1973	Ford	Capri RS3100	D 394	Classic Sports Cars	USA	69,000	Rare	Autoshow, Wheelspin	
+2010	Ford	Crown Victoria Police Interceptor	D 354	Retro Muscle	USA	15,000	Common	Autoshow, Wheelspin	
+1932	Ford	De Luxe Five-Window Coupe	D 100	Rods and Customs	USA	36,000	Common	Autoshow, Wheelspin	
+1992	Ford	Escort RS Cosworth	C 456	Retro Rally	USA	65,000	Rare	Autoshow, Wheelspin	
+2022	Ford	F-150 Lightning	C 500	Pickups & 4x4s	USA	250,000	Epic	Wheelspin, Seasonal	Not in Autoshow
+2023	Ford	F-150 Raptor R	B 536	Pickups & 4x4s	USA	110,000	Epic	Autoshow, Wheelspin	
+2023	Ford	F-150 Raptor R Welcome Pack	B 600	Pickups & 4x4s	USA	50,000	Legendary	Autoshow DLC	Welcome Pack
+2003	Ford	F-150 SVT Lightning	C 474	Pickups & 4x4s	USA	250,000	Common	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1986	Ford	F-150 XLT Lariat	D 263	Pickups & 4x4s	USA	45,000	Common	Autoshow, Wheelspin	
+1986	Ford	F-150 XLT Lariat Forza Edition	S2 850	Drift Cars	USA			Wheelspin, Seasonal	Not in Autoshow
+2023	Ford	Fiesta ST	C 500	Hot Hatch	USA	26,000	Common	Autoshow, Wheelspin	
+2003	Ford	Focus RS	C 484	Retro Hot Hatch	USA	35,000	Common	Autoshow, Wheelspin	
+2009	Ford	Focus RS	B 551	Super Hot Hatch	USA	52,000	Epic	Autoshow	
+2017	Ford	Focus RS	B 588	Super Hot Hatch	USA	37,000	Epic	Autoshow, Collection Journal	
+2022	Ford	Focus ST	B 594	Hot Hatch	USA	34,000	Common	Autoshow, Wheelspin	
+2014	Ford	FPV Limited Edition Pursuit Ute	B 563	Utility Heroes	USA	40,000	Common	Autoshow, Wheelspin	
+2005	Ford	GT	A 676	Retro Supercars	USA	585,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+2017	Ford	GT	S1 757	Modern Supercars	USA	500,000	Epic	Autoshow, Wheelspin	
+2017	Ford	M-Sport Fiesta RS	S1 707	Rally Monsters	USA			Wheelspin, Seasonal	Not in Autoshow
+1969	Ford	Mustang Boss 302	C 468	Classic Muscle	USA	75,000	Rare	Autoshow, Wheelspin	
+2024	Ford	Mustang Dark Horse	A 669	Modern Muscle	USA	59,000	Epic	Autoshow, Collection Journal	
+2024	Ford	Mustang GT	A 628	Modern Muscle	USA	45,000	Epic	Autoshow, Wheelspin	
+1968	Ford	Mustang GT 2+2 Fastback	D 394	Classic Muscle	USA	119,000	Legendary	Autoshow, Wheelspin	
+1968	Ford	Mustang GT 2+2 Fastback Forza Edition	A 700	Drift Cars	USA			Wheelspin, Seasonal	Not in Autoshow
+1965	Ford	Mustang GT Coupe	D 388	Classic Muscle	USA	52,000	Epic	Autoshow	
+2018	Ford	Mustang RTR Spec 5	A 648	Modern Muscle	USA	35,000	Rare	Autoshow, Wheelspin	
+2016	Ford	Mustang Shelby GT350R	S1 721	Track Toys	USA	88,000	Rare	Autoshow, Wheelspin	
+2013	Ford	Mustang Shelby GT500	A 647	Modern Muscle	USA	60,000	Rare	Autoshow, Wheelspin	
+2020	Ford	Mustang Shelby GT500	S1 734	Modern Muscle	USA	125,000	Rare	Autoshow, Wheelspin	
+1993	Ford	Mustang SVT Cobra R	C 432	Retro Muscle	USA	84,000	Common	Autoshow, Wheelspin	
+2000	Ford	Mustang SVT Cobra R	B 528	Retro Muscle	USA	153,000	Common	Autoshow, Wheelspin	
+1999	Ford	Racing Puma	C 401	Retro Rally	USA	30,000	Rare	Autoshow, Wheelspin	
+2014	Ford	Ranger T6 Rally Raid	B 530	Offroad	USA			Wheelspin, Seasonal	Not in Autoshow
+1985	Ford	RS200 Evolution	S1 710	Rally Monsters	USA	420,000	Epic	Seasonal	Not in Autoshow, from Pier Pressure Wristband Event
+1987	Ford	Sierra Cosworth RS500	C 484	Retro Super Saloons	USA			Collection Journal	Not in Autoshow, is discoverable Barn Find in Ito
+2020	Ford	Super Duty F-450 DRW PLATINUM	D 379	Pickups & 4x4s	USA	65,000	Common	Autoshow, Wheelspin	
+2020	Ford	Super Duty F-450 DRW PLATINUM Forza Edition	A 700	Pickups & 4x4s	USA			Wheelspin, Seasonal	Not in Autoshow
+1994	Ford	Supervan 3	S1 740	Track Toys	USA	250,000	Epic	Autoshow, Wheelspin	
+2022	Ford	Supervan 4	R 919	Extreme Track Toys	USA			Collection Journal, Seasonal	Not in Autoshow
+2011	Ford	Transit SuperSportVan	D 235	Utility Heroes	USA	42,000	Rare	Autoshow, Wheelspin	
+1973	Ford	XB Falcon GT	C 422	Classic Muscle	USA	218,000	Rare	Autoshow, Wheelspin	
+2007	Formula Drift	#117 599 GTB Fiorano	S1 767	Drift Cars	USA	525,000	Epic	Autoshow, Collection Journal	
+2015	Formula Drift	#13 Ford Mustang	S1 739	Drift Cars	USA			Wheelspin, Seasonal	Not in Autoshow
+2020	Formula Drift	#151 Toyota GR Supra	S1 779	Drift Cars	USA	185,000	Epic	Autoshow, Wheelspin	
+1995	Formula Drift	#34 Toyota Supra MkIV	S1 759	Drift Cars	USA	150,000	Epic	Autoshow, Wheelspin	
+2019	Formula Drift	#411 Toyota Corolla Hatchback	S1 754	Drift Cars	USA	150,000	Epic	Autoshow, Wheelspin	
+2006	Formula Drift	#43 Dodge Viper SRT-10 ACR	S1 748	Drift Cars	USA			Wheelspin, Seasonal	Not in Autoshow
+2016	Formula Drift	#530 HSV Maloo GEN-F	S1 710	Drift Cars	USA	150,000	Epic	Autoshow, Wheelspin	
+2023	Formula Drift	#64 Forsberg Racing Nissan Z	S1 783	Drift Cars	USA	200,000	Epic	Autoshow, Wheelspin	
+2013	Formula Drift	#777 Chevrolet Corvette	S1 760	Drift Cars	USA	275,000	Epic	Autoshow, Wheelspin	
+1997	Formula Drift	#777 Nissan 240SX	S1 748	Drift Cars	USA	150,000	Epic	Autoshow, Collection Journal	
+2020	Formula Drift	#91 BMW M2	S1 748	Drift Cars	USA	150,000	Epic	Autoshow, Wheelspin	
+1989	Formula Drift	#98 BMW 325i	S1 726	Drift Cars	USA	150,000	Epic	Autoshow, Wheelspin	
+2009	Formula Drift	#99 Mazda RX-8	S1 737	Drift Cars	USA	150,000	Epic	Autoshow, Collection Journal	
+2018	Funco Motorsports	F9	S1 752	Unlimited Buggies	USA	300,000	Epic	Collection Journal, Seasonal	Not in Autoshow
+2022	GMC	HUMMER EV Pickup	A 610	Pickups & 4x4s	USA	95,000	Epic	Autoshow, Wheelspin	
+1970	GMC	Jimmy	C 416	Pickups & 4x4s	USA	60,000	Common	Autoshow	
+1991	GMC	Syclone	C 446	Pickups & 4x4s	USA	46,000	Epic	Autoshow, Wheelspin	
+1992	GMC	Typhoon	C 435	Sports Utility Heroes	USA	38,000	Epic	Autoshow, Wheelspin	
+2020	Gordon Murray Automotive	T.50	S2 871	Hypercars	UK	3,050,000	Legendary	Autoshow, Collection Journal	
+2025	GR	GT Prototype	S1 771	Super GT	Japan	250,000	Legendary	Autoshow, Wheelspin	
+2019	Hennessey	Ford F-150 VelociRaptor 6x6	B 520	Pickups & 4x4s	USA	375,000	Legendary	Autoshow, Wheelspin	
+2021	Hennessey	Venom F5	S2 870	Hypercars	USA	2,050,000	Legendary	Autoshow, Wheelspin	
+2012	Hennessey	Venom GT	S2 845	Hypercars	USA			Wheelspin, Seasonal	Not in Autoshow
+1977	Holden	Torana A9X	C 413	Classic Muscle	Australia	500,000	Rare	Autoshow, Wheelspin	
+1990	Honda	#19 101 Motorsport CRX WTAC	S2 877	Extreme Track Toys	Japan	150,000	Rare	Autoshow DLC	Time Attack Car Pack
+1992	Honda	#21 Hardrace/JDMYard Civic WTAC	R 913	Extreme Track Toys	Japan	150,000	Epic	Autoshow DLC	Time Attack Car Pack
+2001	Honda	#33 Integra WTAC	S2 860	Extreme Track Toys	Japan	150,000	Epic	Autoshow DLC	Time Attack Car Pack
+2004	Honda	#52 Evasive Motorsports S2000 WTAC	S2 888	Extreme Track Toys	Japan	320,000	Epic	Autoshow DLC	Time Attack Car Pack
+1994	Honda	Acty	D 100	Eclectic Domestics	Japan	9,000	Common	Autoshow, Collection Journal, Wheelspin	
+1991	Honda	Beat	D 283	Eclectic Domestics	Japan	15,000	Rare	Autoshow, Collection Journal, Wheelspin	
+1984	Honda	City E II	D 203	Eclectic Domestics	Japan	7,500	Epic	Autoshow, Collection Journal, Wheelspin	
+1984	Honda	Civic CRX Mugen	D 390	Retro Sports Cars	Japan			Collection Journal, Seasonal	Not in Autoshow
+1974	Honda	Civic RS	D 254	Retro Hot Hatch	Japan			Collection Journal, Seasonal	Not in Autoshow
+1986	Honda	Civic Si	D 253	Retro Hot Hatch	Japan	10,000	Epic	Autoshow	
+1997	Honda	Civic Type R	C 430	Retro Hot Hatch	Japan	30,000	Common	Autoshow, Wheelspin	
+2004	Honda	Civic Type R	C 480	Retro Hot Hatch	Japan	15,000	Common	Autoshow, Wheelspin	
+2007	Honda	Civic Type R	C 454	Hot Hatch	Japan	17,000	Common	Autoshow, Wheelspin	
+2008	Honda	Civic Type R	B 514	Retro Super Saloons	Japan	20,000	Rare	Autoshow DLC	Car Pass 6/11/26
+2015	Honda	Civic Type R	B 585	Super Hot Hatch	Japan	30,000	Common	Autoshow, Wheelspin	
+2018	Honda	Civic Type R	A 608	Super Hot Hatch	Japan	35,000	Rare	Autoshow, Wheelspin	
+2023	Honda	Civic Type R	A 620	Super Hot Hatch	Japan	43,000	Rare	Autoshow, Collection Journal, Wheelspin	
+1991	Honda	CR-X SiR	C 465	Retro Hot Hatch	Japan			Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2022	Honda	e	D 398	Hot Hatch	Japan	30,000	Common	Autoshow, Wheelspin	
+1992	Honda	NSX-R	B 572	Retro Sports Cars	Japan	450,000	Epic	Autoshow, Wheelspin	
+2005	Honda	NSX-R	B 570	Retro Sports Cars	Japan	325,000	Epic	Autoshow, Collection Journal	
+2005	Honda	NSX-R GT	A 608	Retro Sports Cars	Japan	600,000	Barn Find	Collection Journal	Not in Autoshow, is discoverable Barn Find in Ohtani
+1994	Honda	Prelude Si	C 410	Retro Hot Hatch	Japan	15,000	Common	Autoshow, Collection Journal, Wheelspin	
+2015	Honda	Ridgeline Baja Trophy Truck	B 580	Unlimited Offroad	Japan	400,000	Epic	Autoshow, Wheelspin	
+2003	Honda	S2000	B 503	Modern Sports Cars	Japan	55,000	Common	Autoshow, Wheelspin	
+1970	Honda	S800	D 134	Cult Cars	Japan	40,000	Common	Autoshow, Wheelspin	
+2014	HSV	GEN-F GTS	A 601	Modern Muscle	Australia	81,000	Rare	Autoshow, Wheelspin	
+2014	HSV	Limited Edition GEN-F GTS Maloo	A 629	Utility Heroes	Australia	65,000	Common	Autoshow, Wheelspin	
+2021	Hyundai	i20 N	B 564	Hot Hatch	Korea	48,000	Rare	Autoshow, Wheelspin	
+2020	Hyundai	i30 N	B 553	Super Hot Hatch	Korea	32,000	Rare	Autoshow, Wheelspin	
+2023	Hyundai	IONIQ 5 N	A 657	Sports Utility Heroes	Korea	22,000	Rare	Autoshow, Wheelspin	
+2022	Hyundai	N Vision 74	A 692	Track Toys	Korea	325,000	Rare	Autoshow, Wheelspin	
+2019	Hyundai	Veloster N	B 532	Super Hot Hatch	Korea	20,000	Epic	Autoshow, Wheelspin	
+2010	Jaguar	C-X75	S2 810	Modern Supercars	UK	3,200,000	Legendary	Autoshow, Wheelspin	
+1956	Jaguar	D-Type	B 506	Classic Racers	UK	4,300,000	Legendary	Autoshow, Wheelspin	
+1961	Jaguar	E-type	C 414	Rare Classics	UK			Wheelspin, Seasonal	Not in Autoshow
+1964	Jaguar	Lightweight E-Type	B 568	Classic Racers	UK	7,900,000	Legendary	Autoshow, Wheelspin	
+1991	Jaguar	Sport XJR-15	S1 716	Retro Supercars	UK	950,000	Legendary	Autoshow, Collection Journal	
+1993	Jaguar	XJ220	A 676	Retro Supercars	UK	570,000	Legendary	Autoshow, Wheelspin	
+1993	Jaguar	XJ220S TWR	S1 750	Retro Supercars	UK	540,000	Rare	Autoshow, Wheelspin	
+2018	Jeep	Grand Cherokee Trackhawk	A 631	Sports Utility Heroes	USA	72,000	Common	Autoshow, Wheelspin	
+2020	Jeep	JT	D 336	Pickups & 4x4s	USA	36,000	Common	Autoshow, Wheelspin	
+2016	Jeep	Trailcat	A 635	Unlimited Offroad	USA	70,000	Rare	Autoshow, Wheelspin	
+2012	Jeep	Wrangler Rubicon	D 350	Pickups & 4x4s	USA	16,000	Common	Autoshow, Wheelspin	
+2020	Jimco	#179 Hammerhead Class 1	A 652	Unlimited Buggies	USA	95,000	Rare	Autoshow, Wheelspin	
+2019	Jimco	#240 Fastball Racing Class 6100 Spec Trophy Truck	B 511	Unlimited Offroad	USA	350,000	Epic	Autoshow, Wheelspin	
+2011	Koenigsegg	Agera	S2 810	Hypercars	Sweden	1,950,000	Legendary	Autoshow, Wheelspin	
+2017	Koenigsegg	Agera RS	S2 890	Hypercars	Sweden	2,900,000	Legendary	Autoshow, Collection Journal	
+2008	Koenigsegg	CCGT	S2 900	Extreme Track Toys	Sweden	3,400,000	Legendary	Autoshow, Wheelspin	
+2024	Koenigsegg	Gemera	S2 900	Hypercars	Sweden	2,000,000	Epic	Autoshow DLC	Car Pass 5/28/26
+2020	Koenigsegg	Jesko	S2 899	Hypercars	Sweden	3,500,000	Legendary	Autoshow, Wheelspin	
+2015	Koenigsegg	One:1	S2 890	Hypercars	Sweden			Wheelspin, Seasonal	Not in Autoshow
+2016	Koenigsegg	Regera	S2 886	Hypercars	Sweden	2,550,000	Legendary	Autoshow	
+2018	KTM	X-Bow GT4	S1 749	Extreme Track Toys	Austria	90,000	Epic	Autoshow, Wheelspin	
+2022	Lamborghini	Aventador LP 780-4 Ultimae	S1 794	Hypercars	Italy	800,000	Legendary	Seasonal	Not in Autoshow, from Horizon Legend Wristband Event
+2012	Lamborghini	Aventador LP700-4	S1 753	Hypercars	Italy			Wheelspin, Seasonal	Not in Autoshow
+2018	Lamborghini	Aventador SVJ	S1 794	Hypercars	Italy	1,200,000	Legendary	Autoshow, Wheelspin	
+2016	Lamborghini	Centenario LP 770-4	S1 792	Hypercars	Italy	150,000	Legendary	Autoshow, Wheelspin, Loyalty	
+1988	Lamborghini	Countach LP5000 QV	A 622	Retro Supercars	Italy	600,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2021	Lamborghini	Countach LPI 800-4	S1 773	Hypercars	Italy	2,100,000	Legendary	Autoshow, Wheelspin	
+1999	Lamborghini	Diablo GTR	S2 823	Extreme Track Toys	Italy			Wheelspin, Seasonal	Not in Autoshow
+1997	Lamborghini	Diablo SV	A 649	Retro Supercars	Italy	375,000	Barn Find	Collection Journal	Not in Autoshow, is discoverable Bard Find in Ito
+2020	Lamborghini	Essenza SCV12	R 911	Extreme Track Toys	Italy	1,500,000	Legendary	Autoshow, Wheelspin	
+2012	Lamborghini	Gallardo LP570-4 Spyder Performante	A 685	Modern Supercars	Italy	210,000	Epic	Autoshow, Wheelspin	
+2020	Lamborghini	Huracán EVO	S1 761	Modern Supercars	Italy	250,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2014	Lamborghini	Huracán LP 610-4	S1 738	Modern Supercars	Italy	200,000	Epic	Autoshow, Wheelspin, Loyalty	
+2022	Lamborghini	Huracán Sterrato	S1 738	Rally Monsters	Italy			Collection Journal, Seasonal	Not in Autoshow
+2020	Lamborghini	Huracán STO	S1 783	Track Toys	Italy	325,000	Legendary	Autoshow, Wheelspin	
+2022	Lamborghini	Huracán Tecnica	S1 747	Modern Supercars	Italy	365,000	Legendary	Autoshow, Wheelspin	
+1967	Lamborghini	Miura P400	B 505	Rare Classics	Italy	1,700,000	Legendary	Autoshow, Wheelspin	
+2010	Lamborghini	Murciélago LP 670-4 SV	S1 707	Modern Supercars	Italy	100,000	Epic	Autoshow, Wheelspin	
+2024	Lamborghini	Revuelto	S2 829	Hypercars	Italy	365,000	Legendary	Autoshow, Collection Journal	
+2011	Lamborghini	Sesto Elemento	S2 871	Extreme Track Toys	Italy			Wheelspin, Seasonal	Not in Autoshow
+2020	Lamborghini	Sián Roadster	S1 797	Hypercars	Italy	2,500,000	Legendary	Autoshow, Wheelspin	
+2019	Lamborghini	Urus	A 659	Sports Utility Heroes	Italy	200,000	Rare	Autoshow, Collection Journal	
+2013	Lamborghini	Veneno	S2 834	Hypercars	Italy	3,950,000	Legendary	Autoshow, Wheelspin	
+1992	Lancia	Delta HF Integrale EVO	C 489	Retro Rally	Italy	110,000	Common	Autoshow, Wheelspin	
+1986	Lancia	Delta S4	B 564	Retro Rally	Italy	55,000	Rare	Autoshow, Wheelspin	
+1974	Lancia	Stratos HF Stradale	C 483	Classic Rally	Italy	680,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+2020	Land Rover	Defender 110 X	C 427	Sports Utility Heroes	UK	250,000	Common	Autoshow	
+2015	Land Rover	Range Rover Sport SVR	A 604	Sports Utility Heroes	UK	48,000	Rare	Autoshow, Collection Journal	
+2021	Lexus	LC 500	B 592	GT Cars	USA	79,000	Rare	Autoshow, Wheelspin	
+2010	Lexus	LFA	A 699	Modern Supercars	USA	875,000	Epic	Autoshow	
+2010	Lexus	LFA Forza Edition	S2 900	Extreme Track Toys	USA			Collection Journal, Seasonal	Not in Autoshow
+2015	Lexus	RC F	A 623	Modern Super Saloons	USA	35,000	Rare	Autoshow, Wheelspin	
+1962	Lincoln	Continental	D 267	Rods and Customs	USA	65,000		Collection Journal	Not in Autoshow, is discoverable Barn Find in Hokubu
+1997	Lotus	Elise GT1	S1 709	Retro Supercars	UK	1,500,000	Legendary	Autoshow, Wheelspin	
+1999	Lotus	Elise Series 1 Sport 190	B 589	Retro Sports Cars	UK	47,000	Common	Autoshow, Wheelspin	
+2023	Lotus	Emira	A 656	Modern Sports Cars	UK	250,000	Rare	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2020	Lotus	Evija	R 937	Hypercars	UK	2,450,000	Legendary	Autoshow, Wheelspin	
+2020	Lotus	Evija Forza Edition	S2 900	Drift Cars	UK	500,000	Forza Edition	Autoshow DLC	VIP
+2018	Lotus	Exige Cup 430	S1 732	Track Toys	UK	250,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2018	Lotus	Scura Motorsports Exige WTAC	R 998	Extreme Track Toys	UK			Collection Journal, Seasonal	Not in Autoshow
+2024	Lucid	Air Sapphire	S2 820	Modern Super Saloons	USA	240,000	Rare	Autoshow, Wheelspin	
+1997	Maserati	Ghibli Cup	B 591	Retro Sports Cars	Italy	102,000	Rare	Autoshow, Collection Journal	
+2004	Maserati	MC12	S1 751	Retro Supercars	Italy			Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2008	Maserati	MC12 Versione Corsa	R 912	Extreme Track Toys	Italy	3,100,000	Legendary	Autoshow, Wheelspin	
+2022	Maserati	MC20	S1 753	Modern Supercars	Italy	220,000	Epic	Autoshow, Wheelspin	
+1974	Mazda	#123 Mad Mike 808 Wagon 'FURSTY'	S1 702	Drift Cars	Japan	100,000	Legendary	Autoshow DLC	Car Pass 6/25/26
+1991	Mazda	#55 Mazda 787B	R 988	Retro Racers	Japan			Collection Journal	Not in Autoshow
+1972	Mazda	Cosmo 110S Series II	D 394	Classic Sports Cars	Japan			Seasonal	Not in Autoshow, in Playlist History
+2008	Mazda	Furai	R 926	Extreme Track Toys	Japan	353,000	Legendary	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2010	Mazda	Mazdaspeed 3	B 536	Hot Hatch	Japan	25,000	Common	Autoshow, Wheelspin	
+2005	Mazda	Mazdaspeed MX-5	C 469	Retro Sports Cars	Japan	21,000	Common	Autoshow, Wheelspin	
+2013	Mazda	MX-5	C 432	Modern Sports Cars	Japan	28,000	Common	Autoshow, Wheelspin	
+2016	Mazda	MX-5	C 499	Modern Sports Cars	Japan	18,000	Epic	Autoshow	
+2017	Mazda	MX-5 Cup	B 586	Track Toys	Japan	60,000	Epic	Autoshow, Collection Journal	
+1994	Mazda	MX-5 Miata	D 329	Retro Sports Cars	Japan	15,000	Common	Autoshow, Wheelspin	
+1994	Mazda	MX-5 Miata Forza Edition	S2 850	Retro Sports Cars	Japan			Seasonal	Not in Autoshow
+2022	Mazda	MX-5 Miata RF	B 509	Modern Sports Cars	Japan	29,000	Epic	Autoshow, Wheelspin	
+1973	Mazda	RX-3	D 328	Classic Sports Cars	Japan	73,000	Common	Autoshow, Wheelspin	
+1973	Mazda	RX-3 Forza Edition	B 600	Classic Sports Cars	Japan			Seasonal	Not in Autoshow
+1985	Mazda	RX-7 GSL-SE	D 357	Retro Sports Cars	Japan	30,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+1992	Mazda	RX-7 Type R	B 548	Retro Sports Cars	Japan	40,000	Rare	Autoshow, Collection Journal	
+2011	Mazda	RX-8 R3	B 508	Modern Sports Cars	Japan	33,000	Rare	Autoshow, Wheelspin	
+1990	Mazda	Savanna RX-7	C 451	Retro Sports Cars	Japan	23,000	Epic	Autoshow, Wheelspin	
+2011	McLaren	12C Coupé	S1 727	Modern Supercars	UK	105,000	Epic	Autoshow, Wheelspin	
+2015	McLaren	570S Coupé	S1 721	Modern Supercars	UK	130,000	Epic	Autoshow, Wheelspin	
+2018	McLaren	600LT Coupé	S1 780	Track Toys	UK	260,000	Epic	Autoshow	
+2021	McLaren	620R	S1 773	Track Toys	UK			Wheelspin, Seasonal	Not in Autoshow
+2014	McLaren	650S Spider	S1 765	Modern Supercars	UK	130,000	Epic	Autoshow, Wheelspin	
+2021	McLaren	765LT Coupé	S2 829	Track Toys	UK	358,000	Epic	Autoshow, Wheelspin	
+2023	McLaren	Artura	S1 766	Modern Supercars	UK	220,000	Epic	Autoshow, Wheelspin	
+1993	McLaren	F1	S1 713	Retro Supercars	UK	5,000,000	Legendary	Autoshow, Wheelspin	
+1997	McLaren	F1 GT	S1 769	Retro Supercars	UK	5,500,000	Legendary	Autoshow, Wheelspin	
+2013	McLaren	P1	S2 848	Hypercars	UK	1,550,000	Legendary	Autoshow, Wheelspin	
+2021	McLaren	Sabre	S1 787	Hypercars	UK	3,400,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2019	McLaren	Speedtail	S2 835	Hypercars	UK	2,000,000	Legendary	Autoshow, Wheelspin	
+2016	Mercedes-AMG	C 63 S Coupé	A 645	Modern Super Saloons	Germany	34,000	Rare	Autoshow, Wheelspin	
+2018	Mercedes-AMG	E 63 S	A 674	Modern Super Saloons	Germany	63,000	Epic	Autoshow, Wheelspin	
+2018	Mercedes-AMG	GT 4-Door Coupé	A 664	Modern Super Saloons	Germany			Wheelspin, Seasonal	Not in Autoshow
+2020	Mercedes-AMG	GT Black Series	S1 782	Track Toys	Germany	440,000	Epic	Autoshow, Wheelspin	
+2020	Mercedes-AMG	GT Black Series Welcome Pack	S2 900	Track Toys	Germany	200,000	Legendary	Autoshow DLC	Welcome Pack
+2017	Mercedes-AMG	GT R	S1 764	Super GT	Germany			Seasonal	Not in Autoshow
+2015	Mercedes-AMG	GT S	A 691	Super GT	Germany	90,000	Rare	Autoshow, Wheelspin	
+2021	Mercedes-AMG	Mercedes-AMG ONE	S2 900	Hypercars	Germany	2,800,000	Legendary	Autoshow, Wheelspin	
+2021	Mercedes-AMG	SL 63	A 690	GT Cars	Germany	120,000	Rare	Autoshow, Wheelspin	
+2020	Mercedes-AMG	SLC 43 Final Edition	A 620	Modern Sports Cars	Germany	50,000	Rare	Autoshow, Wheelspin	
+1990	Mercedes-Benz	190 E 2.5-16 Evolution II	C 460	Retro Super Saloons	Germany	200,000	Epic	Autoshow	
+1990	Mercedes-Benz	190 E 2.5-16 Evolution II Forza Edition	A 700	Track Toys	Germany	750,000	Forza Edition	Wheelspin, Seasonal	Not in Autoshow
+1954	Mercedes-Benz	300 SL Coupé	D 388	Rare Classics	Germany	1,700,000	Legendary	Autoshow, Wheelspin	
+1955	Mercedes-Benz	300 SLR	B 599	Classic Racers	Germany	60,000,000	Legendary	Autoshow, Wheelspin	
+2013	Mercedes-Benz	A 45 AMG	B 582	Super Hot Hatch	Germany	25,000	Rare	Autoshow, Wheelspin	
+1998	Mercedes-Benz	AMG CLK GTR	S1 713	Retro Supercars	Germany			Wheelspin, Seasonal	Not in Autoshow
+1987	Mercedes-Benz	AMG Hammer Coupe	B 565	Retro Super Saloons	Germany	225,000	Common	Autoshow, Wheelspin	
+2012	Mercedes-Benz	C 63 AMG Coupé Black Series	A 654	Modern Super Saloons	Germany	175,000	Epic	Autoshow	
+2014	Mercedes-Benz	G 63 AMG 6x6	C 489	Pickups & 4x4s	Germany			Wheelspin, Seasonal	Not in Autoshow
+2013	Mercedes-Benz	G 65 AMG	B 530	Pickups & 4x4s	Germany	120,000	Rare	Autoshow, Collection Journal	
+2009	Mercedes-Benz	SL 65 AMG Black Series	A 699	Super GT	Germany	360,000	Epic	Autoshow, Wheelspin	
+2014	Mercedes-Benz	Unimog U5023	D 100	Offroad	Germany	235,000	Rare	Autoshow, Wheelspin	
+2018	Mercedes-Benz	X-Class	D 258	Pickups & 4x4s	Germany	50,000	Common	Autoshow, Wheelspin	
+1971	Meyers	Manx	D 201	Buggies	USA	34,000	Epic	Autoshow, Wheelspin	
+2023	Meyers	Manx 2.0	B 540	Buggies	USA	74,000	Epic	Autoshow, Wheelspin	
+1986	MG	Metro 6R4	A 627	Rally Monsters	UK	220,000	Legendary	Autoshow, Collection Journal, Wheelspin	
+1965	MINI	Cooper S	D 158	Classic Rally	UK	39,000	Rare	Autoshow, Wheelspin	
+2012	MINI	John Cooper Works GP	B 509	Hot Hatch	UK	30,000	Rare	Autoshow, Wheelspin	
+2021	MINI	John Cooper Works GP	B 599	Super Hot Hatch	UK			Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2013	MINI	X-Raid All4 Racing Countryman	B 523	Offroad	UK	220,000	Epic	Autoshow, Wheelspin	
+2018	MINI	X-Raid John Cooper Works Buggy	B 514	Offroad	UK			Collection Journal, Seasonal	Not in Autoshow
+2005	Mitsubishi	#1 Sierra Sierra Enterprises Lancer Evolution Time Attack	R 962	Extreme Track Toys	Japan			Collection Journal	Not in Autoshow
+1990	Mitsubishi	#269 Attacking the Clock Racing Minicab Time Attack	D 166	Track Toys	Japan	100,000	Epic	Autoshow DLC	Time Attack Car Pack
+1995	Mitsubishi	Eclipse GSX	C 436	Retro Sports Cars	Japan	35,000	Common	Autoshow, Wheelspin	
+1992	Mitsubishi	Galant VR-4	C 431	Retro Rally	Japan	25,000	Rare	Autoshow, Wheelspin	
+1997	Mitsubishi	GTO	C 495	Retro Sports Cars	Japan	20,000	Common	Autoshow, Wheelspin	
+1995	Mitsubishi	Lancer Evolution III GSR	B 518	Retro Rally	Japan	29,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+2006	Mitsubishi	Lancer Evolution IX MR	B 521	Modern Rally	Japan	250,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2001	Mitsubishi	Lancer Evolution VI GSR TM Edition	B 574	Retro Rally	Japan	70,000	Rare	Autoshow	
+2004	Mitsubishi	Lancer Evolution VIII MR	B 555	Modern Rally	Japan	30,000	Rare	Autoshow, Wheelspin	
+2004	Mitsubishi	Lancer Evolution VIII MR Welcome Pack	A 700	Modern Rally	Japan	100,000	Legendary	Autoshow DLC	Welcome Pack
+2008	Mitsubishi	Lancer Evolution X GSR	B 534	Modern Rally	Japan	25,000	Rare	Autoshow, Wheelspin	
+1997	Mitsubishi	Montero Evolution	D 346	Pickups & 4x4s	Japan	50,000	Barn Find	Collection Journal	Not in Autoshow
+1995	Mitsubishi	Montero Exceed 2800 TD	D 190	Pickups & 4x4s	Japan	25,000	Rare	Autoshow, Wheelspin	
+1983	Nissan	#11 Tomica Skyline Turbo Super Silhouette	S2 847	Retro Racers	Japan			Collection Journal	Not in Autoshow
+1990	Nissan	#12 Skyline GT-R (BNR32 Gr.A) JTC	S2 858	Retro Racers	Japan	1,500,000	Legendary	Autoshow DLC	Car Pass 5/19/26
+1998	Nissan	#23 Pennzoil NISMO Skyline GT-R	S2 848	Retro Racers	Japan	600,000	Barn Find	Collection Journal	Not in Autoshow
+1993	Nissan	#32 Skyline WTAC 'Xtreme GTR'	R 923	Extreme Track Toys	Japan	570,000	Epic	Autoshow DLC	Time Attack Car Pack
+2000	Nissan	#36 Dream Project S15 Silvia WTAC	R 996	Extreme Track Toys	Japan	400,000	Epic	Autoshow DLC	Time Attack Car Pack
+1993	Nissan	240SX	D 339	Retro Sports Cars	Japan			Wheelspin, Seasonal	Not in Autoshow
+2010	Nissan	370Z	B 568	Modern Sports Cars	Japan	250,000	Common	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2019	Nissan	370Z Nismo	A 603	Modern Sports Cars	Japan	46,000	Rare	Autoshow, Wheelspin	
+1987	Nissan	Be-1	D 175	Eclectic Domestics	Japan	23,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2003	Nissan	Fairlady Z	B 534	Retro Sports Cars	Japan	18,000	Common	Autoshow, Wheelspin	
+1969	Nissan	Fairlady Z 432	D 369	Classic Sports Cars	Japan	250,000	Epic	Autoshow, Wheelspin	
+1994	Nissan	Fairlady Z Version S Twin Turbo	C 497	Retro Sports Cars	Japan	40,000	Epic	Autoshow	
+1991	Nissan	Figaro	D 234	Eclectic Domestics	Japan	40,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+1995	Nissan	Gloria Gran Turismo	C 498	Retro Super Saloons	Japan	15,000	Rare	Autoshow, Wheelspin	
+2017	Nissan	GT-R (R35)	S1 709	Modern Supercars	Japan	115,000	Rare	Autoshow, Wheelspin	
+2012	Nissan	GT-R Black Edition (R35)	S1 703	Modern Supercars	Japan	80,000	Rare	Autoshow, Wheelspin	
+2012	Nissan	GT-R Black Edition (R35) Forza Edition	S2 850	Extreme Track Toys	Japan	750,000	Forza Edition	Wheelspin, Seasonal	Not in Autoshow
+2024	Nissan	GT-R Nismo	S1 741	Track Toys	Japan	220,000	Epic	Autoshow, Collection Journal	
+2020	Nissan	GT-R NISMO (R35)	S1 736	Track Toys	Japan	270,000	Epic	Autoshow, Wheelspin	
+1995	Nissan	NISMO GT-R LM	B 545	Retro Sports Cars	Japan	1,100,000	Legendary	Autoshow, Wheelspin	
+1989	Nissan	PAO	D 145	Eclectic Domestics	Japan	12,000	Barn Find	Collection Journal	Not in Autoshow, is discoverable Barn Find in Minamino
+1990	Nissan	Pulsar GTI-R	C 486	Retro Rally	Japan	28,000	Rare	Autoshow, Wheelspin	
+1998	Nissan	R390 (GT1)	S1 774	Retro Supercars	Japan			Collection Journal	Not in Autoshow
+1989	Nissan	S-Cargo	D 131	Eclectic Domestics	Japan	19,000	Rare	Autoshow, Wheelspin	
+1989	Nissan	S-Cargo Forza Edition	S1 800	Track Toys	Japan			Wheelspin, Seasonal	Not in Autoshow
+1985	Nissan	Safari Turbo	D 123	Pickups & 4x4s	Japan	25,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+1989	Nissan	Silvia K's	C 455	Retro Sports Cars	Japan	40,000	Common	Autoshow	
+1994	Nissan	Silvia K's	C 499	Retro Sports Cars	Japan	20,000	Common	Autoshow, Wheelspin	
+1998	Nissan	Silvia K's Aero	C 494	Retro Sports Cars	Japan	22,000	Common	Autoshow, Wheelspin	
+2002	Nissan	Silvia Spec-R	B 551	Retro Sports Cars	Japan	44,000	Common	Autoshow, Wheelspin	
+1971	Nissan	Skyline 2000GT-R	D 380	Classic Sports Cars	Japan	169,000	Barn Find	Collection Journal	Not in Autoshow, is discoverable Barn Find in Nangan
+1992	Nissan	Skyline GT-R	B 541	Retro Sports Cars	Japan	72,000	Rare	Autoshow, Wheelspin	
+1998	Nissan	Skyline GT-R 40th Anniversary	B 547	Retro Sports Cars	Japan			Autoshow DLC	Car Pass 7/2/26
+2000	Nissan	Skyline GT-R V Spec II	B 590	Retro Sports Cars	Japan	200,000	Rare	Autoshow, Wheelspin	
+1997	Nissan	Skyline GT-R V-Spec	B 555	Retro Sports Cars	Japan	250,000	Rare	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1987	Nissan	Skyline GTS-R	C 432	Retro Sports Cars	Japan			Autoshow	
+1973	Nissan	Skyline H/T 2000GT-R	C 407	Classic Sports Cars	Japan			Autoshow, Wheelspin	
+1997	Nissan	Stagea RS Four V	C 439	Retro Super Saloons	Japan	20,000	Epic	Autoshow, Wheelspin	
+2024	Nissan	Z NISMO	A 652	Modern Sports Cars	Japan	60,000	Epic	Autoshow, Wheelspin	
+2010	Noble	M600	S1 793	Modern Supercars	UK	322,000	Epic	Autoshow, Wheelspin	
+1984	Opel	Manta 400	B 576	Rally Monsters	Germany	152,000	Rare	Autoshow, Collection Journal	
+2016	Pagani	Huayra BC Coupe	S2 851	Hypercars	Italy	3,600,000	Legendary	Autoshow, Wheelspin	
+2021	Pagani	Huayra R	R 954	Extreme Track Toys	Italy	2,750,000	Legendary	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2010	Pagani	Zonda Cinque Roadster	S2 812	Hypercars	Italy	4,000,000	Legendary	Autoshow	
+2009	Pagani	Zonda R	R 918	Extreme Track Toys	Italy	4,750,000	Legendary	Autoshow, Wheelspin	
+1962	Peel	P50	D 100	Cult Cars	UK	21,000	Legendary	Autoshow, Wheelspin	
+1962	Peel	P50 Trolli Edition	D 100	Cult Cars	UK	21,000	Legendary	Autoshow DLC	Partnership DLC
+2011	Penhall	The Cholla	B 541	Unlimited Buggies	USA	85,000	Rare	Autoshow, Wheelspin	
+1991	Peugeot	205 Rallye	D 350	Retro Hot Hatch	France	22,000	Rare	Autoshow, Wheelspin	
+1984	Peugeot	205 Turbo 16	C 500	Retro Rally	France	275,000	Barn Find	Collection Journal	Not in Autoshow, is discoverable Barn Find in Shimanoyama
+2007	Peugeot	207 Super 2000	A 632	Rally Monsters	France			Seasonal	Not in Autoshow, from Off Piste Wristband Event
+1968	Plymouth	Barracuda Formula S	C 445	Classic Muscle	USA	45,000	Rare	Autoshow, Wheelspin	
+1971	Plymouth	Cuda 426 HEMI	C 441	Classic Muscle	USA	125,000	Epic	Autoshow, Wheelspin	
+1958	Plymouth	Fury	D 361	Rods and Customs	USA	53,000	Rare	Autoshow, Wheelspin	
+2021	Polaris	RZR Pro XP Factory Racing Limited Edition	C 439	UTVs	USA	50,000	Rare	Autoshow, Wheelspin	
+2021	Polaris	RZR Pro XP Ultimate	C 496	UTVs	USA	34,000	Rare	Autoshow, Collection Journal	
+1977	Pontiac	Firebird Trans Am	D 312	Classic Muscle	USA	60,000	Rare	Autoshow, Wheelspin	
+1987	Pontiac	Firebird Trans Am GTA	D 382	Retro Muscle	USA	25,000	Common	Autoshow, Wheelspin	
+1987	Porsche	959	A 661	Retro Supercars	Germany	1,875,000	Treasure Car	Collection Journal	Not in Autoshow, is discoverable Treasure Car
+1985	Porsche	#185 959 Prodrive Rally Raid	A 623	Rally Monsters	Germany	1,500,000	Legendary	Autoshow, Wheelspin	
+1970	Porsche	#3 917 LH	S1 777	Classic Racers	Germany	1,000,000	Legendary	Autoshow, Collection Journal	
+1970	Porsche	#3 917 LH Forza Edition	R 998	Extreme Track Toys	Germany			Wheelspin, Seasonal	Not in Autoshow
+2019	Porsche	#70 Porsche Motorsport 935	S2 853	Extreme Track Toys	Germany	1,600,000	Legendary	Autoshow, Wheelspin	
+2022	Porsche	718 Cayman GT4 RS	S1 737	Track Toys	Germany	190,000	Epic	Autoshow, Collection Journal	
+2018	Porsche	718 Cayman GTS	A 675	Modern Sports Cars	Germany	75,000	Epic	Autoshow, Wheelspin	
+1973	Porsche	911 Carrera RS	C 490	Rare Classics	Germany	1,050,000	Legendary	Autoshow, Wheelspin	
+2019	Porsche	911 Carrera S	S1 714	Modern Sports Cars	Germany	145,000	Rare	Autoshow, Wheelspin	
+1997	Porsche	911 GT1 Strassenversion	S1 746	Retro Supercars	Germany	4,000,000	Legendary	Autoshow, Wheelspin	
+1995	Porsche	911 GT2	A 644	Retro Supercars	Germany			Wheelspin, Seasonal	Not in Autoshow
+2018	Porsche	911 GT2 RS	S2 803	Track Toys	Germany	550,000	Epic	Autoshow, Wheelspin	
+2004	Porsche	911 GT3	A 674	Retro Supercars	Germany	135,000	Rare	Autoshow, Wheelspin	
+2021	Porsche	911 GT3	S1 752	Track Toys	Germany	260,000	Epic	Autoshow, Wheelspin	
+2019	Porsche	911 GT3 RS	S1 760	Track Toys	Germany			Wheelspin, Seasonal	Not in Autoshow
+2023	Porsche	911 GT3 RS	S1 758	Track Toys	Germany	424,000	Epic	Autoshow, Wheelspin	
+2012	Porsche	911 GT3 RS 4.0	S1 726	Track Toys	Germany	930,000	Epic	Autoshow, Collection Journal	
+2023	Porsche	911 Rallye	A 700	Rally Monsters	Germany			Seasonal	Not in Autoshow, from Flight Club Wristband Event
+1982	Porsche	911 Turbo 3.3	B 550	Retro Supercars	Germany	240,000	Barn Find	Collection Journal	Not in Autoshow
+2023	Porsche	911 Turbo S	S1 774	Modern Supercars	Germany	275,000	Rare	Autoshow, Wheelspin	
+1993	Porsche	911 Turbo S Leichtbau	A 652	Retro Sports Cars	Germany			Seasonal	Not in Autoshow
+2014	Porsche	918 Spyder	S2 858	Hypercars	Germany	2,300,000	Legendary	Autoshow, Collection Journal	
+1993	Porsche	928 GTS	B 563	Retro Sports Cars	Germany	150,000	Rare	Autoshow, Wheelspin	
+1989	Porsche	944 Turbo	B 539	Retro Sports Cars	Germany	30,000	Rare	Autoshow, Wheelspin	
+1993	Porsche	968 Turbo S	B 594	Retro Sports Cars	Germany	520,000	Rare	Autoshow, Wheelspin	
+2003	Porsche	Carrera GT	S1 758	Retro Supercars	Germany			Collection Journal, Seasonal	Not in Autoshow
+2018	Porsche	Cayenne Turbo	A 638	Sports Utility Heroes	Germany	79,000	Epic	Autoshow, Wheelspin	
+2005	Porsche	Cayman GT3 WTAC	S2 856	Extreme Track Toys	Germany	180,000	Epic	Autoshow, Wheelspin	
+2018	Porsche	Macan LPR Rally Raid	B 528	Offroad	Germany	250,000	Epic	Autoshow, Wheelspin	
+2021	Porsche	Mission R	S2 865	Extreme Track Toys	Germany	5,000,000	Legendary	Autoshow, Wheelspin	
+2020	Porsche	Taycan Turbo S	S1 725	Modern Super Saloons	Germany	200,000	Common	Autoshow, Wheelspin	
+2015	Radical	RXC Turbo	S2 842	Extreme Track Toys	UK	147,000	Epic	Autoshow, Wheelspin	
+2024	Ram	1500 TRX	B 514	Pickups & 4x4s	USA	100,000	Common	Autoshow	
+1972	Reliant	Supervan III	D 100	Utility Heroes	UK	39,000	Common	Autoshow, Wheelspin	
+1980	Renault	5 Turbo	C 417	Retro Rally	France	143,000	Rare	Autoshow, Wheelspin	
+1967	Renault	8 Gordini	D 322	Classic Rally	France	250,000	Common	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1993	Renault	Clio Williams	D 400	Retro Hot Hatch	France	30,000	Common	Autoshow, Wheelspin	
+2018	Renault	Megane R.S.	B 547	Super Hot Hatch	France	32,000	Rare	Autoshow, Wheelspin	
+2008	Renault	Mégane R26.R	B 561	Hot Hatch	France	58,000	Rare	Autoshow, Wheelspin	
+2010	Renault	Megane RS 250	B 538	Super Hot Hatch	France	14,000	Common	Autoshow, Wheelspin	
+2021	Rimac	Nevera	R 913	Hypercars	Croatia	2,250,000	Legendary	Wheelspin, Seasonal	Not in Autoshow
+2022	Rivian	R1T	A 607	Pickups & 4x4s	USA	56,000	Epic	Autoshow, Wheelspin	
+2016	RJ Anderson	#37 Polaris RZR Pro 2 Truck	A 674	Unlimited Offroad	USA	120,000	Epic	Autoshow, Collection Journal	
+2021	RJ Anderson	#37 Polaris RZR Pro 4 Truck	A 677	Unlimited Offroad	USA			Wheelspin, Seasonal	Not in Autoshow
+2017	Saleen	S7 LM	S2 835	Extreme Track Toys	USA	1,000,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1993	Schuppan	962CR	S1 764	Retro Supercars	UK	1,950,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1965	Shelby	Cobra 427 S/C	B 582	Rare Classics	USA			Collection Journal, Seasonal	Not in Autoshow
+1965	Shelby	Cobra Daytona Coupe	B 515	Classic Racers	USA	20,000,000	Legendary	Autoshow, Wheelspin	
+2020	SIERRA Cars	#23 Yokohama ALPHA	R 926	Extreme Track Toys	USA	65,000	Epic	Autoshow, Wheelspin	
+2021	SIERRA Cars	700R	D 346	UTVs	USA	75,000	Rare	Autoshow, Wheelspin	
+2021	SIERRA Cars	RX3	A 635	UTVs	USA	50,000	Rare	Autoshow, Wheelspin	
+2013	SRT	Viper GTS	S1 707	Modern Muscle	USA	135,000	Rare	Autoshow, Wheelspin, Loyalty	
+1980	Subaru	BRAT GL	D 159	Utility Heroes	Japan	20,000	Common	Autoshow, Wheelspin	
+2013	Subaru	BRZ	C 463	Modern Sports Cars	Japan	25,000	Common	Autoshow, Wheelspin	
+2022	Subaru	BRZ	B 551	Modern Sports Cars	Japan	28,000	Epic	Autoshow, Wheelspin	
+2022	Subaru	BRZ Forza Edition	A 700	Unlimited Offroad	Japan	500,000	Forza Edition	Seasonal	Not in Autoshow, I found mine for sale as Aftermarket Car in Sotoyama
+1998	Subaru	Impreza 22B-STi Version	B 600	Retro Rally	Japan	86,000	Legendary	Autoshow, Wheelspin	
+2004	Subaru	Impreza WRX STI	B 552	Modern Rally	Japan	30,000	Common	Autoshow, Wheelspin	
+2005	Subaru	Impreza WRX STI	B 570	Modern Rally	Japan	35,000	Common	Autoshow, Wheelspin	
+2008	Subaru	Impreza WRX STI	B 539	Modern Rally	Japan	27,000	Rare	Autoshow, Wheelspin	
+2005	Subaru	Legacy B4 2.0 GT	B 549	Retro Super Saloons	Japan	10,000	Common	Autoshow, Wheelspin	
+1990	Subaru	Legacy RS	C 406	Retro Rally	Japan	15,000	Common	Autoshow, Wheelspin	
+2019	Subaru	STI S209	B 574	Modern Rally	Japan	250,000	Common	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1996	Subaru	SVX	C 466	Retro Sports Cars	Japan	13,000	Common	Autoshow, Wheelspin	
+1994	Subaru	Vivio RX-R	D 281	Eclectic Domestics	Japan	10,000	Epic	Autoshow, Wheelspin	
+1994	Subaru	Vivio RX-R Forza Edition	S2 900	Extreme Track Toys	Japan			Collection Journal, Seasonal	Not in Autoshow
+2022	Subaru	WRX	B 538	Modern Rally	Japan	25,000	Epic	Autoshow, Wheelspin	
+2011	Subaru	WRX STI	B 547	Modern Rally	Japan	27,000	Rare	Autoshow, Wheelspin	
+2015	Subaru	WRX STI	B 555	Modern Rally	Japan	27,000	Common	Autoshow, Wheelspin	
+2018	Subaru	WRX STI ARX Supercar	S1 757	Rally Monsters	Japan	150,000	Epic	Seasonal	Not in Autoshow, from Launch Control Wristband Event
+2013	Toyota	86	C 460	Modern Sports Cars	Japan	15,000	Rare	Autoshow, Wheelspin	
+1993	Toyota	#1 T100 Baja Truck	B 584	Unlimited Offroad	Japan	400,000	Legendary	Autoshow, Wheelspin	
+1969	Toyota	2000GT	D 377	Rare Classics	Japan	1,000,000	Barn Find	Collection Journal	Not in Autoshow, is discoverable Barn Find in Ito
+2019	Toyota	4Runner TRD Pro	C 421	Pickups & 4x4s	Japan	42,000	Rare	Autoshow, Wheelspin	
+2013	Toyota	86 Stories	A 685	Track Toys	Japan			Collection Journal, Seasonal	Not in Autoshow
+1999	Toyota	Altezza RS200 Z Edition	C 461	Retro Super Saloons	Japan	250,000	Rare	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2023	Toyota	Camry TRD	B 525	Modern Super Saloons	Japan	31,000	Epic	Autoshow	
+1992	Toyota	Celica GT-Four RC ST185	C 438	Retro Rally	Japan	30,000	Rare	Autoshow	
+1994	Toyota	Celica GT-Four ST205	C 479	Retro Rally	Japan	27,000	Common	Autoshow, Wheelspin	
+2003	Toyota	Celica Sport Specialty II	C 433	Retro Sports Cars	Japan	12,000	Rare	Autoshow, Wheelspin	
+1997	Toyota	Chaser 2.5 Tourer V	B 504	Retro Super Saloons	Japan	15,500	Rare	Autoshow, Collection Journal	
+1991	Toyota	Chaser GT Twin Turbo	C 484	Retro Super Saloons	Japan	20,000	Rare	Autoshow, Wheelspin	
+1974	Toyota	Corolla SR5	D 197	Classic Sports Cars	Japan			Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+2005	Toyota	Crown Super Deluxe Taxi	D 181	Retro Super Saloons	Japan	10,000	Common	Autoshow, Wheelspin	
+1979	Toyota	FJ40	D 157	Pickups & 4x4s	Japan	103,000	Common	Autoshow, Wheelspin	
+2023	Toyota	GR Corolla	B 596	Super Hot Hatch	Japan			Autoshow DLC	Car Pass 7/9/26
+2020	Toyota	GR Supra	A 616	Modern Sports Cars	Japan	45,000	Rare	Autoshow, Collection Journal, Wheelspin	
+2021	Toyota	GR Yaris	B 558	Modern Rally	Japan	54,000	Epic	Autoshow, Wheelspin	
+2022	Toyota	GR86	B 556	Modern Sports Cars	Japan	28,000	Common	Autoshow, Wheelspin	
+1995	Toyota	J&J Motorsport Supra WTAC	S2 828	Extreme Track Toys	Japan	420,000	Epic	Autoshow DLC	Time Attack Car Pack
+2017	Toyota	JPN Taxi	D 248	Eclectic Domestics	Japan	25,000	Common	Autoshow, Wheelspin	
+2025	Toyota	Land Cruiser	C 456	Sports Utility Heroes	Japan	70,000	Rare	Autoshow, Wheelspin	
+2016	Toyota	Land Cruiser Arctic Trucks AT37	D 332	Pickups & 4x4s	Japan	250,000	Rare	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1995	Toyota	MR2 GT	B 522	Retro Sports Cars	Japan	28,000	Rare	Autoshow, Wheelspin	
+1989	Toyota	MR2 SC	D 397	Retro Sports Cars	Japan	250,000	Epic	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1991	Toyota	Sera	D 344	Eclectic Domestics	Japan	11,000	Rare	Autoshow, Wheelspin	
+1997	Toyota	Soarer 2.5 GT-T	C 491	Retro Sports Cars	Japan	18,000	Rare	Autoshow, Collection Journal, Wheelspin	
+1965	Toyota	Sports 800	D 141	Classic Sports Cars	Japan			Collection Journal, Wheelspin, Seasonal	Not in Autoshow
+1965	Toyota	Sports 800 Fanta Edition	D 141	Classic Sports Cars	Japan	35,000	Rare	Autoshow DLC	Partnership DLC
+1985	Toyota	Sprinter Trueno GT Apex	D 376	Retro Sports Cars	Japan	30,000	Epic	Autoshow, Wheelspin	
+1985	Toyota	Sprinter Trueno GT Apex Forza Edition	B 600	Track Toys	Japan			Collection Journal, Seasonal	Not in Autoshow
+1996	Toyota	Starlet Glanza V	C 435	Retro Hot Hatch	Japan	250,000	Common	Seasonal	Not in Autoshow, in Welcome to Japan Playlist
+1992	Toyota	Supra 2.0 GT	C 453	Retro Sports Cars	Japan	28,000	Rare	Autoshow, Wheelspin	
+1998	Toyota	Supra RZ	B 529	Retro Sports Cars	Japan	60,000	Rare	Autoshow, Collection Journal, Wheelspin	
+2019	Toyota	Tacoma TRD Pro	C 409	Pickups & 4x4s	Japan	34,000	Rare	Autoshow, Wheelspin	
+2019	Toyota	Tacoma TRD Pro Forza Edition	R 998	Extreme Track Toys	Japan	500,000	Forza Edition	Autoshow DLC	VIP
+1998	TVR	Cerbera Speed 12	S1 770	Retro Supercars	UK			Seasonal	Not in Autoshow
+2018	TVR	Griffith	S1 729	Modern Sports Cars	UK	250,000	Rare	Autoshow	
+2005	TVR	Sagaris	A 672	Retro Sports Cars	UK	115,000	Rare	Autoshow, Wheelspin	
+2015	Ultima	Evolution Coupe 1020	R 925	Extreme Track Toys	UK	150,000	Epic	Autoshow, Wheelspin	
+2017	Volkswagen	#34 Andretti Rally Cross Beetle	S1 764	Rally Monsters	Germany	150,000	Epic	Autoshow, Wheelspin	
+1963	Volkswagen	Beetle	D 100	Cult Cars	Germany	17,000	Legendary	Autoshow, Wheelspin	
+1969	Volkswagen	Class 5/1600 Baja Bug	D 260	Buggies	Germany	35,000	Rare	Autoshow, Wheelspin	
+1995	Volkswagen	Corrado VR6	C 426	Retro Hot Hatch	Germany	30,000	Common	Autoshow, Wheelspin	
+1983	Volkswagen	Golf GTI	D 314	Retro Hot Hatch	Germany	18,000	Common	Autoshow, Wheelspin	
+1992	Volkswagen	Golf Gti 16v Mk2	D 308	Retro Hot Hatch	Germany	22,000	Common	Autoshow, Wheelspin	
+2010	Volkswagen	Golf R	B 526	Super Hot Hatch	Germany	20,000	Rare	Autoshow, Wheelspin	
+2014	Volkswagen	Golf R	B 536	Super Hot Hatch	Germany	27,000	Common	Autoshow, Wheelspin	
+2021	Volkswagen	Golf R	B 546	Super Hot Hatch	Germany	29,000	Common	Autoshow, Wheelspin	
+2022	Volkswagen	Golf R	B 548	Super Hot Hatch	Germany	35,000	Rare	Autoshow, Wheelspin	
+1982	Volkswagen	Pickup LX	D 100	Utility Heroes	Germany	16,000	Epic	Autoshow, Wheelspin	
+1989	Volkswagen	Rallye Golf	C 440	Retro Rally	Germany			Seasonal	Not in Autoshow
+2011	Volkswagen	Scirocco R	B 548	Hot Hatch	Germany	15,000	Rare	Autoshow, Wheelspin	
+1963	Volkswagen	Type 2 De Luxe	D 100	Cult Cars	Germany	178,000	Rare	Autoshow, Collection Journal	
+1983	Volvo	242 Turbo Evolution	C 435	Classic Rally	Sweden	30,000	Common	Autoshow, Wheelspin	
+2022	Wuling	Hongguang Mini EV	D 100	Hot Hatch	China	5,000	Rare	Autoshow, Wheelspin	
+2013	Wuling	Sunshine S	D 107	Utility Heroes	China	2,000	Rare	Autoshow, Wheelspin	
+2013	Wuling	Sunshine S Forza Edition	S1 800	Track Toys	China			Wheelspin, Seasonal	Not in Autoshow
+2019	Zenvo	TSR-S	R 906	Hypercars	Denmark	1,200,000	Legendary	Autoshow, Wheelspin	
