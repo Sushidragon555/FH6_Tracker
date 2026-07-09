@@ -3,3 +3,14 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# First-run marker created by the launcher
+.deps_installed
+
+# Runtime data / generated files (grow at runtime; not part of the app)
+telemetry_log.csv
+
+# PyInstaller build output
+build/
+dist/
+*.spec
