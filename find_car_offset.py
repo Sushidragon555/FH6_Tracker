@@ -32,7 +32,7 @@ UDP_PORT = 9999
 # How many in-gameplay packets to sample per car, and how long to wait for them.
 SAMPLES = 120
 CAPTURE_TIMEOUT = 15.0
-COUNTDOWN_SECONDS = 8
+COUNTDOWN_SECONDS = 25
 
 # Plausible range for a real CarOrdinal (0 = no car loaded). Kept wide because some
 # Forza titles use large ordinals; physics floats are filtered out separately below.
