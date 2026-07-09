@@ -1,5 +1,12 @@
 {
     "auto_start_forza": false,
     "launch_tracker_on_start": true,
-    "theme": "light"
+    "theme": "light",
+    "credit_ocr_enabled": true,
+    "credit_region": [
+        0,
+        0,
+        1906,
+        1078
+    ]
 }
