@@ -19,327 +19,355 @@ try:
     ImageGrab = importlib.import_module("PIL.ImageGrab")
     Image = importlib.import_module("PIL.Image")
     ImageOps = importlib.import_module("PIL.ImageOps")
-    except Exception:  # pragma: no cover - optional OCR dependencies
+except Exception:  # pragma: no cover - optional OCR dependencies
     pyautogui = None
     pytesseract = None
     ImageGrab = None
     Image = None
     ImageOps = None
 
-    SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+AUTO_LOG_PATH = os.path.join(BASE_DIR, "auto_log.py")
+OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
+MASTER_FILE = os.path.join(BASE_DIR, "fh6_master_list.json")
+LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
+SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.json")
+METHODS_FILE = os.path.join(BASE_DIR, "methods_history.json")
+METHOD_NAMES = [
+    "Wheelspins",
+    "Super Wheelspins",
+    "Road Racing",
+    "Street Racing",
+    "Cross Country",
+    "Drag Racing",
+    "Drift",
+    "PR Stunts",
+    "Photo Mode",
+    "Barn Finds",
+    "Other",
+]
+
+SESSION_GOALS_FILE = os.path.join(BASE_DIR, "session_goals.json")
+EXPORT_DIR = os.path.join(BASE_DIR, "exports")
 
 
-    def format_credits(amount):
-        if amount >= 1_000_000:
-            return f"{amount / 1_000_000:.2f}M"
-        if amount >= 1_000:
-            return f"{amount / 1_000:.1f}K"
-        return str(amount)
-
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        AUTO_LOG_PATH = os.path.join(BASE_DIR, "auto_log.py")
-        OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
-        MASTER_FILE = os.path.join(BASE_DIR, "fh6_master_list.json")
-        LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
-        SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.json")
+def format_credits(amount):
+    if amount >= 1_000_000:
+        return f"{amount / 1_000_000:.2f}M"
+    if amount >= 1_000:
+        return f"{amount / 1_000:.1f}K"
+    return str(amount)
 
 
-    def load_json_file(path, default):
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as handle:
-                try:
-                    return json.load(handle)
+def load_json_file(path, default):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            try:
+                return json.load(handle)
             except json.JSONDecodeError:
                 return default
-            return default
+    return default
 
 
-    def parse_credit_number(value):
-        cleaned = value.replace(",", "").replace(" ", "")
-        match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([kKmM])?", cleaned)
-        if not match:
-            return None
-        number = float(match.group(1))
-        suffix = match.group(2)
-        if suffix and suffix.lower() == "k":
-            number *= 1000
-        elif suffix and suffix.lower() == "m":
-            number *= 1_000_000
-            return int(number)
+def parse_credit_number(value):
+    cleaned = value.replace(",", "").replace(" ", "")
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([kKmM])?", cleaned)
+    if not match:
+        return None
+    number = float(match.group(1))
+    suffix = match.group(2)
+    if suffix and suffix.lower() == "k":
+        number *= 1000
+    elif suffix and suffix.lower() == "m":
+        number *= 1_000_000
+    return int(number)
 
 
-    def parse_credit_balance_from_text(text):
+def parse_credit_balance_from_text(text):
 
-        print(f">>> DEBUG RAW TEXT: '{text}'")
+    print(f">>> DEBUG RAW TEXT: '{text}'")
 
-        if not text:
-            return None
+    if not text:
+        return None
 
-        clean_text = text.lower().replace('.', ',').replace('|', ',').strip()
+    clean_text = text.lower().replace('.', ',').replace('|', ',').strip()
 
-        patterns = [
+    patterns = [
         r"\b(?:balance|credits? balance|current credits?|credit balance)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
         r"\b(?:credits?|cr)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
         r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, clean_text, flags=re.IGNORECASE)
-            if match:
-                found_str = match.group(1)
-                result = parse_credit_number(found_str)
-                print(f" [MATCH FOUND] string: '{found_str}' -> Value: {result}")
-                return result
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, clean_text, flags=re.IGNORECASE)
+        if match:
+            found_str = match.group(1)
+            result = parse_credit_number(found_str)
+            print(f" [MATCH FOUND] string: '{found_str}' -> Value: {result}")
+            return result
+    return None
 
 
-            return None
+def parse_balance_number_only(text):
+    """Return the most plausible standalone number in ``text``.
+
+    Used when the user has boxed a tight region around just the credit number, so the
+    captured text is often only digits (e.g. "1,050,000" or "1.05M") with no
+    "CR"/"Credits" keyword. We pick the largest number-like token, which for a boxed
+    balance is the balance itself.
+    """
+    if not text:
+        return None
+    best = None
+    for match in re.finditer(r"[0-9][0-9,\.]*\s*[kKmM]?", text):
+        value = parse_credit_number(match.group(0).strip())
+        if value is None:
+            continue
+        if best is None or value > best:
+            best = value
+    return best
 
 
-    def parse_balance_number_only(text):
-        """Return the most plausible standalone number in ``text``.
+def detect_credit_change_from_text(text, previous_balance=None):
+    if not text:
+        return None
 
-        Used when the user has boxed a tight region around just the credit number, so the
-        captured text is often only digits (e.g. "1,050,000" or "1.05M") with no
-        "CR"/"Credits" keyword. We pick the largest number-like token, which for a boxed
-        balance is the balance itself.
-        """
-        if not text:
-            return None
-        best = None
-        for match in re.finditer(r"[0-9][0-9,\.]*\s*[kKmM]?", text):
-            value = parse_credit_number(match.group(0).strip())
-            if value is None:
-                continue
-            if best is None or value > best:
-                best = value
-                return best
-
-
-    def detect_credit_change_from_text(text, previous_balance=None):
-        if not text:
-            return None
-
-        lowered = text.lower()
-        if re.search(r"\b(earned|received|won|reward(?:ed)?|added|gained)\b", lowered):
-            amount = None
-            for pattern in [
+    lowered = text.lower()
+    if re.search(r"\b(earned|received|won|reward(?:ed)?|added|gained)\b", lowered):
+        amount = None
+        for pattern in [
             r"\b(?:earned|received|won|reward(?:ed)?|added|gained)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
             r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
-            ]:
-                match = re.search(pattern, text, flags=re.IGNORECASE)
-                if match:
-                    amount = parse_credit_number(match.group(1))
-                    break
-                return amount if amount is not None else None
+        ]:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                amount = parse_credit_number(match.group(1))
+                break
+        return amount if amount is not None else None
 
-            if re.search(r"\b(spent|used|paid|bought|charged)\b", lowered):
-                amount = None
-                for pattern in [
-                r"\b(?:spent|used|paid|bought|charged)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
-                r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
-                ]:
-                    match = re.search(pattern, text, flags=re.IGNORECASE)
-                    if match:
-                        amount = parse_credit_number(match.group(1))
-                        break
-                    return -amount if amount is not None else None
+    if re.search(r"\b(spent|used|paid|bought|charged)\b", lowered):
+        amount = None
+        for pattern in [
+            r"\b(?:spent|used|paid|bought|charged)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
+            r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
+        ]:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                amount = parse_credit_number(match.group(1))
+                break
+        return -amount if amount is not None else None
 
-                if re.search(r"\b(balance|credits? balance|current credits?)\b", lowered):
-                    amount = None
-                    for pattern in [
-                    r"\b(?:balance|credits? balance|current credits?)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
-                    r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
-                    ]:
-                        match = re.search(pattern, text, flags=re.IGNORECASE)
-                        if match:
-                            amount = parse_credit_number(match.group(1))
-                            break
-                        if amount is None:
-                            return None
-                        if previous_balance is None:
-                            return 0
-                        if amount != previous_balance:
-                            return amount - previous_balance
-                        return 0
+    if re.search(r"\b(balance|credits? balance|current credits?)\b", lowered):
+        amount = None
+        for pattern in [
+            r"\b(?:balance|credits? balance|current credits?)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
+            r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
+        ]:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                amount = parse_credit_number(match.group(1))
+                break
+        if amount is None:
+            return None
+        if previous_balance is None:
+            return 0
+        if amount != previous_balance:
+            return amount - previous_balance
+        return 0
 
-                    if re.search(r"\bcredits?\b", lowered):
-                        amount = None
-                        for pattern in [
-                        r"\b(?:credit(?:s)?|cr)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
-                        r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
-                        ]:
-                            match = re.search(pattern, text, flags=re.IGNORECASE)
-                            if match:
-                                amount = parse_credit_number(match.group(1))
-                                break
-                            return amount if amount is not None else None
+    if re.search(r"\bcredits?\b", lowered):
+        amount = None
+        for pattern in [
+            r"\b(?:credit(?:s)?|cr)\b[^0-9]{0,20}([0-9][0-9,\.kKmM]*)",
+            r"\b([0-9][0-9,\.kKmM]*)\s*(?:credits?|cr)\b",
+        ]:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                amount = parse_credit_number(match.group(1))
+                break
+        return amount if amount is not None else None
 
-                        return None
-
-
-    def save_settings(settings):
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as handle:
-            json.dump(settings, handle, indent=4)
+    return None
 
 
-    def normalize_car_name(name):
-        if not name:
-            return ""
-        lowered = name.strip().lower()
-        lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
-        return " ".join(lowered.split())
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as handle:
+        json.dump(settings, handle, indent=4)
 
 
-    def parse_owned_cars_input(text):
-        return parse_owned_cars_text(text)
+def normalize_car_name(name):
+    if not name:
+        return ""
+    lowered = name.strip().lower()
+    lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return " ".join(lowered.split())
 
 
-    def extract_car_name_from_list_entry(entry):
-        if not entry:
-            return ""
-        if " | " in entry:
-            return entry.split(" | ", 1)[0].strip()
-        return entry.strip()
+def parse_owned_cars_input(text):
+    return parse_owned_cars_text(text)
 
 
-    def add_car_to_owned_list(owned, car_name):
-        car_name = car_name.strip()
-        if not car_name:
-            return owned
-        if car_name not in owned:
-            owned.append(car_name)
-            return owned
+def extract_car_name_from_list_entry(entry):
+    if not entry:
+        return ""
+    if " | " in entry:
+        return entry.split(" | ", 1)[0].strip()
+    return entry.strip()
 
 
-    def build_progress_data(master_db, owned_names, manufacturer=None, year=None, search=None, min_value=None, max_value=None):
-        normalized_owned = {normalize_car_name(name) for name in owned_names if name}
-        missing = []
-        owned_cars = []
-        total_cost = 0
-        search_terms = [term.lower() for term in (search or "").split() if term]
-        min_value_num = parse_credit_number(str(min_value)) if min_value not in [None, ""] else None
-        max_value_num = parse_credit_number(str(max_value)) if max_value not in [None, ""] else None
+def add_car_to_owned_list(owned, car_name):
+    car_name = car_name.strip()
+    if not car_name:
+        return owned
+    if car_name not in owned:
+        owned.append(car_name)
+    return owned
 
-        for car, price in master_db.items():
-            price_value = int(price)
-            if min_value_num is not None and price_value < min_value_num:
+
+def build_progress_data(master_db, owned_names, manufacturer=None, year=None, search=None, min_value=None, max_value=None):
+    normalized_owned = {normalize_car_name(name) for name in owned_names if name}
+    missing = []
+    owned_cars = []
+    total_cost = 0
+    search_terms = [term.lower() for term in (search or "").split() if term]
+    min_value_num = parse_credit_number(str(min_value)) if min_value not in [None, ""] else None
+    max_value_num = parse_credit_number(str(max_value)) if max_value not in [None, ""] else None
+
+    for car, price in master_db.items():
+        price_value = int(price)
+        if min_value_num is not None and price_value < min_value_num:
+            continue
+        if max_value_num is not None and price_value > max_value_num:
+            continue
+        if manufacturer and manufacturer.lower() not in car.lower():
+            continue
+        if year is not None and year != "":
+            match = re.match(r"^(\d{4})\s", car)
+            if not match or match.group(1) != str(year):
                 continue
-            if max_value_num is not None and price_value > max_value_num:
+        if search_terms:
+            lowered = car.lower()
+            if not all(term in lowered for term in search_terms):
                 continue
-            if manufacturer and manufacturer.lower() not in car.lower():
-                continue
-            if year is not None and year != "":
-                car_year = None
-                match = re.match(r"^(\d{4})\s", car)
-                if match:
-                    car_year = match.group(1)
-                    if car_year != str(year):
-                        continue
-                    if search_terms:
-                        lowered = car.lower()
-                        if not all(term in lowered for term in search_terms):
-                            continue
-                        normalized_car = normalize_car_name(car)
-                        if normalized_car in normalized_owned:
-                            owned_cars.append((car, price))
-                        else:
-                            missing.append((car, price))
-                            total_cost += price_value
-                            missing.sort(key=lambda item: item[1], reverse=True)
-                            owned_cars.sort(key=lambda item: item[0])
-                            return missing, owned_cars, total_cost
+        normalized_car = normalize_car_name(car)
+        if normalized_car in normalized_owned:
+            owned_cars.append((car, price))
+        else:
+            missing.append((car, price))
+            total_cost += price_value
+    missing.sort(key=lambda item: item[1], reverse=True)
+    owned_cars.sort(key=lambda item: item[0])
+    return missing, owned_cars, total_cost
 
 
-    def load_settings():
-        settings = load_json_file(SETTINGS_FILE, {})
-        return {
+def _find_tesseract():
+    """Return the first valid tesseract.exe path, or None."""
+    candidates = [
+        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'D:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'E:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'F:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'F:\Tesseract\tesseract.exe',
+        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def load_settings():
+    settings = load_json_file(SETTINGS_FILE, {})
+    return {
         "auto_start_forza": settings.get("auto_start_forza", False),
         "launch_tracker_on_start": settings.get("launch_tracker_on_start", False),
         "theme": settings.get("theme", "light"),
         "credit_ocr_enabled": settings.get("credit_ocr_enabled", False),
         "credit_region": settings.get("credit_region"),
         "performance_mode": settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE),
-        }
+        "tesseract_path": settings.get("tesseract_path") or _find_tesseract() or "",
+    }
 
 
-    def tracker_button_label(running):
-        return "Stop Tracker" if running else "Start Tracker"
+def tracker_button_label(running):
+    return "Stop Tracker" if running else "Start Tracker"
 
 
-    def is_forza_process_name(name):
-        if not name:
-            return False
-        lowered = name.lower()
-        return lowered.startswith("forzahorizon") or (lowered.startswith("forza") and "horizon" in lowered)
+def is_forza_process_name(name):
+    if not name:
+        return False
+    lowered = name.lower()
+    return lowered.startswith("forzahorizon") or (lowered.startswith("forza") and "horizon" in lowered)
 
 
-    def get_running_process_names():
-        if os.name == "nt":
-            try:
-                # CREATE_NO_WINDOW keeps this from flashing a console window every refresh.
-                completed = subprocess.run(
+def get_running_process_names():
+    if os.name == "nt":
+        try:
+            # CREATE_NO_WINDOW keeps this from flashing a console window every refresh.
+            completed = subprocess.run(
                 ["tasklist", "/fo", "csv", "/nh"],
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=10,
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-            except (OSError, subprocess.SubprocessError):
-                return []
-            if completed.returncode != 0:
-                return []
-            names = []
-            for line in completed.stdout.splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    parts = next(csv.reader([line]))
-                except csv.Error:
-                    continue
-                if parts:
-                    names.append(parts[0].strip().strip('"'))
-                    return names
-
-                try:
-                    completed = subprocess.run(["ps", "-eo", "comm="], capture_output=True, text=True, check=False, timeout=10)
-                except (OSError, subprocess.SubprocessError):
-                    return []
-                if completed.returncode != 0:
-                    return []
-                return [name.strip() for name in completed.stdout.splitlines() if name.strip()]
-
-
-    def has_running_forza_process():
-        return any(is_forza_process_name(name) for name in get_running_process_names())
-
-
-    def is_forza_window_title(title):
-        if not title:
-            return False
-        lowered = title.lower()
-        return "forza" in lowered or "horizon" in lowered
-
-
-    def get_visible_forza_window_titles():
-        if os.name != "nt":
+            )
+        except (OSError, subprocess.SubprocessError):
             return []
+        if completed.returncode != 0:
+            return []
+        names = []
+        for line in completed.stdout.splitlines():
+            if not line.strip():
+                continue
+            try:
+                parts = next(csv.reader([line]))
+            except csv.Error:
+                continue
+            if parts:
+                names.append(parts[0].strip().strip('"'))
+        return names
+    else:
         try:
-            user32 = ctypes.windll.user32
-            enum_windows = user32.EnumWindows
-            enum_windows_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
-            titles = []
+            completed = subprocess.run(["ps", "-eo", "comm="], capture_output=True, text=True, check=False, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return []
+        if completed.returncode != 0:
+            return []
+        return [name.strip() for name in completed.stdout.splitlines() if name.strip()]
 
-    def callback(hwnd, _):
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length <= 0:
-            return True
-        buffer = ctypes.create_unicode_buffer(length + 1)
-        user32.GetWindowTextW(hwnd, buffer, length + 1)
-        title = buffer.value
-        if is_forza_window_title(title):
-            titles.append(title)
+
+def has_running_forza_process():
+    return any(is_forza_process_name(name) for name in get_running_process_names())
+
+
+def is_forza_window_title(title):
+    if not title:
+        return False
+    lowered = title.lower()
+    return "forza" in lowered or "horizon" in lowered
+
+
+def get_visible_forza_window_titles():
+    if os.name != "nt":
+        return []
+    try:
+        user32 = ctypes.windll.user32
+        enum_windows = user32.EnumWindows
+        enum_windows_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
+        titles = []
+
+        def callback(hwnd, _):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buffer, length + 1)
+            title = buffer.value
+            if is_forza_window_title(title):
+                titles.append(title)
             return True
 
         enum_windows(enum_windows_proc(callback), None)
@@ -348,8 +376,8 @@ try:
         return []
 
 
-    def has_running_forza_window():
-        return bool(get_visible_forza_window_titles())
+def has_running_forza_window():
+    return bool(get_visible_forza_window_titles())
 
 
 class FH6TrackerGUI(tk.Tk):
@@ -373,12 +401,27 @@ class FH6TrackerGUI(tk.Tk):
         self.known_owned = set(load_json_file(OWNED_FILE, {"owned": []}).get("owned", []))
         self.detected_car_id = None
         self._notice_after_id = None
+        self._method_active = False
+        self._method_name = None
+        self._method_start_time = None
+        self._method_start_credits = 0
+        self._method_timer_after_id = None
+        self._master_db_cache = load_json_file(MASTER_FILE, {})
+        self._owned_cache = load_json_file(OWNED_FILE, {"owned": []}).get("owned", [])
+        self._master_db_mtime = os.path.getmtime(MASTER_FILE) if os.path.exists(MASTER_FILE) else 0
+        self._owned_mtime = os.path.getmtime(OWNED_FILE) if os.path.exists(OWNED_FILE) else 0
+        self.goal_summary_var = tk.StringVar(value="No active goal")
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
         self.refresh_all()
         self.after(self._refresh_interval_ms(), self.refresh_loop)
         self.after(2000, self._check_forza_auto_start)
+        self.after(1000, self._update_session_timer)
+
+        self.bind("<Control-f>", lambda e: self.search_entry.focus_set())
+        self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
+        self.bind("<Control-r>", lambda e: self.refresh_all())
 
     def create_widgets(self):
         self.columnconfigure(0, weight=1)
@@ -418,34 +461,45 @@ class FH6TrackerGUI(tk.Tk):
         self.credit_y_var = tk.StringVar(value=str(region[1]))
         self.credit_w_var = tk.StringVar(value=str(region[2]))
         self.credit_h_var = tk.StringVar(value=str(region[3]))
+        self.tesseract_path_var = tk.StringVar(value=self.settings.get("tesseract_path", ""))
         self.performance_var = tk.StringVar(value=self.settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE))
-        ttk.Button(controls, text="Save Settings", command=lambda: self.save_auto_start_setting).grid(row=0, column=2, padx=(8, 8), sticky="w")
+        ttk.Button(controls, text="Save Settings", command=self.save_auto_start_setting).grid(row=0, column=2, padx=(8, 8), sticky="w")
 
         self.add_car_var = tk.StringVar()
-        ttk.Entry(controls, textvariable=self.add_car_var, width=42).grid(row=1, column=0, columnspan=4, padx=(0, 8), pady=(8, 0), sticky="ew")
-        ttk.Button(controls, text="Add Car", command=lambda: self.add_car_manual).grid(row=1, column=4, padx=(0, 8), pady=(8, 0), sticky="w")
-        ttk.Button(controls, text="Import List", command=lambda: self.import_owned_cars_from_text).grid(row=1, column=5, padx=(0, 8), pady=(8, 0), sticky="w")
-        ttk.Button(controls, text="Import File", command=lambda: self.import_owned_cars_from_file).grid(row=1, column=6, padx=(0, 8), pady=(8, 0), sticky="w")
-        ttk.Button(controls, text="Remove Selected", command=lambda: self.remove_selected_car).grid(row=1, column=7, pady=(8, 0), sticky="w")
+        self.add_car_var_entry = ttk.Entry(controls, textvariable=self.add_car_var, width=42)
+        self.add_car_var_entry.grid(row=1, column=0, columnspan=4, padx=(0, 8), pady=(8, 0), sticky="ew")
+        ttk.Button(controls, text="Add Car", command=self.add_car_manual).grid(row=1, column=4, padx=(0, 8), pady=(8, 0), sticky="w")
+        ttk.Button(controls, text="Import List", command=self.import_owned_cars_from_text).grid(row=1, column=5, padx=(0, 8), pady=(8, 0), sticky="w")
+        ttk.Button(controls, text="Import File", command=self.import_owned_cars_from_file).grid(row=1, column=6, padx=(0, 8), pady=(8, 0), sticky="w")
+        ttk.Button(controls, text="Remove Selected", command=self.remove_selected_car).grid(row=1, column=7, pady=(8, 0), sticky="w")
 
-        notebook = ttk.Notebook(self)
-        notebook.grid(row=2, column=0, sticky="nsew")
-        notebook.enable_traversal()
+        self.notebook = ttk.Notebook(self)
+        self.notebook.grid(row=2, column=0, sticky="nsew")
+        self.notebook.enable_traversal()
 
-        self.garage_tab = ttk.Frame(notebook)
-        self.live_tab = ttk.Frame(notebook)
-        self.stats_tab = ttk.Frame(notebook)
-        self.settings_tab = ttk.Frame(notebook)
-        self.logs_tab = ttk.Frame(notebook)
-        notebook.add(self.garage_tab, text="Collection")
-        notebook.add(self.live_tab, text="Live Data")
-        notebook.add(self.stats_tab, text="Stats")
-        notebook.add(self.settings_tab, text="Settings")
-        notebook.add(self.logs_tab, text="Logs")
+        self.garage_tab = ttk.Frame(self.notebook)
+        self.live_tab = ttk.Frame(self.notebook)
+        self.stats_tab = ttk.Frame(self.notebook)
+        self.settings_tab = ttk.Frame(self.notebook)
+        self.logs_tab = ttk.Frame(self.notebook)
+        self.methods_tab = ttk.Frame(self.notebook)
+        self.recommendations_tab = ttk.Frame(self.notebook)
+        self.goals_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.garage_tab, text="Collection")
+        self.notebook.add(self.live_tab, text="Live Data")
+        self.notebook.add(self.methods_tab, text="Methods")
+        self.notebook.add(self.stats_tab, text="Stats")
+        self.notebook.add(self.recommendations_tab, text="Recommendations")
+        self.notebook.add(self.goals_tab, text="Session Goals")
+        self.notebook.add(self.settings_tab, text="Settings")
+        self.notebook.add(self.logs_tab, text="Logs")
 
         self.build_garage_tab()
         self.build_live_tab()
+        self.build_methods_tab()
         self.build_stats_tab()
+        self.build_recommendations_tab()
+        self.build_goals_tab()
         self.build_settings_tab()
         self.build_logs_tab()
         self.populate_progress_manufacturers()
@@ -469,7 +523,8 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Label(filter_frame, text="Search:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
         self.progress_search_var = tk.StringVar()
-        ttk.Entry(filter_frame, textvariable=self.progress_search_var, width=32).grid(row=0, column=1, padx=(4, 8), pady=6, sticky="ew")
+        self.search_entry = ttk.Entry(filter_frame, textvariable=self.progress_search_var, width=32)
+        self.search_entry.grid(row=0, column=1, padx=(4, 8), pady=6, sticky="ew")
 
         ttk.Label(filter_frame, text="Manufacturer:").grid(row=0, column=2, sticky="w", padx=(8, 4), pady=6)
         self.progress_manufacturer_var = tk.StringVar()
@@ -488,8 +543,12 @@ class FH6TrackerGUI(tk.Tk):
         self.collection_max_value_var = tk.StringVar()
         ttk.Entry(filter_frame, textvariable=self.collection_max_value_var, width=12).grid(row=0, column=9, padx=(4, 8), pady=6, sticky="w")
 
-        ttk.Button(filter_frame, text="Apply", command=self.refresh_collection).grid(row=0, column=10, padx=(4, 8), pady=6)
-        ttk.Button(filter_frame, text="Clear", command=self.clear_collection_filters).grid(row=0, column=11, padx=(0, 8), pady=6)
+        ttk.Label(filter_frame, text="Sort:").grid(row=0, column=10, sticky="w", padx=(8, 4), pady=6)
+        self.collection_sort_var = tk.StringVar(value="Name A-Z")
+        ttk.Combobox(filter_frame, textvariable=self.collection_sort_var, values=["Name A-Z", "Name Z-A", "Price Low-High", "Price High-Low"], state="readonly", width=14).grid(row=0, column=11, padx=(4, 8), pady=6, sticky="w")
+
+        ttk.Button(filter_frame, text="Apply", command=self.refresh_collection).grid(row=0, column=12, padx=(4, 8), pady=6)
+        ttk.Button(filter_frame, text="Clear", command=self.clear_collection_filters).grid(row=0, column=13, padx=(0, 8), pady=6)
 
         self.collection_notebook = ttk.Notebook(self.garage_tab)
         self.collection_notebook.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
@@ -501,8 +560,9 @@ class FH6TrackerGUI(tk.Tk):
 
         self.owned_listbox = tk.Listbox(self.owned_frame, height=24, font=("Consolas", 10), selectmode=tk.EXTENDED)
         self.owned_listbox.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        self.owned_listbox.bind("<<ListboxSelect>>", lambda event: self.on_owned_list_select)
+        self.owned_listbox.bind("<<ListboxSelect>>", lambda event: self.on_owned_list_select())
         self.owned_listbox.bind("<Double-1>", lambda event: self.remove_selected_car())
+        self._add_owned_context_menu()
         owned_scrollbar = ttk.Scrollbar(self.owned_frame, orient="vertical", command=self.owned_listbox.yview)
         owned_scrollbar.grid(row=0, column=1, sticky="ns", pady=8)
         self.owned_listbox.configure(yscrollcommand=owned_scrollbar.set)
@@ -511,7 +571,8 @@ class FH6TrackerGUI(tk.Tk):
 
         self.unowned_listbox = tk.Listbox(self.missing_frame, height=24, font=("Consolas", 10))
         self.unowned_listbox.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        self.unowned_listbox.bind("<Double-1>", lambda event: self.add_selected_missing_car)
+        self.unowned_listbox.bind("<Double-1>", lambda event: self.add_selected_missing_car())
+        self._add_missing_context_menu()
         missing_scrollbar = ttk.Scrollbar(self.missing_frame, orient="vertical", command=self.unowned_listbox.yview)
         missing_scrollbar.grid(row=0, column=1, sticky="ns", pady=8)
         self.unowned_listbox.configure(yscrollcommand=missing_scrollbar.set)
@@ -527,11 +588,12 @@ class FH6TrackerGUI(tk.Tk):
         info_frame.columnconfigure(1, weight=1)
 
         labels = [
-        ("RPM", "rpm_var"),
-        ("Speed", "speed_var"),
-        ("Car ID", "car_id_var"),
-        ("Car Name", "car_name_var"),
-        ("Session Credits", "session_credits_var"),
+            ("RPM", "rpm_var"),
+            ("Speed", "speed_var"),
+            ("Car ID", "car_id_var"),
+            ("Car Name", "car_name_var"),
+            ("Session Credits", "session_credits_var"),
+            ("Session Time", "session_time_var"),
         ]
         self.vars = {}
         for idx, (text, var_name) in enumerate(labels):
@@ -540,32 +602,191 @@ class FH6TrackerGUI(tk.Tk):
             self.vars[var_name] = var
             ttk.Label(info_frame, textvariable=var).grid(row=idx, column=1, sticky="w", padx=8, pady=4)
 
-            controls_frame = ttk.Frame(self.live_tab)
-            controls_frame.grid(row=1, column=0, sticky="w", padx=10, pady=6)
-            ttk.Label(controls_frame, text="Reward credits:").grid(row=0, column=0, sticky="w")
-            self.session_credit_entry = tk.StringVar(value="0")
-            ttk.Entry(controls_frame, textvariable=self.session_credit_entry, width=12).grid(row=0, column=1, padx=(6, 8))
-            ttk.Button(controls_frame, text="Add Credits", command=self.add_session_credits).grid(row=0, column=2, padx=(0, 8))
-            ttk.Button(controls_frame, text="Reset Session", command=self.reset_session).grid(row=0, column=3)
+        controls_frame = ttk.Frame(self.live_tab)
+        controls_frame.grid(row=1, column=0, sticky="w", padx=10, pady=6)
+        ttk.Label(controls_frame, text="Reward credits:").grid(row=0, column=0, sticky="w")
+        self.session_credit_entry = tk.StringVar(value="0")
+        ttk.Entry(controls_frame, textvariable=self.session_credit_entry, width=12).grid(row=0, column=1, padx=(6, 8))
+        ttk.Button(controls_frame, text="Add Credits", command=self.add_session_credits).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(controls_frame, text="Reset Session", command=self.reset_session).grid(row=0, column=3)
 
-            ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=2, column=0, sticky="w", padx=10, pady=(6, 0))
-            if pyautogui is None or pytesseract is None or ImageGrab is None:
-                ttk.Label(self.live_tab, text="Automatic credit tracking needs OCR packages — see Settings → Automatic Credit Tracking.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
-            else:
-                ttk.Label(self.live_tab, text="Automatic credit tracking runs when enabled in Settings and Forza is open (a new session starts each time the game opens).").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
-                ttk.Label(self.live_tab, text="Press F4 and say the car name to save it to your owned list.").grid(row=4, column=0, sticky="w", padx=10, pady=(4, 0))
+        ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=2, column=0, sticky="w", padx=10, pady=(6, 0))
 
-                detect_frame = ttk.LabelFrame(self.live_tab, text="Auto Garage Detection")
-                detect_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
-                detect_frame.columnconfigure(0, weight=1)
-                self.detection_status_var = tk.StringVar(value="Start the tracker and drive a car in Forza to auto-detect it.")
-                ttk.Label(detect_frame, textvariable=self.detection_status_var, wraplength=760, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
-                self.tag_detected_button = ttk.Button(detect_frame, text="Tag Detected Car", command=self.tag_detected_car)
-                self.tag_detected_button.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
+        self.detection_status_var = tk.StringVar(value="Start the tracker and drive a car in Forza to auto-detect it.")
+        if pyautogui is None or pytesseract is None or ImageGrab is None:
+            ttk.Label(self.live_tab, text="Automatic credit tracking needs OCR packages — see Settings → Automatic Credit Tracking.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
+        else:
+            ttk.Label(self.live_tab, text="Automatic credit tracking runs when enabled in Settings and Forza is open (a new session starts each time the game opens).").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
+            ttk.Label(self.live_tab, text="Press F4 and say the car name to save it to your owned list.").grid(row=4, column=0, sticky="w", padx=10, pady=(4, 0))
+
+            detect_frame = ttk.LabelFrame(self.live_tab, text="Auto Garage Detection")
+            detect_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
+            detect_frame.columnconfigure(0, weight=1)
+            ttk.Label(detect_frame, textvariable=self.detection_status_var, wraplength=760, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
+            self.tag_detected_button = ttk.Button(detect_frame, text="Tag Detected Car", command=self.tag_detected_car)
+            self.tag_detected_button.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
+
+    def build_methods_tab(self):
+        self.methods_tab.columnconfigure(0, weight=1)
+        self.methods_tab.rowconfigure(2, weight=1)
+
+        control_frame = ttk.LabelFrame(self.methods_tab, text="Track a Method")
+        control_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        control_frame.columnconfigure(2, weight=1)
+
+        ttk.Label(control_frame, text="Method:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        self.method_var = tk.StringVar(value=METHOD_NAMES[0])
+        ttk.Combobox(control_frame, textvariable=self.method_var, values=METHOD_NAMES, state="readonly", width=20).grid(row=0, column=1, padx=(4, 8), pady=6, sticky="w")
+
+        self.method_start_stop_btn = ttk.Button(control_frame, text="Start Tracking", command=self.toggle_method_tracking)
+        self.method_start_stop_btn.grid(row=0, column=2, padx=(8, 8), pady=6, sticky="w")
+
+        self.method_timer_var = tk.StringVar(value="--:--:--")
+        ttk.Label(control_frame, text="Elapsed:").grid(row=1, column=0, sticky="w", padx=8, pady=4)
+        ttk.Label(control_frame, textvariable=self.method_timer_var, font=("Consolas", 12, "bold")).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=4)
+
+        self.method_status_var = tk.StringVar(value="Select a method and click Start Tracking")
+        ttk.Label(control_frame, textvariable=self.method_status_var, foreground="#555555", wraplength=600).grid(row=2, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 6))
+
+        self.method_start_credits_var = tk.StringVar(value="Starting credits: -")
+        self.method_current_credits_var = tk.StringVar(value="Current credits: -")
+        self.method_crhr_var = tk.StringVar(value="CR/hr: -")
+        info_row = ttk.Frame(self.methods_tab)
+        info_row.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
+        ttk.Label(info_row, textvariable=self.method_start_credits_var).grid(row=0, column=0, sticky="w", padx=(0, 20))
+        ttk.Label(info_row, textvariable=self.method_current_credits_var).grid(row=0, column=1, sticky="w", padx=(0, 20))
+        ttk.Label(info_row, textvariable=self.method_crhr_var, font=("Segoe UI", 10, "bold"), foreground="#1f6feb").grid(row=0, column=2, sticky="w")
+
+        history_frame = ttk.LabelFrame(self.methods_tab, text="Method History")
+        history_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        history_frame.columnconfigure(0, weight=1)
+        history_frame.rowconfigure(0, weight=1)
+
+        cols = ("Method", "Duration", "Credits", "CR/hr", "Date")
+        self.method_tree = ttk.Treeview(history_frame, columns=cols, show="headings", height=16)
+        for col in cols:
+            self.method_tree.heading(col, text=col)
+            self.method_tree.column(col, width=140 if col != "Method" else 160)
+        self.method_tree.column("Date", width=170)
+        tree_scroll = ttk.Scrollbar(history_frame, orient="vertical", command=self.method_tree.yview)
+        self.method_tree.configure(yscrollcommand=tree_scroll.set)
+        self.method_tree.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        tree_scroll.grid(row=0, column=1, sticky="ns", pady=8)
+
+        summary_frame = ttk.LabelFrame(self.methods_tab, text="Average CR/hr by Method")
+        summary_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
+        summary_frame.columnconfigure(0, weight=1)
+        self.method_summary_var = tk.StringVar(value="No history yet")
+        ttk.Label(summary_frame, textvariable=self.method_summary_var, wraplength=900, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=6)
+
+    def toggle_method_tracking(self):
+        if self._method_active:
+            self._stop_method_tracking()
+        else:
+            self._start_method_tracking()
+
+    def _start_method_tracking(self):
+        self._method_active = True
+        self._method_name = self.method_var.get()
+        self._method_start_time = time.monotonic()
+        session_credits = self.get_session_credits()
+        self._method_start_credits = session_credits
+        self.method_start_stop_btn.configure(text="Stop Tracking")
+        self.method_status_var.set(f"Tracking: {self._method_name}")
+        self.method_start_credits_var.set(f"Starting credits: {format_credits(session_credits)}")
+        self._update_method_timer()
+
+    def _stop_method_tracking(self):
+        if not self._method_active:
+            return
+        elapsed = time.monotonic() - self._method_start_time
+        current_credits = self.get_session_credits()
+        credits_earned = current_credits - self._method_start_credits
+        crhr = (credits_earned / (elapsed / 3600)) if elapsed > 0 else 0
+
+        entry = {
+            "method": self._method_name,
+            "start_time": self.current_timestamp(),
+            "elapsed_seconds": round(elapsed),
+            "credits_earned": credits_earned,
+            "crhr": round(crhr),
+        }
+        self._save_method_entry(entry)
+
+        self._method_active = False
+        self._method_name = None
+        self._method_start_time = None
+        if self._method_timer_after_id:
+            self.after_cancel(self._method_timer_after_id)
+            self._method_timer_after_id = None
+        self.method_start_stop_btn.configure(text="Start Tracking")
+        self.method_status_var.set(
+            f"Last: {entry['method']} — {format_credits(credits_earned)} in "
+            f"{self._format_duration(elapsed)} = {format_credits(crhr)}/hr"
+        )
+        self.method_timer_var.set("--:--:--")
+        self.method_start_credits_var.set("Starting credits: -")
+        self.method_current_credits_var.set("Current credits: -")
+        self.method_crhr_var.set("CR/hr: -")
+        self.refresh_methods_panel()
+
+    def _update_method_timer(self):
+        if not self._method_active:
+            return
+        elapsed = time.monotonic() - self._method_start_time
+        self.method_timer_var.set(self._format_duration(elapsed))
+        current_credits = self.get_session_credits()
+        credits_earned = current_credits - self._method_start_credits
+        crhr = (credits_earned / (elapsed / 3600)) if elapsed > 0 else 0
+        self.method_current_credits_var.set(f"Current credits: {format_credits(current_credits)}")
+        self.method_crhr_var.set(f"CR/hr: {format_credits(crhr)}")
+        self._method_timer_after_id = self.after(1000, self._update_method_timer)
+
+    def _format_duration(self, seconds):
+        h, rem = divmod(int(seconds), 3600)
+        m, s = divmod(rem, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def _load_methods_history(self):
+        return load_json_file(METHODS_FILE, {"sessions": []})
+
+    def _save_method_entry(self, entry):
+        history = self._load_methods_history()
+        history["sessions"].append(entry)
+        history["sessions"] = history["sessions"][-200:]
+        with open(METHODS_FILE, "w", encoding="utf-8") as handle:
+            json.dump(history, handle, indent=4)
+
+    def refresh_methods_panel(self):
+        history = self._load_methods_history()
+        sessions = history.get("sessions", [])
+
+        self.method_tree.delete(*self.method_tree.get_children())
+        for entry in reversed(sessions[-50:]):
+            duration = self._format_duration(entry.get("elapsed_seconds", 0))
+            credits = format_credits(entry.get("credits_earned", 0))
+            crhr = format_credits(entry.get("crhr", 0))
+            date_str = entry.get("start_time", "")[:19].replace("T", " ")
+            self.method_tree.insert("", "end", values=(entry.get("method", "?"), duration, credits, crhr, date_str))
+
+        method_totals = {}
+        for entry in sessions:
+            m = entry.get("method", "Other")
+            if m not in method_totals:
+                method_totals[m] = {"total_credits": 0, "total_seconds": 0, "count": 0}
+            method_totals[m]["total_credits"] += entry.get("credits_earned", 0)
+            method_totals[m]["total_seconds"] += entry.get("elapsed_seconds", 0)
+            method_totals[m]["count"] += 1
+
+        parts = []
+        for m, data in sorted(method_totals.items()):
+            avg_crhr = (data["total_credits"] / (data["total_seconds"] / 3600)) if data["total_seconds"] > 0 else 0
+            parts.append(f"{m}: {format_credits(avg_crhr)}/hr ({data['count']} sessions)")
+        self.method_summary_var.set("  |  ".join(parts) if parts else "No history yet")
 
     def build_stats_tab(self):
         self.stats_tab.columnconfigure(0, weight=1)
-        self.stats_tab.rowconfigure(1, weight=1)
+        self.stats_tab.rowconfigure(2, weight=1)
 
         summary_frame = ttk.LabelFrame(self.stats_tab, text="Collection Progress")
         summary_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -579,20 +800,29 @@ class FH6TrackerGUI(tk.Tk):
         self.stats_progress_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
 
         details_frame = ttk.LabelFrame(self.stats_tab, text="Live Summary")
-        details_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        details_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
         details_frame.columnconfigure(1, weight=1)
 
         self.stats_last_seen_var = tk.StringVar(value="No recent telemetry")
         self.stats_session_var = tk.StringVar(value="Session credits: 0")
         self.stats_window_var = tk.StringVar(value="Waiting for Forza window...")
+        self.stats_total_value_var = tk.StringVar(value="Collection value: -")
         labels = [
-        ("Last seen car", self.stats_last_seen_var),
-        ("Session credits", self.stats_session_var),
-        ("Forza window", self.stats_window_var),
+            ("Last seen car", self.stats_last_seen_var),
+            ("Session credits", self.stats_session_var),
+            ("Forza window", self.stats_window_var),
+            ("Total collection value", self.stats_total_value_var),
         ]
         for idx, (text, var) in enumerate(labels):
             ttk.Label(details_frame, text=f"{text}:").grid(row=idx, column=0, sticky="w", padx=8, pady=6)
             ttk.Label(details_frame, textvariable=var).grid(row=idx, column=1, sticky="w", padx=8, pady=6)
+
+        history_frame = ttk.LabelFrame(self.stats_tab, text="Session Earnings History")
+        history_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        history_frame.columnconfigure(0, weight=1)
+        history_frame.rowconfigure(0, weight=1)
+        self.history_canvas = tk.Canvas(history_frame, bg="white", height=150)
+        self.history_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
     def build_settings_tab(self):
         self.settings_tab.columnconfigure(0, weight=1)
@@ -609,24 +839,24 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Label(settings_frame, text="Performance:").grid(row=3, column=0, sticky="w", padx=8, pady=6)
         ttk.Combobox(
-        settings_frame,
-        textvariable=self.performance_var,
-        values=list(car_lookup.PERFORMANCE_PRESETS.keys()),
-        state="readonly",
-        width=12,
+            settings_frame,
+            textvariable=self.performance_var,
+            values=list(car_lookup.PERFORMANCE_PRESETS.keys()),
+            state="readonly",
+            width=12,
         ).grid(row=3, column=1, sticky="w", padx=(4, 8), pady=6)
         ttk.Label(
-        settings_frame,
-        text=(
-        "Higher performance = fewer screen reads, disk writes and UI updates, which "
-        "frees resources for the game (higher FPS).\n"
-        "Quality: smoothest dashboard (updates every 1s).  "
-        "Balanced: recommended.  "
-        "Performance: best in-game FPS (dashboard updates every ~4s)."
-        ),
-        wraplength=760,
-        justify="left",
-        foreground="#555555",
+            settings_frame,
+            text=(
+                "Higher performance = fewer screen reads, disk writes and UI updates, which "
+                "frees resources for the game (higher FPS).\n"
+                "Quality: smoothest dashboard (updates every 1s).  "
+                "Balanced: recommended.  "
+                "Performance: best in-game FPS (dashboard updates every ~4s)."
+            ),
+            wraplength=760,
+            justify="left",
+            foreground="#555555",
         ).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
         ttk.Button(settings_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=5, column=0, sticky="w", padx=8, pady=(6, 8))
 
@@ -648,14 +878,27 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Button(ocr_frame, text="Capture Area", command=self.capture_credit_area).grid(row=1, column=5, sticky="w", padx=8)
         ttk.Button(ocr_frame, text="Test OCR", command=self.test_credit_ocr).grid(row=2, column=5, sticky="w", padx=8)
-        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=3, column=0, sticky="w", padx=8, pady=(6, 8))
+
+        ttk.Label(ocr_frame, text="Tesseract path:").grid(row=3, column=0, sticky="w", padx=8)
+        ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var, width=50).grid(row=3, column=1, columnspan=4, sticky="ew", padx=(2, 8))
+        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=3, column=5, sticky="w", padx=8)
 
         if pyautogui is None or pytesseract is None or ImageGrab is None:
             ocr_status = "OCR packages not installed. Run: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program."
         else:
             ocr_status = "OCR ready. Leave W/H at 0 to scan the full screen, or use Capture Area to box the credit number for faster, more reliable reads."
-            self.ocr_status_var = tk.StringVar(value=ocr_status)
-            ttk.Label(ocr_frame, textvariable=self.ocr_status_var, wraplength=760, justify="left", foreground="#8a6d00").grid(row=4, column=0, columnspan=6, sticky="w", padx=8, pady=(0, 8))
+        self.ocr_status_var = tk.StringVar(value=ocr_status)
+        ttk.Label(ocr_frame, textvariable=self.ocr_status_var, wraplength=760, justify="left", foreground="#8a6d00").grid(row=4, column=0, columnspan=6, sticky="w", padx=8, pady=(0, 8))
+
+        export_frame = ttk.LabelFrame(self.settings_tab, text="Export & Backup")
+        export_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        export_frame.columnconfigure(1, weight=1)
+
+        ttk.Button(export_frame, text="Export Owned Cars (CSV)", command=self.export_owned_to_csv).grid(row=0, column=0, padx=8, pady=6)
+        ttk.Button(export_frame, text="Export Full Collection (CSV)", command=self.export_collection_to_csv).grid(row=0, column=1, padx=(4, 8), pady=6, sticky="w")
+        ttk.Button(export_frame, text="Backup All Data (ZIP)", command=self.backup_all_data).grid(row=1, column=0, padx=8, pady=6)
+        ttk.Button(export_frame, text="Restore from Backup", command=self.restore_from_backup).grid(row=1, column=1, padx=(4, 8), pady=6, sticky="w")
+        ttk.Button(export_frame, text="Keyboard Shortcuts", command=self.show_shortcuts_help).grid(row=0, column=2, rowspan=2, padx=(8, 8), pady=6, sticky="ns")
 
     def build_logs_tab(self):
         self.logs_tab.columnconfigure(0, weight=1)
@@ -665,60 +908,87 @@ class FH6TrackerGUI(tk.Tk):
         self.log_text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         self.log_text.configure(state="disabled")
 
-    def build_progress_tab(self):
-        self.progress_tab.columnconfigure(0, weight=1)
-        self.progress_tab.rowconfigure(2, weight=1)
+    def build_recommendations_tab(self):
+        self.recommendations_tab.columnconfigure(0, weight=1)
+        self.recommendations_tab.rowconfigure(1, weight=1)
 
-        summary_frame = ttk.LabelFrame(self.progress_tab, text="Summary")
-        summary_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
-        summary_frame.columnconfigure(1, weight=1)
+        header = ttk.LabelFrame(self.recommendations_tab, text="Smart Recommendations")
+        header.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        header.columnconfigure(1, weight=1)
 
-        self.progress_var = tk.StringVar(value="Loading...")
-        ttk.Label(summary_frame, textvariable=self.progress_var).grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        ttk.Button(header, text="Refresh", command=self.refresh_recommendations).grid(row=0, column=0, padx=8, pady=6)
+        self.rec_filter_var = tk.StringVar(value="All")
+        ttk.Combobox(header, textvariable=self.rec_filter_var, values=["All", "Best Value", "Cheapest Missing", "Highest Rated", "By Manufacturer"], state="readonly", width=18).grid(row=0, column=1, padx=(4, 8), pady=6, sticky="w")
+        ttk.Button(header, text="Add Selected to Owned", command=self.add_recommended_to_owned).grid(row=0, column=2, padx=(8, 8), pady=6, sticky="e")
 
-        filter_frame = ttk.LabelFrame(self.progress_tab, text="Filters")
-        filter_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        filter_frame.columnconfigure(3, weight=1)
+        self.recommendations_tree = ttk.Treeview(self.recommendations_tab, columns=("Car", "Price", "Score", "Reason", "Category"), show="headings", selectmode="extended")
+        for col, width in [("Car", 280), ("Price", 100), ("Score", 80), ("Reason", 220), ("Category", 120)]:
+            self.recommendations_tree.heading(col, text=col)
+            self.recommendations_tree.column(col, width=width, minwidth=60)
+        self.recommendations_tree.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        rec_scroll = ttk.Scrollbar(self.recommendations_tab, orient="vertical", command=self.recommendations_tree.yview)
+        rec_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 8))
+        self.recommendations_tree.configure(yscrollcommand=rec_scroll.set)
 
-        ttk.Label(filter_frame, text="Search:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
-        self.progress_search_var = tk.StringVar()
-        ttk.Entry(filter_frame, textvariable=self.progress_search_var, width=32).grid(row=0, column=1, padx=(4, 8), pady=6, sticky="ew")
+        self.rec_summary_var = tk.StringVar(value="Click Refresh to generate recommendations.")
+        ttk.Label(self.recommendations_tab, textvariable=self.rec_summary_var, foreground="#555555").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 8))
 
-        ttk.Label(filter_frame, text="Manufacturer:").grid(row=0, column=2, sticky="w", padx=(8, 4), pady=6)
-        self.progress_manufacturer_var = tk.StringVar()
-        self.progress_manufacturer_dropdown = ttk.Combobox(filter_frame, textvariable=self.progress_manufacturer_var, width=20, state="readonly")
-        self.progress_manufacturer_dropdown.grid(row=0, column=3, padx=(4, 8), pady=6, sticky="w")
+    def build_goals_tab(self):
+        self.goals_tab.columnconfigure(0, weight=1)
+        self.goals_tab.rowconfigure(2, weight=1)
 
-        ttk.Label(filter_frame, text="Year:").grid(row=0, column=4, sticky="w", padx=(8, 4), pady=6)
-        self.progress_year_var = tk.StringVar()
-        ttk.Entry(filter_frame, textvariable=self.progress_year_var, width=8).grid(row=0, column=5, padx=(4, 8), pady=6, sticky="w")
+        goal_setup = ttk.LabelFrame(self.goals_tab, text="Session Goals")
+        goal_setup.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        goal_setup.columnconfigure(1, weight=1)
 
-        ttk.Button(filter_frame, text="Apply", command=self.refresh_progress).grid(row=0, column=6, padx=(4, 8), pady=6)
-        ttk.Button(filter_frame, text="Clear", command=self.clear_progress_filters).grid(row=0, column=7, padx=(0, 8), pady=6)
+        ttk.Label(goal_setup, text="Target Credits:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        self.goal_credits_var = tk.StringVar(value="1000000")
+        ttk.Entry(goal_setup, textvariable=self.goal_credits_var, width=16).grid(row=0, column=1, sticky="w", padx=(4, 8), pady=6)
 
-        self.progress_notebook = ttk.Notebook(self.progress_tab)
-        self.progress_notebook.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        ttk.Label(goal_setup, text="Target Duration (min):").grid(row=0, column=2, sticky="w", padx=(8, 4), pady=6)
+        self.goal_duration_var = tk.StringVar(value="60")
+        ttk.Entry(goal_setup, textvariable=self.goal_duration_var, width=10).grid(row=0, column=3, sticky="w", padx=(4, 8), pady=6)
 
-        self.missing_frame = ttk.Frame(self.progress_notebook)
-        self.owned_frame = ttk.Frame(self.progress_notebook)
-        self.progress_notebook.add(self.missing_frame, text="Still Missing")
-        self.progress_notebook.add(self.owned_frame, text="Owned")
+        ttk.Label(goal_setup, text="Method:").grid(row=1, column=0, sticky="w", padx=8, pady=6)
+        self.goal_method_var = tk.StringVar(value="Any")
+        ttk.Combobox(goal_setup, textvariable=self.goal_method_var, values=["Any"] + METHOD_NAMES, state="readonly", width=18).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=6)
 
-        self.unowned_listbox = tk.Listbox(self.missing_frame, height=22, font=("Consolas", 10))
-        self.unowned_listbox.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        missing_scrollbar = ttk.Scrollbar(self.missing_frame, orient="vertical", command=self.unowned_listbox.yview)
-        missing_scrollbar.grid(row=0, column=1, sticky="ns", pady=8)
-        self.unowned_listbox.configure(yscrollcommand=missing_scrollbar.set)
-        self.missing_frame.columnconfigure(0, weight=1)
-        self.missing_frame.rowconfigure(0, weight=1)
+        self.goal_active_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(goal_setup, text="Track goal this session", variable=self.goal_active_var).grid(row=1, column=2, columnspan=2, sticky="w", padx=(8, 8), pady=6)
+        ttk.Button(goal_setup, text="Start Goal", command=self.start_session_goal).grid(row=0, column=4, rowspan=2, padx=(8, 8), pady=6, sticky="ns")
 
-        self.owned_progress_listbox = tk.Listbox(self.owned_frame, height=22, font=("Consolas", 10))
-        self.owned_progress_listbox.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        owned_scrollbar = ttk.Scrollbar(self.owned_frame, orient="vertical", command=self.owned_progress_listbox.yview)
-        owned_scrollbar.grid(row=0, column=1, sticky="ns", pady=8)
-        self.owned_progress_listbox.configure(yscrollcommand=owned_scrollbar.set)
-        self.owned_frame.columnconfigure(0, weight=1)
-        self.owned_frame.rowconfigure(0, weight=1)
+        progress_frame = ttk.LabelFrame(self.goals_tab, text="Progress")
+        progress_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        progress_frame.columnconfigure(0, weight=1)
+
+        self.goal_progress_var = tk.DoubleVar(value=0.0)
+        self.goal_progress_bar = ttk.Progressbar(progress_frame, variable=self.goal_progress_var, maximum=100)
+        self.goal_progress_bar.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+
+        self.goal_status_var = tk.StringVar(value="No active goal")
+        ttk.Label(progress_frame, textvariable=self.goal_status_var, font=("Segoe UI", 10, "bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
+
+        details_frame = ttk.LabelFrame(self.goals_tab, text="Goal Details")
+        details_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        details_frame.columnconfigure(1, weight=1)
+        details_frame.rowconfigure(0, weight=1)
+
+        self.goal_details_text = scrolledtext.ScrolledText(details_frame, wrap=tk.WORD, height=12, state="disabled")
+        self.goal_details_text.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=8, pady=8)
+
+        history_frame = ttk.LabelFrame(self.goals_tab, text="Goal History")
+        history_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
+        history_frame.columnconfigure(0, weight=1)
+
+        goal_cols = ("Date", "Method", "Target", "Earned", "Duration", "Status")
+        self.goal_history_tree = ttk.Treeview(history_frame, columns=goal_cols, show="headings", height=6)
+        for col in goal_cols:
+            self.goal_history_tree.heading(col, text=col)
+            self.goal_history_tree.column(col, width=130)
+        self.goal_history_tree.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        goal_hist_scroll = ttk.Scrollbar(history_frame, orient="vertical", command=self.goal_history_tree.yview)
+        goal_hist_scroll.grid(row=0, column=1, sticky="ns", pady=8)
+        self.goal_history_tree.configure(yscrollcommand=goal_hist_scroll.set)
 
     def _performance_preset(self):
         return car_lookup.get_performance_preset(self.settings.get("performance_mode"))
@@ -733,16 +1003,58 @@ class FH6TrackerGUI(tk.Tk):
         self._pending_balance = None
         self._pending_balance_count = 0
 
+    def _check_cache_reload(self):
+        try:
+            mtime = os.path.getmtime(MASTER_FILE) if os.path.exists(MASTER_FILE) else 0
+            if mtime != self._master_db_mtime:
+                self._master_db_cache = load_json_file(MASTER_FILE, {})
+                self._master_db_mtime = mtime
+        except OSError:
+            pass
+        try:
+            mtime = os.path.getmtime(OWNED_FILE) if os.path.exists(OWNED_FILE) else 0
+            if mtime != self._owned_mtime:
+                self._owned_cache = load_json_file(OWNED_FILE, {"owned": []}).get("owned", [])
+                self._owned_mtime = mtime
+        except OSError:
+            pass
+
+    def _invalidate_owned_cache(self):
+        self._owned_cache = load_json_file(OWNED_FILE, {"owned": []}).get("owned", [])
+        self._owned_mtime = os.path.getmtime(OWNED_FILE) if os.path.exists(OWNED_FILE) else 0
+        self.known_owned = set(self._owned_cache)
+
     def refresh_loop(self):
-        self.refresh_all()
+        self.update_forza_session_state()
+        self.detect_credit_popup_change()
+        self._refresh_active_tab()
         self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
         self.update_forza_session_state()
         self.refresh_collection()
-        self.refresh_live_data()
-        self.refresh_stats_panel()
-        self.refresh_logs_panel()
+        self._refresh_active_tab()
+
+    def _refresh_active_tab(self):
+        tab_map = {
+            self.garage_tab: self.refresh_collection,
+            self.live_tab: self.refresh_live_data,
+            self.stats_tab: self.refresh_stats_panel,
+            self.logs_tab: self.refresh_logs_panel,
+            self.methods_tab: self.refresh_methods_panel,
+            self.recommendations_tab: self.refresh_recommendations,
+            self.goals_tab: self.refresh_goals_panel,
+        }
+        try:
+            selected = self.notebook.select()
+            for widget, refresh_fn in tab_map.items():
+                if str(widget) == selected:
+                    refresh_fn()
+                    return
+        except Exception:
+            pass
+        for fn in tab_map.values():
+            fn()
 
     def refresh_owned_cars(self):
         self.refresh_collection()
@@ -763,10 +1075,9 @@ class FH6TrackerGUI(tk.Tk):
             self.detected_car_id = None
             self.detection_status_var.set("Start the tracker and drive a car in Forza to auto-detect it.")
 
-            self.detect_credit_popup_change()
-
-            session_credits = self.get_session_credits()
-            self.vars["session_credits_var"].set(format_credits(session_credits))
+        self.detect_credit_popup_change()
+        session_credits = self.get_session_credits()
+        self.vars["session_credits_var"].set(format_credits(session_credits))
 
     def auto_register_from_telemetry(self, latest):
         car_id = latest.get("car_id")
@@ -778,14 +1089,17 @@ class FH6TrackerGUI(tk.Tk):
         self.detected_car_id = str(car_id)
         car_name = car_lookup.lookup_car_name(car_id)
         if car_name:
-            car_lookup.add_owned_car(car_name)
-            if car_name not in self.known_owned:
+            was_new = car_lookup.add_owned_car(car_name)
+            if was_new:
+                self._invalidate_owned_cache()
                 self.on_new_owned_car(car_name)
                 self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — owned \u2713")
             else:
-                self.detection_status_var.set(
+                self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — already owned")
+        else:
+            self.detection_status_var.set(
                 f"Detected an unknown car (ID {car_id}). Click \u201cTag Detected Car\u201d to link it to your garage."
-                )
+            )
 
     def on_new_owned_car(self, car_name):
         self.known_owned.add(car_name)
@@ -798,14 +1112,14 @@ class FH6TrackerGUI(tk.Tk):
                 self.after_cancel(self._notice_after_id)
             except Exception:
                 pass
-            self._notice_after_id = self.after(10000, lambda: self.notice_var.set(""))
+        self._notice_after_id = self.after(10000, lambda: self.notice_var.set(""))
 
     def tag_detected_car(self):
         car_id = self.detected_car_id
         if not car_lookup.is_real_ordinal(car_id):
             messagebox.showinfo(
-            "No car detected",
-            "No car is being detected yet. Start the tracker and drive a car in Forza, then try again.",
+                "No car detected",
+                "No car is being detected yet. Start the tracker and drive a car in Forza, then try again.",
             )
             return
 
@@ -816,17 +1130,18 @@ class FH6TrackerGUI(tk.Tk):
         else:
             prompt += "\nPick the car you are driving to link it to this ID."
 
-            chosen = self._choose_master_car("Tag Detected Car", prompt, preselect=existing)
-            if not chosen:
-                return
+        chosen = self._choose_master_car("Tag Detected Car", prompt, preselect=existing)
+        if not chosen:
+            return
 
-            car_lookup.save_mapping(car_id, chosen)
-            car_lookup.add_owned_car(chosen)
-            if chosen not in self.known_owned:
-                self.on_new_owned_car(chosen)
-            else:
-                self.show_notice(f"Linked ID {car_id} to {chosen}")
-                self.refresh_all()
+        car_lookup.save_mapping(car_id, chosen)
+        was_new = car_lookup.add_owned_car(chosen)
+        if was_new:
+            self._invalidate_owned_cache()
+            self.on_new_owned_car(chosen)
+        else:
+            self.show_notice(f"Linked ID {car_id} to {chosen}")
+        self.refresh_all()
 
     def _choose_master_car(self, title, prompt, preselect=None):
         master_db = load_json_file(MASTER_FILE, {})
@@ -856,28 +1171,28 @@ class FH6TrackerGUI(tk.Tk):
 
         result = {"car": None}
 
-    def populate(*_):
-        terms = [t for t in search_var.get().lower().split() if t]
-        listbox.delete(0, tk.END)
-        for car in all_cars:
-            lowered = car.lower()
-            if all(term in lowered for term in terms):
-                listbox.insert(tk.END, car)
-                if preselect and preselect in all_cars and not terms:
-                    try:
-                        idx = list(listbox.get(0, tk.END)).index(preselect)
-                        listbox.selection_set(idx)
-                        listbox.see(idx)
-                    except ValueError:
-                        pass
+        def populate(*_):
+            terms = [t for t in search_var.get().lower().split() if t]
+            listbox.delete(0, tk.END)
+            for car in all_cars:
+                lowered = car.lower()
+                if all(term in lowered for term in terms):
+                    listbox.insert(tk.END, car)
+            if preselect and preselect in all_cars and not terms:
+                try:
+                    idx = list(listbox.get(0, tk.END)).index(preselect)
+                    listbox.selection_set(idx)
+                    listbox.see(idx)
+                except ValueError:
+                    pass
 
-    def confirm(*_):
-        selection = listbox.curselection()
-        if not selection:
-            messagebox.showinfo("Pick a car", "Select a car from the list first.", parent=dialog)
-            return
-        result["car"] = listbox.get(selection[0])
-        dialog.destroy()
+        def confirm(*_):
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showinfo("Pick a car", "Select a car from the list first.", parent=dialog)
+                return
+            result["car"] = listbox.get(selection[0])
+            dialog.destroy()
 
         search_var.trace_add("write", populate)
         listbox.bind("<Double-1>", confirm)
@@ -892,30 +1207,97 @@ class FH6TrackerGUI(tk.Tk):
         return result["car"]
 
     def refresh_stats_panel(self):
-        master_db = load_json_file(MASTER_FILE, {})
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned_names = sorted(owned_data.get("owned", []))
+        self._check_cache_reload()
+        master_db = self._master_db_cache
+        owned_names = sorted(self._owned_cache)
         total_cars = len(master_db)
         owned_count = len(owned_names)
         if total_cars:
             completion_pct = round((owned_count / total_cars) * 100, 1)
         else:
             completion_pct = 0.0
-            self.stats_summary_var.set(f"{owned_count} owned • {total_cars - owned_count} still missing • {completion_pct}% complete")
-            self.stats_progress_var.set(completion_pct)
+        self.stats_summary_var.set(f"{owned_count} owned • {total_cars - owned_count} still missing • {completion_pct}% complete")
+        self.stats_progress_var.set(completion_pct)
 
-            latest = self.read_latest_telemetry_row()
-            if latest:
-                self.stats_last_seen_var.set(f"{latest.get('car_name', '-')} ({latest.get('car_id', '-')})")
-            else:
-                self.stats_last_seen_var.set("No recent telemetry")
+        latest = self.read_latest_telemetry_row()
+        if latest:
+            self.stats_last_seen_var.set(f"{latest.get('car_name', '-')} ({latest.get('car_id', '-')})")
+        else:
+            self.stats_last_seen_var.set("No recent telemetry")
 
-                session_credits = self.get_session_credits()
-                self.stats_session_var.set(f"Session credits: {format_credits(session_credits)}")
-                if has_running_forza_window() or has_running_forza_process():
-                    self.stats_window_var.set("Forza window detected")
-                else:
-                    self.stats_window_var.set("Waiting for Forza window...")
+        session_credits = self.get_session_credits()
+        self.stats_session_var.set(f"Session credits: {format_credits(session_credits)}")
+        if has_running_forza_window() or has_running_forza_process():
+            self.stats_window_var.set("Forza window detected")
+        else:
+            self.stats_window_var.set("Waiting for Forza window...")
+
+        total_value = sum(int(price) for _, price in build_progress_data(master_db, owned_names)[1])
+        self.stats_total_value_var.set(f"Collection value: {format_credits(total_value)}")
+
+        self._draw_credit_history()
+
+    def _load_credit_history(self):
+        history_file = os.path.join(BASE_DIR, "credit_history.json")
+        return load_json_file(history_file, {"sessions": []})
+
+    def _save_credit_history(self, history):
+        history_file = os.path.join(BASE_DIR, "credit_history.json")
+        with open(history_file, "w", encoding="utf-8") as handle:
+            json.dump(history, handle, indent=4)
+
+    def _record_session_to_history(self):
+        credits = self.get_session_credits()
+        if credits <= 0:
+            return
+        history = self._load_credit_history()
+        history["sessions"].append({
+            "time": self.current_timestamp(),
+            "credits": credits,
+        })
+        history["sessions"] = history["sessions"][-50:]
+        self._save_credit_history(history)
+
+    def _draw_credit_history(self):
+        self.history_canvas.delete("all")
+        history = self._load_credit_history()
+        sessions = history.get("sessions", [])
+        if not sessions:
+            self.history_canvas.create_text(
+                self.history_canvas.winfo_width() // 2 or 200,
+                75,
+                text="No session data yet. Complete a session to see history.",
+                fill="#888888",
+                font=("Segoe UI", 10),
+            )
+            return
+
+        credits_list = [s.get("credits", 0) for s in sessions[-20:]]
+        if not credits_list:
+            return
+
+        max_credits = max(credits_list) if max(credits_list) > 0 else 1
+        canvas_w = self.history_canvas.winfo_width() or 400
+        canvas_h = self.history_canvas.winfo_height() or 150
+        padding = 40
+        chart_w = canvas_w - 2 * padding
+        chart_h = canvas_h - 2 * padding
+
+        self.history_canvas.create_line(padding, canvas_h - padding, canvas_w - padding, canvas_h - padding, fill="#cccccc")
+        self.history_canvas.create_line(padding, padding, padding, canvas_h - padding, fill="#cccccc")
+
+        bar_width = max(4, chart_w // len(credits_list) - 4)
+        for i, credits in enumerate(credits_list):
+            x = padding + i * (chart_w / len(credits_list)) + 2
+            bar_h = (credits / max_credits) * chart_h if max_credits > 0 else 0
+            y0 = canvas_h - padding - bar_h
+            y1 = canvas_h - padding
+            color = "#4caf50" if credits > 0 else "#cccccc"
+            self.history_canvas.create_rectangle(x, y0, x + bar_width, y1, fill=color, outline="")
+
+        self.history_canvas.create_text(padding, padding - 10, text=format_credits(max_credits), anchor="w", fill="#555555", font=("Segoe UI", 8))
+        self.history_canvas.create_text(padding, canvas_h - padding + 10, text="0", anchor="w", fill="#555555", font=("Segoe UI", 8))
+        self.history_canvas.create_text(canvas_w // 2, canvas_h - 5, text=f"Last {len(credits_list)} sessions", fill="#555555", font=("Segoe UI", 9))
 
     def refresh_logs_panel(self):
         if not os.path.exists(LOG_FILE):
@@ -925,51 +1307,77 @@ class FH6TrackerGUI(tk.Tk):
             self.log_text.configure(state="disabled")
             return
 
-        with open(LOG_FILE, "r", newline="", encoding="utf-8") as handle:
-            lines = handle.readlines()
-            display_lines = lines[-80:] if len(lines) > 80 else lines
-            self.log_text.configure(state="normal")
-            self.log_text.delete("1.0", tk.END)
-            self.log_text.insert(tk.END, "".join(display_lines))
-            self.log_text.configure(state="disabled")
+        try:
+            with open(LOG_FILE, "rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                read_size = min(size, 8192)
+                handle.seek(size - read_size)
+                tail = handle.read().decode("utf-8", "replace")
+            lines = [line for line in tail.splitlines() if line.strip()]
+            display_lines = lines[-80:]
+        except (OSError, UnicodeDecodeError):
+            display_lines = []
+
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.insert(tk.END, "\n".join(display_lines) if display_lines else "No telemetry log yet.")
+        self.log_text.configure(state="disabled")
 
     def refresh_collection(self):
-        master_db = load_json_file(MASTER_FILE, {})
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned_names = sorted(owned_data.get("owned", []))
+        self._check_cache_reload()
+        master_db = self._master_db_cache
+        owned_names = sorted(self._owned_cache)
 
         manufacturer = self.progress_manufacturer_var.get().strip()
         year = self.progress_year_var.get().strip()
         search = self.progress_search_var.get().strip()
         min_value = self.collection_min_value_var.get().strip()
         max_value = self.collection_max_value_var.get().strip()
-        missing, _, total_cost = build_progress_data(
-        master_db,
-        owned_names,
-        manufacturer=manufacturer or None,
-        year=year or None,
-        search=search or None,
-        min_value=min_value or None,
-        max_value=max_value or None,
+        missing, owned_cars, total_cost = build_progress_data(
+            master_db,
+            owned_names,
+            manufacturer=manufacturer or None,
+            year=year or None,
+            search=search or None,
+            min_value=min_value or None,
+            max_value=max_value or None,
         )
+
+        sort_mode = self.collection_sort_var.get()
+        if sort_mode == "Name Z-A":
+            owned_cars.sort(key=lambda item: item[0], reverse=True)
+        elif sort_mode == "Price Low-High":
+            owned_cars.sort(key=lambda item: item[1])
+        elif sort_mode == "Price High-Low":
+            owned_cars.sort(key=lambda item: item[1], reverse=True)
+        else:
+            owned_cars.sort(key=lambda item: item[0])
 
         previous_selection = self.owned_listbox.curselection()
         self.owned_listbox.delete(0, tk.END)
-        for car in owned_names:
-            self.owned_listbox.insert(tk.END, car)
-            if previous_selection:
-                try:
-                    self.owned_listbox.selection_set(previous_selection[0])
-                    self.owned_listbox.activate(previous_selection[0])
-                except Exception:
-                    pass
+        for car, price in owned_cars:
+            if price > 0:
+                self.owned_listbox.insert(tk.END, f"{car} | {format_credits(price)}")
+            else:
+                self.owned_listbox.insert(tk.END, car)
+        if previous_selection:
+            try:
+                self.owned_listbox.selection_set(previous_selection[0])
+                self.owned_listbox.activate(previous_selection[0])
+            except Exception:
+                pass
 
-                self.unowned_listbox.delete(0, tk.END)
-                for car, price in missing[:120]:
-                    self.unowned_listbox.insert(tk.END, f"{car} | {format_credits(price)}")
+        self.unowned_listbox.delete(0, tk.END)
+        for car, price in missing[:120]:
+            self.unowned_listbox.insert(tk.END, f"{car} | {format_credits(price)}")
 
-                    total_missing = len(missing)
-                    self.collection_summary_var.set(f"{len(owned_names)} owned • {total_missing} still missing • {format_credits(total_cost)} remaining value")
+        total_owned_value = sum(price for _, price in owned_cars)
+        total_missing = len(missing)
+        self.collection_summary_var.set(
+            f"{len(owned_names)} owned ({format_credits(total_owned_value)} value) • "
+            f"{total_missing} still missing ({format_credits(total_cost)} to buy)"
+        )
 
     def clear_collection_filters(self):
         self.progress_search_var.set("")
@@ -1011,44 +1419,44 @@ class FH6TrackerGUI(tk.Tk):
         if balance is None and region_set:
             balance = self._read_region_balance()
 
-            if balance is not None:
-                if self.last_credit_balance is None:
-                    self.last_credit_balance = balance
-                    self._reset_pending_balance()
-                    return
-                if balance == self.last_credit_balance:
-                    self._reset_pending_balance()
-                    return
-                # The reading changed. Require it to repeat on consecutive scans before acting
-                # so a single garbled OCR frame can't inject a phantom credit gain.
-                if balance == self._pending_balance:
-                    self._pending_balance_count += 1
-                else:
-                    self._pending_balance = balance
-                    self._pending_balance_count = 1
-                    if self._pending_balance_count < 2:
-                        return
-                    if balance > self.last_credit_balance:
-                        self.update_session_credits(balance - self.last_credit_balance)
-                        self.last_credit_balance = balance
-                        self._reset_pending_balance()
-                        return
+        if balance is not None:
+            if self.last_credit_balance is None:
+                self.last_credit_balance = balance
+                self._reset_pending_balance()
+                return
+            if balance == self.last_credit_balance:
+                self._reset_pending_balance()
+                return
+            # The reading changed. Require it to repeat on consecutive scans before acting
+            # so a single garbled OCR frame can't inject a phantom credit gain.
+            if balance == self._pending_balance:
+                self._pending_balance_count += 1
+            else:
+                self._pending_balance = balance
+                self._pending_balance_count = 1
+            if self._pending_balance_count < 2:
+                return
+            if balance > self.last_credit_balance:
+                self.update_session_credits(balance - self.last_credit_balance)
+                self.last_credit_balance = balance
+                self._reset_pending_balance()
+                return
 
-                    if change is None or change <= 0:
-                        return
+        if change is None or change <= 0:
+            return
 
-                    if self.last_credit_balance is None:
-                        self.last_credit_balance = max(0, self.get_session_credits())
+        if self.last_credit_balance is None:
+            self.last_credit_balance = max(0, self.get_session_credits())
 
-                        self.update_session_credits(change)
-                        self.last_credit_balance = (self.last_credit_balance or 0) + change
+        self.update_session_credits(change)
+        self.last_credit_balance = (self.last_credit_balance or 0) + change
 
     def load_session_state(self):
         state = load_json_file(SESSION_STATE_FILE, {})
         return {
-        "session_started": state.get("session_started", False),
-        "session_start_time": state.get("session_start_time"),
-        "session_credits": state.get("session_credits", 0),
+            "session_started": state.get("session_started", False),
+            "session_start_time": state.get("session_start_time"),
+            "session_credits": state.get("session_credits", 0),
         }
 
     def save_session_state(self):
@@ -1082,19 +1490,20 @@ class FH6TrackerGUI(tk.Tk):
     def reset_session(self):
         if not messagebox.askyesno("Reset session", "Reset the current session credit total?"):
             return
+        self._record_session_to_history()
         self.session_state = {
-        "session_started": True,
-        "session_start_time": self.current_timestamp(),
-        "session_credits": 0,
+            "session_started": True,
+            "session_start_time": self.current_timestamp(),
+            "session_credits": 0,
         }
         self.save_session_state()
         self.refresh_live_data()
 
     def start_new_session(self, auto=False):
         self.session_state = {
-        "session_started": True,
-        "session_start_time": self.current_timestamp(),
-        "session_credits": 0,
+            "session_started": True,
+            "session_start_time": self.current_timestamp(),
+            "session_credits": 0,
         }
         self.save_session_state()
         self.last_credit_balance = None
@@ -1103,6 +1512,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def end_session(self, auto=False):
         total = self.session_state.get("session_credits", 0)
+        self._record_session_to_history()
         self.session_state["session_started"] = False
         self.save_session_state()
         if auto:
@@ -1117,7 +1527,7 @@ class FH6TrackerGUI(tk.Tk):
             self.start_new_session(auto=True)
         elif not running_now and self.forza_running_prev:
             self.end_session(auto=True)
-            self.forza_running_prev = running_now
+        self.forza_running_prev = running_now
 
     def _read_region_fields(self):
         try:
@@ -1140,19 +1550,19 @@ class FH6TrackerGUI(tk.Tk):
     def _grab_credit_image(self, region=None):
         if region is None:
             region = self.get_credit_region()
-            try:
-                if ImageGrab is not None:
-                    if region:
-                        x, y, w, h = region
-                        return ImageGrab.grab(bbox=(x, y, x + w, y + h))
-                    return ImageGrab.grab()
-                if pyautogui is not None:
-                    if region:
-                        return pyautogui.screenshot(region=tuple(region))
-                    return pyautogui.screenshot()
-            except Exception:
-                return None
+        try:
+            if ImageGrab is not None:
+                if region:
+                    x, y, w, h = region
+                    return ImageGrab.grab(bbox=(x, y, x + w, y + h))
+                return ImageGrab.grab()
+            if pyautogui is not None:
+                if region:
+                    return pyautogui.screenshot(region=tuple(region))
+                return pyautogui.screenshot()
+        except Exception:
             return None
+        return None
 
     def _upscale_for_ocr(self, image):
         """Enlarge a small capture so Tesseract reads small HUD digits reliably."""
@@ -1169,23 +1579,40 @@ class FH6TrackerGUI(tk.Tk):
             # A quiet border keeps glyphs off the capture edge; Tesseract mangles
             # characters that touch the border (e.g. reading "50" as "VU").
             image = ImageOps.expand(image, border=16, fill=255)
-            if height < 120:
-                scale = min(4, max(2, round(120 / height)))
-                new_width, new_height = image.size
-                image = image.resize((new_width * scale, new_height * scale), Image.LANCZOS)
-                return image
+        if height < 120:
+            scale = min(4, max(2, round(120 / height)))
+            new_width, new_height = image.size
+            image = image.resize((new_width * scale, new_height * scale), Image.LANCZOS)
+        return image
+
+    def _set_tesseract_path(self):
+        if pytesseract is None:
+            return
+        path = self.tesseract_path_var.get().strip()
+        if path and os.path.isfile(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            return
+        found = _find_tesseract()
+        if found:
+            pytesseract.pytesseract.tesseract_cmd = found
+            return
+        if os.name == 'nt':
+            pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
     def _ocr_credit_text(self, region=None, numeric=False):
+        if pytesseract is None or (ImageGrab is None and pyautogui is None):
+            return ""
+        self._set_tesseract_path()
         image = self._grab_credit_image(region=region)
         if image is None:
             return ""
         # A digit-only whitelist on a single line makes Tesseract far more accurate on
         # stylised HUD numbers (e.g. it stops reading a "7" as "/").
-        config = "--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM" if numeric else ""
+        config = "--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM" if numeric else "--psm 6"
         try:
-            return pytesseract.image_to_string(self._upscale_for_ocr(image), config=config)
-    except Exception:
-        return ""
+            return pytesseract.image_to_string(self._upscale_for_ocr(image), config=config).strip()
+        except Exception:
+            return ""
 
     def _read_region_balance(self, region=None):
         """Read just the number from a boxed credit region using the numeric OCR pass."""
@@ -1194,52 +1621,71 @@ class FH6TrackerGUI(tk.Tk):
     def test_credit_ocr(self):
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
             messagebox.showwarning(
-            "OCR unavailable",
-            "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
+                "OCR unavailable",
+                "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
             )
             return
         region = self._read_region_fields()
-        text = self._ocr_credit_text(region=region)
+
+        # Capture the image and provide diagnostics.
+        debug_lines = []
+        if region is None:
+            debug_lines.append("Region: NOT SET (all zeros). Click 'Capture Area' first.")
+        else:
+            x, y, w, h = region
+            debug_lines.append(f"Region: x={x} y={y} w={w} h={h}")
+
+        if os.name == 'nt':
+            self._set_tesseract_path()
+            debug_lines.append(f"Tesseract: {pytesseract.pytesseract.tesseract_cmd}")
+            debug_lines.append(f"Exists: {os.path.isfile(pytesseract.pytesseract.tesseract_cmd)}")
+
+        image = self._grab_credit_image(region=region)
+        if image is None:
+            debug_lines.append("Capture: FAILED (image is None)")
+            messagebox.showinfo("OCR test", "\n".join(debug_lines))
+            return
+
+        try:
+            w_img, h_img = image.size
+            debug_lines.append(f"Image size: {w_img}x{h_img}")
+        except Exception:
+            debug_lines.append("Image size: unknown")
+
+        # Save a debug screenshot so the user can inspect what was captured.
+        try:
+            debug_path = os.path.join(BASE_DIR, "ocr_debug_capture.png")
+            image.save(debug_path)
+            debug_lines.append(f"Saved capture: {debug_path}")
+        except Exception as exc:
+            debug_lines.append(f"Could not save debug image: {exc}")
+
+        try:
+            text = pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 6").strip()
+        except Exception as exc:
+            debug_lines.append(f"Tesseract ERROR: {exc}")
+            text = ""
+
         raw = " ".join(text.split())[:200]
+        debug_lines.append(f"Raw text: {raw or '(nothing detected)'}")
+
         balance = parse_credit_balance_from_text(text)
         if balance is None and region is not None:
-            balance = self._read_region_balance(region=region)
-            if balance is not None:
-                messagebox.showinfo("OCR test", f"Detected balance: {format_credits(balance)} ({balance:,})\n\nRaw text: {raw}")
-            else:
-                messagebox.showinfo("OCR test", f"No credit balance found in the captured area.\n\nRaw text: {raw or '(nothing detected)'}")
-
-    def _ocr_credit_text(self, region=None):
-        if os.name == 'nt':
-            pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+            # Try numeric-only pass.
             try:
-                if region:
-                    bbox = (region[0], region[1], region[0] + region[2], region[1] + region[3])
-                    screenshot = ImageGrab.grab(bbox=bbox)
-                else:
-                    screenshot = ImageGrab.grab()
+                num_text = pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
+            except Exception as exc:
+                num_text = ""
+                debug_lines.append(f"Tesseract numeric pass ERROR: {exc}")
+            debug_lines.append(f"Numeric text: {num_text or '(nothing detected)'}")
+            balance = parse_balance_number_only(num_text)
 
-                    # Save debug image to folder
-                    screenshot.save("ocr_debug.png")
-
-                    screenshot = screenshot.convert('L') # Grayscale
-                    text = pytesseract.image_to_string(screenshot, config='--psm 6')
-                    return text.strip()
-            except Exception as e:
-                print(f"OCR Capture Error: {e}")
-                return ""
-
-    def _read_region_fields(self):
-        """Pulls the X, Y, W, H values from your GUI entry boxes."""
-        try:
-            return (
-        int(self.credit_x_var.get()),
-        int(self.credit_y_var.get()),
-        int(self.credit_w_var.get()),
-        int(self.credit_h_var.get())
-        )
-    except (ValueError, AttributeError, tk.TclError):
-        return None
+        if balance is not None:
+            debug_lines.insert(0, f"Detected balance: {format_credits(balance)} ({balance:,})")
+            messagebox.showinfo("OCR test", "\n\n".join(debug_lines))
+        else:
+            debug_lines.insert(0, "No credit balance found in the captured area.")
+            messagebox.showinfo("OCR test", "\n\n".join(debug_lines))
 
     def capture_credit_area(self):
         try:
@@ -1253,44 +1699,44 @@ class FH6TrackerGUI(tk.Tk):
 
             state = {"start": None, "rect": None, "cstart": (0, 0)}
 
-    def on_press(event):
-        state["start"] = (event.x_root, event.y_root)
-        state["cstart"] = (event.x, event.y)
-        if state["rect"]:
-            canvas.delete(state["rect"])
-            state["rect"] = canvas.create_rectangle(event.x, event.y, event.x, event.y, outline="#00ff00", width=2)
+            def on_press(event):
+                state["start"] = (event.x_root, event.y_root)
+                state["cstart"] = (event.x, event.y)
+                if state["rect"]:
+                    canvas.delete(state["rect"])
+                state["rect"] = canvas.create_rectangle(event.x, event.y, event.x, event.y, outline="#00ff00", width=2)
 
-    def on_drag(event):
-        if state["rect"]:
-            cx, cy = state["cstart"]
-            canvas.coords(state["rect"], cx, cy, event.x, event.y)
+            def on_drag(event):
+                if state["rect"]:
+                    cx, cy = state["cstart"]
+                    canvas.coords(state["rect"], cx, cy, event.x, event.y)
 
-    def on_release(event):
-        if not state["start"]:
-            overlay.destroy()
-            return
-        x0, y0 = state["start"]
-        x1, y1 = event.x_root, event.y_root
-        overlay.destroy()
-        x, y = int(min(x0, x1)), int(min(y0, y1))
-        w, h = int(abs(x1 - x0)), int(abs(y1 - y0))
-        if w > 4 and h > 4:
-            self.credit_x_var.set(str(x))
-            self.credit_y_var.set(str(y))
-            self.credit_w_var.set(str(w))
-            self.credit_h_var.set(str(h))
+            def on_release(event):
+                if not state["start"]:
+                    overlay.destroy()
+                    return
+                x0, y0 = state["start"]
+                x1, y1 = event.x_root, event.y_root
+                overlay.destroy()
+                x, y = int(min(x0, x1)), int(min(y0, y1))
+                w, h = int(abs(x1 - x0)), int(abs(y1 - y0))
+                if w > 4 and h > 4:
+                    self.credit_x_var.set(str(x))
+                    self.credit_y_var.set(str(y))
+                    self.credit_w_var.set(str(w))
+                    self.credit_h_var.set(str(h))
 
-    def on_cancel(_event):
-        overlay.destroy()
+            def on_cancel(_event):
+                overlay.destroy()
 
-        canvas.bind("<ButtonPress-1>", on_press)
-        canvas.bind("<B1-Motion>", on_drag)
-        canvas.bind("<ButtonRelease-1>", on_release)
-        overlay.bind("<Escape>", on_cancel)
-        overlay.focus_force()
+            canvas.bind("<ButtonPress-1>", on_press)
+            canvas.bind("<B1-Motion>", on_drag)
+            canvas.bind("<ButtonRelease-1>", on_release)
+            overlay.bind("<Escape>", on_cancel)
+            overlay.focus_force()
 
-    except Exception as exc:
-        messagebox.showerror("Capture failed", f"Could not open the capture overlay: {exc}")
+        except Exception as exc:
+            messagebox.showerror("Capture failed", f"Could not open the capture overlay: {exc}")
 
     def current_timestamp(self):
         from datetime import datetime, timezone
@@ -1337,11 +1783,12 @@ class FH6TrackerGUI(tk.Tk):
             owned.append(car_name)
             with open(OWNED_FILE, "w", encoding="utf-8") as handle:
                 json.dump({"owned": owned}, handle, indent=4)
-                messagebox.showinfo("Car added", f"Added {car_name} to your owned list.")
-            else:
-                messagebox.showinfo("Already present", f"{car_name} is already in your owned list.")
-                self.add_car_var.set("")
-                self.refresh_all()
+            self._invalidate_owned_cache()
+            messagebox.showinfo("Car added", f"Added {car_name} to your owned list.")
+        else:
+            messagebox.showinfo("Already present", f"{car_name} is already in your owned list.")
+        self.add_car_var.set("")
+        self.refresh_all()
 
     def import_owned_cars_from_text(self):
         text = simpledialog.askstring("Import owned cars", "Paste your car names, one per line or separated by commas:")
@@ -1354,17 +1801,18 @@ class FH6TrackerGUI(tk.Tk):
 
         owned_data = load_json_file(OWNED_FILE, {"owned": []})
         owned = owned_data.get("owned", [])
-        for car in cars:
-            if car not in owned:
-                owned.append(car)
-                save_owned_cars(owned, OWNED_FILE)
-                messagebox.showinfo("Import complete", f"Imported {len(cars)} cars into your owned list.")
-                self.refresh_all()
+        new_cars = [car for car in cars if car not in owned]
+        if new_cars:
+            owned.extend(new_cars)
+            save_owned_cars(owned, OWNED_FILE)
+            self._invalidate_owned_cache()
+        messagebox.showinfo("Import complete", f"Imported {len(new_cars)} new cars into your owned list.")
+        self.refresh_all()
 
     def import_owned_cars_from_file(self):
         file_path = filedialog.askopenfilename(
-        title="Choose a car list file",
-        filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Choose a car list file",
+            filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if not file_path:
             return
@@ -1379,12 +1827,13 @@ class FH6TrackerGUI(tk.Tk):
 
         owned_data = load_json_file(OWNED_FILE, {"owned": []})
         owned = owned_data.get("owned", [])
-        for car in cars:
-            if car not in owned:
-                owned.append(car)
-                save_owned_cars(owned, OWNED_FILE)
-                messagebox.showinfo("Import complete", f"Imported {len(cars)} cars from {os.path.basename(file_path)}.")
-                self.refresh_all()
+        new_cars = [car for car in cars if car not in owned]
+        if new_cars:
+            owned.extend(new_cars)
+            save_owned_cars(owned, OWNED_FILE)
+            self._invalidate_owned_cache()
+        messagebox.showinfo("Import complete", f"Imported {len(new_cars)} new cars from {os.path.basename(file_path)}.")
+        self.refresh_all()
 
     def on_owned_list_select(self, event=None):
         selection = self.owned_listbox.curselection()
@@ -1404,10 +1853,10 @@ class FH6TrackerGUI(tk.Tk):
         owned = owned_data.get("owned", [])
         owned = add_car_to_owned_list(owned, car_name)
         save_owned_cars(owned, OWNED_FILE)
+        self._invalidate_owned_cache()
         self.refresh_all()
 
     def remove_selected_car(self):
-
         selection = self.owned_listbox.curselection()
         if not selection:
             if hasattr(self, "last_selected_car") and self.last_selected_car:
@@ -1418,16 +1867,494 @@ class FH6TrackerGUI(tk.Tk):
         else:
             car_name = self.owned_listbox.get(selection[0])
             self.last_selected_car = car_name
-            if not messagebox.askyesno("Remove car", f"Remove '{car_name}' from your owned list?"):
-                return
+        if not messagebox.askyesno("Remove car", f"Remove '{car_name}' from your owned list?"):
+            return
+        owned_data = load_json_file(OWNED_FILE, {"owned": []})
+        owned = owned_data.get("owned", [])
+        if car_name in owned:
+            owned.remove(car_name)
+            with open(OWNED_FILE, "w", encoding="utf-8") as handle:
+                json.dump({"owned": owned}, handle, indent=4)
+            self._invalidate_owned_cache()
+        self.refresh_all()
 
-            owned_data = load_json_file(OWNED_FILE, {"owned": []})
-            owned = owned_data.get("owned", [])
-            if car_name in owned:
-                owned.remove(car_name)
-                with open(OWNED_FILE, "w", encoding="utf-8") as handle:
-                    json.dump({"owned": owned}, handle, indent=4)
-                    self.refresh_all()
+    def _add_owned_context_menu(self):
+        self.owned_context_menu = tk.Menu(self, tearoff=0)
+        self.owned_context_menu.add_command(label="Remove Selected", command=self.remove_selected_car)
+        self.owned_context_menu.add_command(label="Copy Name", command=lambda: self._copy_selection(self.owned_listbox))
+        self.owned_context_menu.add_command(label="Export to CSV", command=self.export_owned_to_csv)
+        self.owned_context_menu.add_separator()
+        self.owned_context_menu.add_command(label="Select All", command=lambda: self.owned_listbox.selection_set(0, tk.END))
+        self.owned_listbox.bind("<Button-3>", self._show_owned_context_menu)
+        self.owned_listbox.bind("<Control-Button-1>", self._show_owned_context_menu)
+
+    def _add_missing_context_menu(self):
+        self.missing_context_menu = tk.Menu(self, tearoff=0)
+        self.missing_context_menu.add_command(label="Add to Owned", command=self.add_selected_missing_car)
+        self.missing_context_menu.add_command(label="Copy Name", command=lambda: self._copy_selection(self.unowned_listbox))
+        self.missing_context_menu.add_command(label="Search Online", command=self._search_car_online)
+        self.missing_context_menu.add_separator()
+        self.missing_context_menu.add_command(label="Select All", command=lambda: self.unowned_listbox.selection_set(0, tk.END))
+        self.unowned_listbox.bind("<Button-3>", self._show_missing_context_menu)
+        self.unowned_listbox.bind("<Control-Button-1>", self._show_missing_context_menu)
+
+    def _show_owned_context_menu(self, event):
+        try:
+            self.owned_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.owned_context_menu.grab_release()
+
+    def _show_missing_context_menu(self, event):
+        try:
+            self.missing_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.missing_context_menu.grab_release()
+
+    def _copy_selection(self, listbox):
+        selection = listbox.curselection()
+        if selection:
+            text = "\n".join(listbox.get(i) for i in selection)
+            self.clipboard_clear()
+            self.clipboard_append(text)
+
+    def _search_car_online(self):
+        selection = self.unowned_listbox.curselection()
+        if selection:
+            car_name = extract_car_name_from_list_entry(self.unowned_listbox.get(selection[0]))
+            if car_name:
+                import webbrowser
+                query = car_name.replace(" ", "+")
+                webbrowser.open(f"https://www.google.com/search?q={query}+Forza+Horizon")
+
+    def export_owned_to_csv(self):
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export Owned Cars"
+        )
+        if not file_path:
+            return
+        owned_data = load_json_file(OWNED_FILE, {"owned": []})
+        owned = owned_data.get("owned", [])
+        master_db = load_json_file(MASTER_FILE, {})
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Car", "Price"])
+            for car in sorted(owned):
+                price = master_db.get(car, 0)
+                writer.writerow([car, price])
+        messagebox.showinfo("Export complete", f"Exported {len(owned)} cars to {os.path.basename(file_path)}")
+
+    def export_collection_to_csv(self):
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export Full Collection"
+        )
+        if not file_path:
+            return
+        master_db = load_json_file(MASTER_FILE, {})
+        owned_data = load_json_file(OWNED_FILE, {"owned": []})
+        owned = set(owned_data.get("owned", []))
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Car", "Price", "Owned"])
+            for car, price in sorted(master_db.items()):
+                if car and car != "Year Make Model":
+                    writer.writerow([car, price, "Yes" if car in owned else "No"])
+        messagebox.showinfo("Export complete", f"Exported {len(master_db)} cars to {os.path.basename(file_path)}")
+
+    def backup_all_data(self):
+        import zipfile
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".zip",
+            filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
+            title="Backup All Data"
+        )
+        if not file_path:
+            return
+        data_files = [
+            ("owned_cars.json", OWNED_FILE),
+            ("gui_settings.json", SETTINGS_FILE),
+            ("session_state.json", SESSION_STATE_FILE),
+            ("methods_history.json", METHODS_FILE),
+            ("credit_history.json", os.path.join(BASE_DIR, "credit_history.json")),
+            ("session_goals.json", SESSION_GOALS_FILE),
+        ]
+        try:
+            with zipfile.ZipFile(file_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for name, path in data_files:
+                    if os.path.exists(path):
+                        zf.write(path, name)
+                if os.path.exists(MASTER_FILE):
+                    zf.write(MASTER_FILE, "fh6_master_list.json")
+            messagebox.showinfo("Backup complete", f"Created backup: {os.path.basename(file_path)}")
+        except Exception as exc:
+            messagebox.showerror("Backup failed", f"Could not create backup: {exc}")
+
+    def restore_from_backup(self):
+        import zipfile
+        file_path = filedialog.askopenfilename(
+            filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
+            title="Restore from Backup"
+        )
+        if not file_path:
+            return
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                zf.extractall(BASE_DIR)
+            self._invalidate_owned_cache()
+            self._master_db_cache = load_json_file(MASTER_FILE, {})
+            self._master_db_mtime = os.path.getmtime(MASTER_FILE) if os.path.exists(MASTER_FILE) else 0
+            self.settings = load_settings()
+            self.apply_theme(self.settings.get("theme", "light"))
+            self.refresh_all()
+            messagebox.showinfo("Restore complete", "Data restored from backup. GUI refreshed.")
+        except Exception as exc:
+            messagebox.showerror("Restore failed", f"Could not restore backup: {exc}")
+
+    def show_shortcuts_help(self):
+        shortcuts = [
+            ("Ctrl+F", "Focus search box"),
+            ("Ctrl+N", "Focus add car entry"),
+            ("Ctrl+R", "Refresh all data"),
+            ("Double-click Owned", "Remove car"),
+            ("Double-click Missing", "Add car to owned"),
+            ("Right-click Owned", "Context menu (remove, export, search)"),
+            ("Right-click Missing", "Context menu (add, view details)"),
+            ("F4 (in-game)", "Voice car tagging (if enabled)"),
+        ]
+        dialog = tk.Toplevel(self)
+        dialog.title("Keyboard Shortcuts")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.geometry("400x350")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+
+        tree = ttk.Treeview(dialog, columns=("Key", "Action"), show="headings")
+        tree.heading("Key", text="Shortcut")
+        tree.heading("Action", text="Action")
+        tree.column("Key", width=120)
+        tree.column("Action", width=260)
+        tree.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        for key, action in shortcuts:
+            tree.insert("", "end", values=(key, action))
+
+        ttk.Button(dialog, text="Close", command=dialog.destroy).grid(row=1, column=0, pady=(0, 10))
+
+    def _add_owned_context_menu(self):
+        self.owned_context_menu = tk.Menu(self, tearoff=0)
+        self.owned_context_menu.add_command(label="Remove Selected", command=self.remove_selected_car)
+        self.owned_context_menu.add_command(label="Export Selected to CSV", command=self._export_selected_owned)
+        self.owned_context_menu.add_separator()
+        self.owned_context_menu.add_command(label="Search Online", command=self._search_selected_car)
+        self.owned_context_menu.add_command(label="Copy Name", command=self._copy_selected_car_name)
+        self.owned_listbox.bind("<Button-3>", self._show_owned_context_menu)
+        self.owned_listbox.bind("<Control-Button-1>", self._show_owned_context_menu)
+
+    def _add_missing_context_menu(self):
+        self.missing_context_menu = tk.Menu(self, tearoff=0)
+        self.missing_context_menu.add_command(label="Add to Owned", command=self.add_selected_missing_car)
+        self.missing_context_menu.add_command(label="View Details", command=self._show_missing_car_details)
+        self.missing_context_menu.add_separator()
+        self.missing_context_menu.add_command(label="Search Online", command=self._search_selected_missing)
+        self.missing_context_menu.add_command(label="Copy Name", command=self._copy_selected_missing_name)
+        self.unowned_listbox.bind("<Button-3>", self._show_missing_context_menu)
+        self.unowned_listbox.bind("<Control-Button-1>", self._show_missing_context_menu)
+
+    def _show_owned_context_menu(self, event):
+        try:
+            self.owned_listbox.selection_clear(0, tk.END)
+            self.owned_listbox.selection_set(self.owned_listbox.nearest(event.y))
+            self.owned_listbox.activate(self.owned_listbox.nearest(event.y))
+        except Exception:
+            pass
+        self.owned_context_menu.tk_popup(event.x_root, event.y_root)
+
+    def _show_missing_context_menu(self, event):
+        try:
+            self.unowned_listbox.selection_clear(0, tk.END)
+            self.unowned_listbox.selection_set(self.unowned_listbox.nearest(event.y))
+            self.unowned_listbox.activate(self.unowned_listbox.nearest(event.y))
+        except Exception:
+            pass
+        self.missing_context_menu.tk_popup(event.x_root, event.y_root)
+
+    def _export_selected_owned(self):
+        selection = self.owned_listbox.curselection()
+        if not selection:
+            return
+        cars = [extract_car_name_from_list_entry(self.owned_listbox.get(i)) for i in selection]
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")], title="Export Selected Cars")
+        if not file_path:
+            return
+        master_db = load_json_file(MASTER_FILE, {})
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Car", "Price"])
+            for car in cars:
+                writer.writerow([car, master_db.get(car, 0)])
+        messagebox.showinfo("Export complete", f"Exported {len(cars)} cars")
+
+    def _search_selected_car(self):
+        selection = self.owned_listbox.curselection()
+        if selection:
+            car = extract_car_name_from_list_entry(self.owned_listbox.get(selection[0]))
+            import webbrowser
+            webbrowser.open(f"https://www.google.com/search?q={car.replace(' ', '+')}+Forza+Horizon")
+
+    def _search_selected_missing(self):
+        selection = self.unowned_listbox.curselection()
+        if selection:
+            car = extract_car_name_from_list_entry(self.unowned_listbox.get(selection[0]))
+            import webbrowser
+            webbrowser.open(f"https://www.google.com/search?q={car.replace(' ', '+')}+Forza+Horizon")
+
+    def _copy_selected_car_name(self):
+        selection = self.owned_listbox.curselection()
+        if selection:
+            car = extract_car_name_from_list_entry(self.owned_listbox.get(selection[0]))
+            self.clipboard_clear()
+            self.clipboard_append(car)
+
+    def _copy_selected_missing_name(self):
+        selection = self.unowned_listbox.curselection()
+        if selection:
+            car = extract_car_name_from_list_entry(self.unowned_listbox.get(selection[0]))
+            self.clipboard_clear()
+            self.clipboard_append(car)
+
+    def _show_missing_car_details(self):
+        selection = self.unowned_listbox.curselection()
+        if not selection:
+            return
+        car = extract_car_name_from_list_entry(self.unowned_listbox.get(selection[0]))
+        master_db = load_json_file(MASTER_FILE, {})
+        price = master_db.get(car, 0)
+        messagebox.showinfo(car, f"Car: {car}\nPrice: {format_credits(price)} ({price:,} CR)")
+
+    def compute_recommendations(self, master_db, owned_names, method="all"):
+        """Generate smart recommendations for missing cars."""
+        from collections import Counter
+        owned_norm = {normalize_car_name(n) for n in owned_names if n}
+        missing = []
+        manufacturer_counts = Counter()
+        year_counts = Counter()
+        price_buckets = Counter()
+
+        for car, price in master_db.items():
+            if not car or car == "Year Make Model":
+                continue
+            norm = normalize_car_name(car)
+            if norm in owned_norm:
+                continue
+            mfr = car.split()[1] if len(car.split()) > 1 else "Unknown"
+            year = car.split()[0] if car.split()[0].isdigit() else "Unknown"
+            price_val = int(price)
+            missing.append((car, price_val, mfr, year))
+            manufacturer_counts[mfr] += 1
+            year_counts[year] += 1
+            if price_val < 50000:
+                price_buckets["Budget (<50K)"] += 1
+            elif price_val < 200000:
+                price_buckets["Mid-range (50K-200K)"] += 1
+            elif price_val < 1000000:
+                price_buckets["Premium (200K-1M)"] += 1
+            else:
+                price_buckets["Exotic (1M+)"] += 1
+
+        if not missing:
+            return []
+
+        recommendations = []
+        for car, price, mfr, year in missing:
+            score = 0
+            reasons = []
+
+            if manufacturer_counts[mfr] > 5:
+                score += 10
+                reasons.append(f"Popular manufacturer ({manufacturer_counts[mfr]} missing)")
+
+            if price < 50000:
+                score += 15
+                reasons.append("Budget-friendly")
+            elif price < 200000:
+                score += 10
+                reasons.append("Good value")
+            elif price < 500000:
+                score += 5
+                reasons.append("Mid-range")
+
+            if year.isdigit() and int(year) >= 2020:
+                score += 8
+                reasons.append("Modern car")
+
+            if "Forza Edition" in car or "FE" in car or "Pre Order" in car or "Pre-Order" in car:
+                score += 20
+                reasons.append("Special edition")
+
+            reason_str = "; ".join(reasons) if reasons else "Standard pick"
+            category = "Budget" if price < 50000 else "Mid-range" if price < 200000 else "Premium" if price < 1000000 else "Exotic"
+
+            recommendations.append({
+                "car": car,
+                "price": price,
+                "score": score,
+                "reason": reason_str,
+                "category": category,
+                "manufacturer": mfr,
+                "year": year,
+            })
+
+        if method == "value":
+            recommendations.sort(key=lambda x: x["score"] / max(x["price"], 1), reverse=True)
+        elif method == "cheapest":
+            recommendations.sort(key=lambda x: x["price"])
+        elif method == "score":
+            recommendations.sort(key=lambda x: x["score"], reverse=True)
+        elif method == "manufacturer":
+            recommendations.sort(key=lambda x: (x["manufacturer"], -x["score"]))
+        else:
+            recommendations.sort(key=lambda x: x["score"] / max(x["price"], 1), reverse=True)
+
+        return recommendations[:100]
+
+    def refresh_recommendations(self):
+        self._check_cache_reload()
+        master_db = self._master_db_cache
+        owned_names = sorted(self._owned_cache)
+
+        filter_mode = self.rec_filter_var.get().lower().replace(" ", "_")
+        if filter_mode == "best_value":
+            method = "value"
+        elif filter_mode == "cheapest_missing":
+            method = "cheapest"
+        elif filter_mode == "highest_rated":
+            method = "score"
+        elif filter_mode == "by_manufacturer":
+            method = "manufacturer"
+        else:
+            method = "all"
+
+        recs = self.compute_recommendations(master_db, owned_names, method)
+
+        self.recommendations_tree.delete(*self.recommendations_tree.get_children())
+        for r in recs:
+            self.recommendations_tree.insert("", "end", values=(
+                r["car"],
+                format_credits(r["price"]),
+                r["score"],
+                r["reason"],
+                r["category"],
+            ), tags=(r["car"],))
+
+        total_missing = len([c for c in master_db if normalize_car_name(c) not in {normalize_car_name(n) for n in owned_names}])
+        self.rec_summary_var.set(
+            f"Showing {len(recs)} of {total_missing} missing cars. "
+            f"Top pick: {recs[0]['car']} ({format_credits(recs[0]['price'])}, score {recs[0]['score']})" if recs else "Collection complete!"
+        )
+
+    def add_recommended_to_owned(self):
+        selection = self.recommendations_tree.selection()
+        if not selection:
+            messagebox.showinfo("No selection", "Select one or more cars from the recommendations list.")
+            return
+
+        owned_data = load_json_file(OWNED_FILE, {"owned": []})
+        owned = owned_data.get("owned", [])
+        added = 0
+        for item_id in selection:
+            car = self.recommendations_tree.item(item_id, "values")[0]
+            if car not in owned:
+                owned.append(car)
+                added += 1
+
+        if added:
+            save_owned_cars(owned, OWNED_FILE)
+            self._invalidate_owned_cache()
+            messagebox.showinfo("Added", f"Added {added} car(s) to your owned list.")
+        else:
+            messagebox.showinfo("Already owned", "All selected cars are already in your owned list.")
+        self.refresh_all()
+
+    def load_session_goals(self):
+        return load_json_file(SESSION_GOALS_FILE, {"goals": [], "active_goal": None})
+
+    def save_session_goals(self, data):
+        with open(SESSION_GOALS_FILE, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=4)
+
+    def start_session_goal(self):
+        if not self.goal_active_var.get():
+            self.goal_progress_var.set(0)
+            self.goal_summary_var.set("Goal tracking disabled.")
+            return
+
+        try:
+            target_credits = int(self.goal_credits_var.get().replace(",", "").replace("K", "000").replace("M", "000000"))
+            target_duration = int(self.goal_duration_var.get())
+        except ValueError:
+            messagebox.showwarning("Invalid input", "Enter valid numbers for target credits and duration.")
+            return
+
+        goal = {
+            "target_credits": target_credits,
+            "target_duration_min": target_duration,
+            "method": self.goal_method_var.get() if self.goal_method_var.get() != "Any" else None,
+            "start_time": self.current_timestamp(),
+            "start_credits": self.get_session_credits(),
+            "active": True,
+        }
+
+        data = self.load_session_goals()
+        data["active_goal"] = goal
+        data["goals"].append(goal)
+        data["goals"] = data["goals"][-50:]
+        self.save_session_goals(data)
+
+        self.goal_progress_var.set(0)
+        self.goal_summary_var.set(f"Goal: {format_credits(target_credits)} in {target_duration} min ({format_credits(target_credits * 60 // max(target_duration, 1))}/hr)")
+        self.refresh_goals_panel()
+
+    def refresh_goals_panel(self):
+        data = self.load_session_goals()
+        goal = data.get("active_goal")
+
+        if not goal or not goal.get("active"):
+            self.goal_progress_var.set(0)
+            self.goal_summary_var.set("No active goal. Set a target and click Start Goal.")
+            return
+
+        elapsed_min = max(1, (time.time() - self._parse_iso_time(goal["start_time"])) / 60) if goal.get("start_time") else 1
+        current_credits = self.get_session_credits()
+        earned = current_credits - goal.get("start_credits", 0)
+        target = goal.get("target_credits", 0)
+        target_duration = goal.get("target_duration_min", 60)
+
+        progress_pct = min(100, (earned / target * 100) if target > 0 else 0)
+        time_progress_pct = min(100, (elapsed_min / target_duration * 100)) if target_duration > 0 else 0
+
+        self.goal_progress_var.set(progress_pct)
+
+        cr_per_hour = (earned / (elapsed_min / 60)) if elapsed_min > 0 else 0
+        projected = cr_per_hour * (target_duration / 60) if cr_per_hour > 0 else 0
+
+        status = "ON TRACK" if progress_pct >= time_progress_pct * 0.9 else "BEHIND" if progress_pct < time_progress_pct * 0.9 else "AHEAD"
+        status_color = "#137333" if status == "ON TRACK" else "#c5221f" if status == "BEHIND" else "#1f6feb"
+
+        self.goal_summary_var.set(
+            f"Earned: {format_credits(earned)} / {format_credits(target)} ({progress_pct:.1f}%) | "
+            f"Rate: {format_credits(cr_per_hour)}/hr | Projected: {format_credits(projected)} | "
+            f"Time: {elapsed_min:.0f}/{target_duration} min | Status: {status}"
+        )
+
+    def _parse_iso_time(self, iso_str):
+        try:
+            from datetime import datetime, timezone
+            return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return time.time()
 
     def save_auto_start_setting(self):
         previous_mode = self.settings.get("performance_mode")
@@ -1436,6 +2363,7 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["theme"] = self.theme_var.get() or "light"
         self.settings["credit_ocr_enabled"] = bool(self.credit_ocr_var.get())
         self.settings["credit_region"] = self._read_region_fields()
+        self.settings["tesseract_path"] = self.tesseract_path_var.get().strip()
         self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
         save_settings(self.settings)
         self.apply_theme(self.settings["theme"])
@@ -1444,11 +2372,11 @@ class FH6TrackerGUI(tk.Tk):
         if self.settings["performance_mode"] != previous_mode and self.tracker_running:
             self.stop_tracker()
             self.after(500, self.start_tracker)
-            if self.settings.get("auto_start_forza") and not self.tracker_running and (has_running_forza_window() or has_running_forza_process()):
-                self.start_tracker()
-            else:
-                self.after(0, self._check_forza_auto_start)
-                messagebox.showinfo("Settings saved", "Tracker launch settings updated.")
+        if self.settings.get("auto_start_forza") and not self.tracker_running and (has_running_forza_window() or has_running_forza_process()):
+            self.start_tracker()
+        else:
+            self.after(0, self._check_forza_auto_start)
+        messagebox.showinfo("Settings saved", "Tracker launch settings updated.")
 
     def toggle_tracker(self):
         if self.tracker_running:
@@ -1466,15 +2394,15 @@ class FH6TrackerGUI(tk.Tk):
             kwargs = {"cwd": BASE_DIR, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
             if os.name == "nt":
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-                self.tracker_process = subprocess.Popen([sys.executable, AUTO_LOG_PATH], **kwargs)
-                self.tracker_running = True
-                self.last_status = "Running"
-                self.status_var.set("Status: Running")
-                self._update_tracker_button()
-            except Exception as exc:
-                self.last_status = "Error"
-                self.status_var.set(f"Status: Error ({exc})")
-                messagebox.showerror("Launch failed", f"Could not start the tracker: {exc}")
+            self.tracker_process = subprocess.Popen([sys.executable, AUTO_LOG_PATH], **kwargs)
+            self.tracker_running = True
+            self.last_status = "Running"
+            self.status_var.set("Status: Running")
+            self._update_tracker_button()
+        except Exception as exc:
+            self.last_status = "Error"
+            self.status_var.set(f"Status: Error ({exc})")
+            messagebox.showerror("Launch failed", f"Could not start the tracker: {exc}")
 
     def stop_tracker(self):
         if self.tracker_process and self.tracker_process.poll() is None:
@@ -1483,11 +2411,11 @@ class FH6TrackerGUI(tk.Tk):
                 self.tracker_process.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 self.tracker_process.kill()
-                self.tracker_process = None
-                self.tracker_running = False
-                self.last_status = "Stopped"
-                self.status_var.set("Status: Stopped")
-                self._update_tracker_button()
+        self.tracker_process = None
+        self.tracker_running = False
+        self.last_status = "Stopped"
+        self.status_var.set("Status: Stopped")
+        self._update_tracker_button()
 
     def _check_forza_auto_start(self):
         if not self.settings.get("auto_start_forza", False):
@@ -1498,6 +2426,21 @@ class FH6TrackerGUI(tk.Tk):
             self.start_tracker()
             return
         self.after(3000, self._check_forza_auto_start)
+
+    def _update_session_timer(self):
+        if self.session_state.get("session_started") and self.session_state.get("session_start_time"):
+            try:
+                from datetime import datetime, timezone
+                start = datetime.fromisoformat(self.session_state["session_start_time"])
+                elapsed = datetime.now(timezone.utc) - start
+                hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                self.vars["session_time_var"].set(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+            except Exception:
+                self.vars["session_time_var"].set("-")
+        else:
+            self.vars["session_time_var"].set("Not in session")
+        self.after(1000, self._update_session_timer)
 
     def apply_theme(self, theme_name):
         theme_name = theme_name or "light"
@@ -1515,26 +2458,27 @@ class FH6TrackerGUI(tk.Tk):
             accent = "#1f6feb"
             button_bg = "#dce8ff"
 
-            self.configure(bg=bg)
-            self.style.theme_use("clam")
-            self.style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg)
-            self.style.configure("TFrame", background=bg)
-            self.style.configure("TLabelframe", background=bg)
-            self.style.configure("TLabelframe.Label", background=bg, foreground=fg)
-            self.style.configure("TNotebook", background=bg, borderwidth=0)
-            self.style.configure("TNotebook.Tab", background=button_bg, foreground=fg)
-            self.style.map("TNotebook.Tab", background=[("selected", accent), ("active", button_bg)], foreground=[("selected", "white"), ("active", fg)])
-            self.style.configure("TButton", background=button_bg, foreground=fg)
-            self.style.map("TButton", background=[("active", accent), ("pressed", accent)], foreground=[("active", "white")])
-            self.style.configure("TEntry", fieldbackground=field_bg, foreground=fg)
-            self.style.configure("TCombobox", fieldbackground=field_bg, foreground=fg)
-            self.style.configure("TLabel", background=bg, foreground=fg)
-            self.style.configure("Listbox", background=field_bg, foreground=fg)
-            self.style.configure("Text", background=field_bg, foreground=fg)
+        self.configure(bg=bg)
+        self.style.theme_use("clam")
+        self.style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg)
+        self.style.configure("TFrame", background=bg)
+        self.style.configure("TLabelframe", background=bg)
+        self.style.configure("TLabelframe.Label", background=bg, foreground=fg)
+        self.style.configure("TNotebook", background=bg, borderwidth=0)
+        self.style.configure("TNotebook.Tab", background=button_bg, foreground=fg)
+        self.style.map("TNotebook.Tab", background=[("selected", accent), ("active", button_bg)], foreground=[("selected", "white"), ("active", fg)])
+        self.style.configure("TButton", background=button_bg, foreground=fg)
+        self.style.map("TButton", background=[("active", accent), ("pressed", accent)], foreground=[("active", "white")])
+        self.style.configure("TEntry", fieldbackground=field_bg, foreground=fg)
+        self.style.configure("TCombobox", fieldbackground=field_bg, foreground=fg)
+        self.style.configure("TLabel", background=bg, foreground=fg)
+        self.style.configure("Listbox", background=field_bg, foreground=fg)
+        self.style.configure("Text", background=field_bg, foreground=fg)
+
     def _update_tracker_button(self):
         self.start_stop_button.configure(text=tracker_button_label(self.tracker_running))
 
 
-        if __name__ == "__main__":
-            app = FH6TrackerGUI()
-            app.mainloop()
+if __name__ == "__main__":
+    app = FH6TrackerGUI()
+    app.mainloop()
