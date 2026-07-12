@@ -4,10 +4,11 @@
     "theme": "light",
     "credit_ocr_enabled": true,
     "credit_region": [
-        1199,
-        135,
-        529,
-        306
+        1074,
+        35,
+        779,
+        483
     ],
-    "performance_mode": "Quality"
+    "performance_mode": "Performance",
+    "tesseract_path": "F:\\Tesseract\\tesseract.exe"
 }
