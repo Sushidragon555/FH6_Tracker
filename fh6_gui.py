@@ -475,14 +475,6 @@ class FH6TrackerGUI(tk.Tk):
         self.performance_var = tk.StringVar(value=self.settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE))
         ttk.Button(controls, text="Save Settings", command=self.save_auto_start_setting).grid(row=0, column=2, padx=(8, 8), sticky="w")
 
-        self.add_car_var = tk.StringVar()
-        self.add_car_var_entry = ttk.Entry(controls, textvariable=self.add_car_var, width=42)
-        self.add_car_var_entry.grid(row=1, column=0, columnspan=4, padx=(0, 8), pady=(8, 0), sticky="ew")
-        ttk.Button(controls, text="Add Car", command=self.add_car_manual).grid(row=1, column=4, padx=(0, 8), pady=(8, 0), sticky="w")
-        ttk.Button(controls, text="Import List", command=self.import_owned_cars_from_text).grid(row=1, column=5, padx=(0, 8), pady=(8, 0), sticky="w")
-        ttk.Button(controls, text="Import File", command=self.import_owned_cars_from_file).grid(row=1, column=6, padx=(0, 8), pady=(8, 0), sticky="w")
-        ttk.Button(controls, text="Remove Selected", command=self.remove_selected_car).grid(row=1, column=7, pady=(8, 0), sticky="w")
-
         self.notebook = ttk.Notebook(self)
         self.notebook.grid(row=2, column=0, sticky="nsew")
         self.notebook.enable_traversal()
@@ -518,7 +510,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def build_garage_tab(self):
         self.garage_tab.columnconfigure(0, weight=1)
-        self.garage_tab.rowconfigure(2, weight=1)
+        self.garage_tab.rowconfigure(3, weight=1)
 
         summary_frame = ttk.LabelFrame(self.garage_tab, text="Summary")
         summary_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -560,8 +552,19 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(filter_frame, text="Apply", command=self.refresh_collection).grid(row=0, column=12, padx=(4, 8), pady=6)
         ttk.Button(filter_frame, text="Clear", command=self.clear_collection_filters).grid(row=0, column=13, padx=(0, 8), pady=6)
 
+        manage_frame = ttk.LabelFrame(self.garage_tab, text="Manage Cars")
+        manage_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        manage_frame.columnconfigure(1, weight=1)
+
+        self.add_car_var = tk.StringVar()
+        self.add_car_var_entry = ttk.Entry(manage_frame, textvariable=self.add_car_var, width=42)
+        self.add_car_var_entry.grid(row=0, column=0, columnspan=2, padx=(8, 8), pady=(6, 6), sticky="ew")
+        ttk.Button(manage_frame, text="Add Car", command=self.add_car_manual).grid(row=0, column=2, padx=(0, 8), pady=6, sticky="w")
+        ttk.Button(manage_frame, text="Import List", command=self.import_owned_cars_from_text).grid(row=0, column=3, padx=(0, 8), pady=6, sticky="w")
+        ttk.Button(manage_frame, text="Import File", command=self.import_owned_cars_from_file).grid(row=0, column=4, padx=(0, 8), pady=6, sticky="w")
+
         self.collection_notebook = ttk.Notebook(self.garage_tab)
-        self.collection_notebook.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self.collection_notebook.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 8))
 
         self.owned_frame = ttk.Frame(self.collection_notebook)
         self.missing_frame = ttk.Frame(self.collection_notebook)
@@ -2124,10 +2127,10 @@ class FH6TrackerGUI(tk.Tk):
             full_text = ""
         # Estimate center of the credit number on screen
         cx = img_w // 2
-        cw = min(300, img_w // 3)
-        ch = min(strip_h + 20, 60)
+        cw = min(500, img_w // 2)
+        ch = min(120, strip_h + 60)
         detected_x = max(0, cx - cw // 2)
-        detected_y = max(0, best_y - 10)
+        detected_y = max(0, best_y - 20)
         detected_w = cw
         detected_h = ch
 
