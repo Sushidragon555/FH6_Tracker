@@ -34,6 +34,7 @@ MASTER_FILE = os.path.join(BASE_DIR, "fh6_master_list.json")
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.json")
 METHODS_FILE = os.path.join(BASE_DIR, "methods_history.json")
+CREDIT_TRANSACTIONS_FILE = os.path.join(BASE_DIR, "credit_transactions.json")
 METHOD_NAMES = [
     "Wheelspins",
     "Super Wheelspins",
@@ -397,6 +398,14 @@ class FH6TrackerGUI(tk.Tk):
         self.last_credit_scan_time = 0
         self._pending_balance = None
         self._pending_balance_count = 0
+        self._credit_transactions = self._load_credit_transactions()
+        self._recent_balances = []
+        self._last_rollback_balance = None
+        self._ocr_success_count = 0
+        self._ocr_total_count = 0
+        self._last_ocr_raw_text = ""
+        self._last_ocr_scan_time = 0
+        self._credit_rate_points = []
         self.forza_running_prev = None
         self.known_owned = set(load_json_file(OWNED_FILE, {"owned": []}).get("owned", []))
         self.detected_car_id = None
@@ -679,6 +688,24 @@ class FH6TrackerGUI(tk.Tk):
         self.method_summary_var = tk.StringVar(value="No history yet")
         ttk.Label(summary_frame, textvariable=self.method_summary_var, wraplength=900, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
+        txn_frame = ttk.LabelFrame(self.methods_tab, text="Credit Transactions (auto-detected)")
+        txn_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
+        txn_frame.columnconfigure(0, weight=1)
+        txn_frame.rowconfigure(0, weight=1)
+
+        txn_cols = ("Time", "Amount", "Type", "Balance")
+        self.txn_tree = ttk.Treeview(txn_frame, columns=txn_cols, show="headings", height=8)
+        for col in txn_cols:
+            self.txn_tree.heading(col, text=col)
+            self.txn_tree.column(col, width=160 if col != "Type" else 80)
+        txn_scroll = ttk.Scrollbar(txn_frame, orient="vertical", command=self.txn_tree.yview)
+        self.txn_tree.configure(yscrollcommand=txn_scroll.set)
+        self.txn_tree.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        txn_scroll.grid(row=0, column=1, sticky="ns", pady=8)
+
+        self.txn_summary_var = tk.StringVar(value="No transactions yet")
+        ttk.Label(txn_frame, textvariable=self.txn_summary_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+
     def toggle_method_tracking(self):
         if self._method_active:
             self._stop_method_tracking()
@@ -783,6 +810,25 @@ class FH6TrackerGUI(tk.Tk):
             avg_crhr = (data["total_credits"] / (data["total_seconds"] / 3600)) if data["total_seconds"] > 0 else 0
             parts.append(f"{m}: {format_credits(avg_crhr)}/hr ({data['count']} sessions)")
         self.method_summary_var.set("  |  ".join(parts) if parts else "No history yet")
+        self.refresh_transactions()
+
+    def refresh_transactions(self):
+        txns = self._credit_transactions.get("transactions", [])
+        self.txn_tree.delete(*self.txn_tree.get_children())
+        for entry in reversed(txns[-30:]):
+            ts = entry.get("timestamp", "")[:19].replace("T", " ")
+            amount = entry.get("amount", 0)
+            amt_str = f"+{format_credits(amount)}" if amount > 0 else format_credits(amount)
+            txn_type = entry.get("type", "?").capitalize()
+            balance_after = format_credits(entry.get("balance_after", 0))
+            tag = "gain" if amount > 0 else "spend"
+            self.txn_tree.insert("", "end", values=(ts, amt_str, txn_type, balance_after), tags=(tag,))
+        self.txn_tree.tag_configure("gain", foreground="#137333")
+        self.txn_tree.tag_configure("spend", foreground="#c5221f")
+        total_gains = sum(t["amount"] for t in txns if t.get("amount", 0) > 0)
+        count = len(txns)
+        self.txn_summary_var.set(f"{count} transactions total | Total gains: +{format_credits(total_gains)}")
+        self.refresh_transactions()
 
     def build_stats_tab(self):
         self.stats_tab.columnconfigure(0, weight=1)
@@ -823,6 +869,14 @@ class FH6TrackerGUI(tk.Tk):
         history_frame.rowconfigure(0, weight=1)
         self.history_canvas = tk.Canvas(history_frame, bg="white", height=150)
         self.history_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+
+        rate_frame = ttk.LabelFrame(self.stats_tab, text="Credit Rate (Live)")
+        rate_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
+        rate_frame.columnconfigure(0, weight=1)
+        self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
+        self.rate_canvas.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+        self.rate_stats_var = tk.StringVar(value="No rate data yet")
+        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
     def build_settings_tab(self):
         self.settings_tab.columnconfigure(0, weight=1)
@@ -878,20 +932,41 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Button(ocr_frame, text="Capture Area", command=self.capture_credit_area).grid(row=1, column=5, sticky="w", padx=8)
         ttk.Button(ocr_frame, text="Test OCR", command=self.test_credit_ocr).grid(row=2, column=5, sticky="w", padx=8)
+        ttk.Button(ocr_frame, text="Auto-Detect Region", command=self.auto_calibrate_region).grid(row=1, column=6, sticky="w", padx=8)
 
         ttk.Label(ocr_frame, text="Tesseract path:").grid(row=3, column=0, sticky="w", padx=8)
         ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var, width=50).grid(row=3, column=1, columnspan=4, sticky="ew", padx=(2, 8))
         ttk.Button(ocr_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=3, column=5, sticky="w", padx=8)
 
-        if pyautogui is None or pytesseract is None or ImageGrab is None:
-            ocr_status = "OCR packages not installed. Run: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program."
-        else:
-            ocr_status = "OCR ready. Leave W/H at 0 to scan the full screen, or use Capture Area to box the credit number for faster, more reliable reads."
-        self.ocr_status_var = tk.StringVar(value=ocr_status)
-        ttk.Label(ocr_frame, textvariable=self.ocr_status_var, wraplength=760, justify="left", foreground="#8a6d00").grid(row=4, column=0, columnspan=6, sticky="w", padx=8, pady=(0, 8))
+        self._ocr_confidence_color = tk.StringVar(value="gray")
+        self._ocr_confidence_text = tk.StringVar(value="No scans yet")
+        conf_frame = ttk.Frame(ocr_frame)
+        conf_frame.grid(row=4, column=0, columnspan=6, sticky="w", padx=8, pady=(0, 4))
+        self._conf_indicator_label = ttk.Label(conf_frame, text="\u25cf", font=("Segoe UI", 14))
+        self._conf_indicator_label.pack(side="left", padx=(0, 6))
+        ttk.Label(conf_frame, textvariable=self._ocr_confidence_text).pack(side="left")
+        ttk.Label(conf_frame, text="  |  Last raw:").pack(side="left", padx=(12, 4))
+        self._ocr_raw_text_var = tk.StringVar(value="")
+        ttk.Label(conf_frame, textvariable=self._ocr_raw_text_var, foreground="#888888").pack(side="left")
+
+        preview_frame = ttk.LabelFrame(self.settings_tab, text="OCR Region Preview")
+        preview_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        preview_frame.columnconfigure(0, weight=1)
+
+        preview_inner = ttk.Frame(preview_frame)
+        preview_inner.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        preview_inner.columnconfigure(0, weight=1)
+
+        self._preview_canvas = tk.Canvas(preview_inner, bg="#2b2b2b", height=90, highlightthickness=1, highlightbackground="#555555")
+        self._preview_canvas.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._preview_canvas.create_text(150, 45, text="No preview yet — click Refresh", fill="#888888", tags="placeholder")
+        ttk.Button(preview_inner, text="Refresh\nPreview", command=self._refresh_ocr_preview).grid(row=0, column=1, sticky="ns")
+
+        self._preview_info_var = tk.StringVar(value="")
+        ttk.Label(preview_frame, textvariable=self._preview_info_var, foreground="#555555", wraplength=760).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
         export_frame = ttk.LabelFrame(self.settings_tab, text="Export & Backup")
-        export_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        export_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
         export_frame.columnconfigure(1, weight=1)
 
         ttk.Button(export_frame, text="Export Owned Cars (CSV)", command=self.export_owned_to_csv).grid(row=0, column=0, padx=8, pady=6)
@@ -1003,6 +1078,52 @@ class FH6TrackerGUI(tk.Tk):
         self._pending_balance = None
         self._pending_balance_count = 0
 
+    def _load_credit_transactions(self):
+        return load_json_file(CREDIT_TRANSACTIONS_FILE, {"transactions": []})
+
+    def _save_credit_transactions(self):
+        with open(CREDIT_TRANSACTIONS_FILE, "w", encoding="utf-8") as handle:
+            json.dump(self._credit_transactions, handle, indent=4)
+
+    def _log_credit_transaction(self, amount, balance_before, balance_after):
+        entry = {
+            "timestamp": self.current_timestamp(),
+            "amount": amount,
+            "type": "gain" if amount > 0 else "spend",
+            "balance_before": balance_before,
+            "balance_after": balance_after,
+        }
+        self._credit_transactions["transactions"].append(entry)
+        self._credit_transactions["transactions"] = self._credit_transactions["transactions"][-500:]
+        self._save_credit_transactions()
+        self._credit_rate_points.append((time.monotonic(), balance_after))
+        self._credit_rate_points = self._credit_rate_points[-200:]
+
+    def _median_of_recent(self):
+        vals = [b for b in self._recent_balances if b is not None]
+        if not vals:
+            return None
+        vals_sorted = sorted(vals)
+        n = len(vals_sorted)
+        if n % 2 == 1:
+            return vals_sorted[n // 2]
+        return (vals_sorted[n // 2 - 1] + vals_sorted[n // 2]) // 2
+
+    def _ocr_confidence_label(self):
+        if not self.settings.get("credit_ocr_enabled", False):
+            return "gray", "OCR disabled"
+        region = self.get_credit_region()
+        if not region:
+            return "gray", "No region set"
+        if self._ocr_total_count == 0:
+            return "gray", "No scans yet"
+        rate = self._ocr_success_count / self._ocr_total_count
+        if rate >= 0.7:
+            return "green", f"Confidence: {self._ocr_success_count}/{self._ocr_total_count} scans OK"
+        if rate >= 0.4:
+            return "yellow", f"Confidence: {self._ocr_success_count}/{self._ocr_total_count} scans OK"
+        return "red", f"Confidence: {self._ocr_success_count}/{self._ocr_total_count} scans OK"
+
     def _check_cache_reload(self):
         try:
             mtime = os.path.getmtime(MASTER_FILE) if os.path.exists(MASTER_FILE) else 0
@@ -1027,6 +1148,7 @@ class FH6TrackerGUI(tk.Tk):
     def refresh_loop(self):
         self.update_forza_session_state()
         self.detect_credit_popup_change()
+        self._update_ocr_confidence_indicator()
         self._refresh_active_tab()
         self.after(self._refresh_interval_ms(), self.refresh_loop)
 
@@ -1236,6 +1358,83 @@ class FH6TrackerGUI(tk.Tk):
         self.stats_total_value_var.set(f"Collection value: {format_credits(total_value)}")
 
         self._draw_credit_history()
+        self._draw_credit_rate_chart()
+
+    def _draw_credit_rate_chart(self):
+        self.rate_canvas.delete("all")
+        points = self._credit_rate_points
+        if len(points) < 2:
+            self.rate_canvas.create_text(
+                self.rate_canvas.winfo_width() // 2 or 200, 60,
+                text="No rate data yet — credits will appear here as they are detected.",
+                fill="#888888", font=("Segoe UI", 10),
+            )
+            self.rate_stats_var.set("No rate data yet")
+            return
+
+        canvas_w = self.rate_canvas.winfo_width() or 500
+        canvas_h = self.rate_canvas.winfo_height() or 120
+        padding = 40
+        chart_w = canvas_w - 2 * padding
+        chart_h = canvas_h - 2 * padding
+
+        now_mono = time.monotonic()
+        window = 1800
+        recent = [(t, b) for t, b in points if now_mono - t <= window]
+        if len(recent) < 2:
+            recent = points[-20:]
+
+        t_min = recent[0][0]
+        t_max = recent[-1][0]
+        t_range = max(t_max - t_min, 1)
+        b_vals = [b for _, b in recent]
+        b_min = min(b_vals)
+        b_max = max(b_vals)
+        b_range = max(b_max - b_min, 1)
+
+        self.rate_canvas.create_line(padding, canvas_h - padding, canvas_w - padding, canvas_h - padding, fill="#cccccc")
+        self.rate_canvas.create_line(padding, padding, padding, canvas_h - padding, fill="#cccccc")
+
+        coords = []
+        for t, b in recent:
+            x = padding + ((t - t_min) / t_range) * chart_w
+            y = canvas_h - padding - ((b - b_min) / b_range) * chart_h
+            coords.append((x, y))
+
+        if len(coords) >= 2:
+            flat = [c for p in coords for c in p]
+            self.rate_canvas.create_line(*flat, fill="#1f6feb", width=2, smooth=True)
+
+            # Moving average trendline (last 5 points)
+            if len(coords) >= 3:
+                window_avg = 5
+                avg_coords = []
+                for i in range(len(coords)):
+                    start = max(0, i - window_avg + 1)
+                    segment = coords[start:i + 1]
+                    avg_x = sum(x for x, _ in segment) / len(segment)
+                    avg_y = sum(y for _, y in segment) / len(segment)
+                    avg_coords.append((avg_x, avg_y))
+                if len(avg_coords) >= 2:
+                    flat_avg = [c for p in avg_coords for c in p]
+                    self.rate_canvas.create_line(*flat_avg, fill="#ff9800", width=1, dash=(4, 4))
+
+            # Dots at each data point
+            for x, y in coords:
+                self.rate_canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill="#1f6feb", outline="")
+
+        self.rate_canvas.create_text(padding, padding - 10, text=format_credits(b_max), anchor="w", fill="#555555", font=("Segoe UI", 8))
+        self.rate_canvas.create_text(padding, canvas_h - padding + 10, text=format_credits(b_min), anchor="w", fill="#555555", font=("Segoe UI", 8))
+
+        # Stats
+        total_earned = b_vals[-1] - b_vals[0] if b_vals else 0
+        elapsed_hrs = (recent[-1][0] - recent[0][0]) / 3600 if len(recent) >= 2 else 0
+        avg_crhr = total_earned / max(elapsed_hrs, 0.001)
+        self.rate_stats_var.set(
+            f"Current rate: {format_credits(avg_crhr)}/hr | "
+            f"Points: {len(recent)} | "
+            f"Change: {'+' if total_earned >= 0 else ''}{format_credits(total_earned)} over {elapsed_hrs * 60:.0f} min"
+        )
 
     def _load_credit_history(self):
         history_file = os.path.join(BASE_DIR, "credit_history.json")
@@ -1405,17 +1604,17 @@ class FH6TrackerGUI(tk.Tk):
         if not (has_running_forza_process() or has_running_forza_window()):
             return
         self.last_credit_scan_time = now
+        self._ocr_total_count += 1
+        self._last_ocr_scan_time = now
 
         region_set = self.get_credit_region() is not None
         text = self._ocr_credit_text()
+        self._last_ocr_raw_text = text or ""
         if (not text or not text.strip()) and not region_set:
             return
 
         change = detect_credit_change_from_text(text, self.last_credit_balance) if text else None
         balance = parse_credit_balance_from_text(text) if text else None
-        # When the user has boxed a tight region around just the number, the captured
-        # text usually has no "CR"/"Credits" keyword, so fall back to a numeric-only OCR
-        # pass over that region and treat the number itself as the balance.
         if balance is None and region_set:
             balance = self._read_region_balance()
 
@@ -1423,10 +1622,29 @@ class FH6TrackerGUI(tk.Tk):
             if self.last_credit_balance is None:
                 self.last_credit_balance = balance
                 self._reset_pending_balance()
+                self._recent_balances = [balance]
+                self._ocr_success_count += 1
+                self._credit_rate_points.append((now, balance))
                 return
             if balance == self.last_credit_balance:
                 self._reset_pending_balance()
+                self._recent_balances.append(balance)
+                if len(self._recent_balances) > 5:
+                    self._recent_balances = self._recent_balances[-5:]
+                self._ocr_success_count += 1
                 return
+
+            # Plausibility check: reject absurdly large single-hop gains
+            delta = balance - self.last_credit_balance
+            if delta > 100_000_000 or delta <= 0:
+                self._recent_balances.append(balance)
+                if len(self._recent_balances) > 5:
+                    self._recent_balances = self._recent_balances[-5:]
+                return
+
+            # Use median of recent readings as the baseline to reduce jitter
+            median_balance = self._median_of_recent() or self.last_credit_balance
+
             # The reading changed. Require it to repeat on consecutive scans before acting
             # so a single garbled OCR frame can't inject a phantom credit gain.
             if balance == self._pending_balance:
@@ -1436,11 +1654,24 @@ class FH6TrackerGUI(tk.Tk):
                 self._pending_balance_count = 1
             if self._pending_balance_count < 2:
                 return
-            if balance > self.last_credit_balance:
-                self.update_session_credits(balance - self.last_credit_balance)
+
+            # Confirmed — the same new balance appeared twice in a row.
+            confirmed_delta = balance - median_balance
+            if confirmed_delta > 0 and confirmed_delta <= 100_000_000:
+                old_balance = self.last_credit_balance
+                self.update_session_credits(confirmed_delta)
                 self.last_credit_balance = balance
+                self._log_credit_transaction(confirmed_delta, old_balance, balance)
+                self._ocr_success_count += 1
+                self._recent_balances.append(balance)
+                if len(self._recent_balances) > 5:
+                    self._recent_balances = self._recent_balances[-5:]
                 self._reset_pending_balance()
                 return
+
+            self._recent_balances.append(balance)
+            if len(self._recent_balances) > 5:
+                self._recent_balances = self._recent_balances[-5:]
 
         if change is None or change <= 0:
             return
@@ -1448,8 +1679,10 @@ class FH6TrackerGUI(tk.Tk):
         if self.last_credit_balance is None:
             self.last_credit_balance = max(0, self.get_session_credits())
 
+        old_balance = self.last_credit_balance
         self.update_session_credits(change)
         self.last_credit_balance = (self.last_credit_balance or 0) + change
+        self._log_credit_transaction(change, old_balance, self.last_credit_balance)
 
     def load_session_state(self):
         state = load_json_file(SESSION_STATE_FILE, {})
@@ -1737,6 +1970,156 @@ class FH6TrackerGUI(tk.Tk):
 
         except Exception as exc:
             messagebox.showerror("Capture failed", f"Could not open the capture overlay: {exc}")
+
+    def _refresh_ocr_preview(self):
+        if pytesseract is None or (ImageGrab is None and pyautogui is None):
+            self._preview_info_var.set("OCR packages not installed.")
+            return
+        region = self._read_region_fields()
+        if region is None:
+            self._preview_info_var.set("No region set — use Capture Area or Auto-Detect first.")
+            return
+        image = self._grab_credit_image(region=region)
+        if image is None:
+            self._preview_info_var.set("Failed to capture screen region.")
+            return
+        self._preview_image_ref = image
+        self._preview_canvas.delete("all")
+        try:
+            cw = self._preview_canvas.winfo_width()
+            if cw < 10:
+                cw = 400
+            ch = self._preview_canvas.winfo_height()
+            if ch < 10:
+                ch = 90
+            img_w, img_h = image.size
+            scale = min(cw / max(img_w, 1), ch / max(img_h, 1), 2.0)
+            new_w = max(1, int(img_w * scale))
+            new_h = max(1, int(img_h * scale))
+            resized = image.resize((new_w, new_h), Image.LANCZOS) if Image is not None else image
+            from PIL import ImageTk
+            self._preview_photo = ImageTk.PhotoImage(resized)
+            self._preview_canvas.create_image(cw // 2, ch // 2, image=self._preview_photo, anchor="center")
+        except Exception as exc:
+            self._preview_canvas.create_text(200, 45, text=f"Preview error: {exc}", fill="#ff6666")
+
+        # Run a quick OCR read and show info
+        try:
+            self._set_tesseract_path()
+            raw_text = pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 6").strip()
+        except Exception:
+            raw_text = ""
+        balance = parse_credit_balance_from_text(raw_text)
+        if balance is None and region is not None:
+            try:
+                num_text = pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
+            except Exception:
+                num_text = ""
+            balance = parse_balance_number_only(num_text)
+        x, y, w, h = region
+        info = f"Region: ({x}, {y}) {w}x{h} | Raw: '{raw_text[:80]}'"
+        if balance is not None:
+            info += f" | Balance: {format_credits(balance)}"
+        else:
+            info += " | No balance detected"
+        self._preview_info_var.set(info)
+
+    def auto_calibrate_region(self):
+        if pytesseract is None or (ImageGrab is None and pyautogui is None):
+            messagebox.showwarning(
+                "OCR unavailable",
+                "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
+            )
+            return
+        if not (has_running_forza_process() or has_running_forza_window()):
+            messagebox.showinfo("Auto-detect", "Forza does not appear to be running. Start the game first, then try again.")
+            return
+        self.show_notice("Auto-detecting credit region... wait a moment.")
+        self.update_idletasks()
+
+        full_image = None
+        try:
+            if ImageGrab is not None:
+                full_image = ImageGrab.grab()
+            elif pyautogui is not None:
+                full_image = pyautogui.screenshot()
+        except Exception as exc:
+            messagebox.showerror("Auto-detect failed", f"Could not capture screen: {exc}")
+            return
+        if full_image is None:
+            messagebox.showerror("Auto-detect failed", "Screen capture returned None.")
+            return
+
+        self._set_tesseract_path()
+        img_w, img_h = full_image.size
+        top_strip_h = int(img_h * 0.15)
+        best_balance = None
+        best_region = None
+        best_y = 0
+        strip_h = 40
+
+        for y_start in range(0, top_strip_h, strip_h // 2):
+            strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
+            strip = self._upscale_for_ocr(strip)
+            try:
+                text = pytesseract.image_to_string(strip, config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
+            except Exception:
+                continue
+            balance = parse_balance_number_only(text)
+            if balance is not None and balance >= 1000:
+                best_balance = balance
+                best_y = y_start
+                break
+
+        if best_balance is None:
+            for y_start in range(0, top_strip_h, strip_h // 2):
+                strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
+                strip = self._upscale_for_ocr(strip)
+                try:
+                    text = pytesseract.image_to_string(strip, config="--psm 6").strip()
+                except Exception:
+                    continue
+                balance = parse_credit_balance_from_text(text)
+                if balance is not None and balance >= 1000:
+                    best_balance = balance
+                    best_y = y_start
+                    break
+
+        if best_balance is None:
+            self.show_notice("Auto-detect could not find the credit balance on screen.")
+            messagebox.showinfo("Auto-detect", "Could not find the credit balance.\n\nTips:\n- Make sure Forza is showing the credit display (e.g. main menu or pause screen)\n- Try manually capturing the area instead")
+            return
+
+        # Refine: find horizontal extent of the number within the strip
+        refine_strip = full_image.crop((0, best_y, img_w, best_y + strip_h))
+        try:
+            full_text = pytesseract.image_to_string(self._upscale_for_ocr(refine_strip), config="--psm 7").strip()
+        except Exception:
+            full_text = ""
+        # Estimate center of the credit number on screen
+        cx = img_w // 2
+        cw = min(300, img_w // 3)
+        ch = min(strip_h + 20, 60)
+        detected_x = max(0, cx - cw // 2)
+        detected_y = max(0, best_y - 10)
+        detected_w = cw
+        detected_h = ch
+
+        self.credit_x_var.set(str(detected_x))
+        self.credit_y_var.set(str(detected_y))
+        self.credit_w_var.set(str(detected_w))
+        self.credit_h_var.set(str(detected_h))
+
+        self.show_notice(f"Auto-detected region: ({detected_x}, {detected_y}) {detected_w}x{detected_h} — balance ~{format_credits(best_balance)}")
+        self._refresh_ocr_preview()
+
+    def _update_ocr_confidence_indicator(self):
+        color, text = self._ocr_confidence_label()
+        color_map = {"green": "#137333", "yellow": "#b06000", "red": "#c5221f", "gray": "#888888"}
+        self._conf_indicator_label.configure(foreground=color_map.get(color, "#888888"))
+        self._ocr_confidence_text.set(text)
+        raw = self._last_ocr_raw_text[:60] if self._last_ocr_raw_text else ""
+        self._ocr_raw_text_var.set(raw or "(empty)")
 
     def current_timestamp(self):
         from datetime import datetime, timezone
