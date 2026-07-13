@@ -435,7 +435,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def create_widgets(self):
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)
 
         header = ttk.Frame(self)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
@@ -455,8 +455,8 @@ class FH6TrackerGUI(tk.Tk):
         controls.columnconfigure(0, weight=0)
         controls.columnconfigure(1, weight=0)
         controls.columnconfigure(2, weight=0)
-        controls.columnconfigure(3, weight=0)
-        controls.columnconfigure(4, weight=1)
+        controls.columnconfigure(3, weight=1)
+        controls.columnconfigure(4, weight=0)
 
         self.start_stop_button = ttk.Button(controls, text=tracker_button_label(self.tracker_running), command=lambda: self.toggle_tracker())
         self.start_stop_button.grid(row=0, column=0, padx=(0, 8), sticky="w")
@@ -529,7 +529,7 @@ class FH6TrackerGUI(tk.Tk):
 
         filter_frame = ttk.LabelFrame(self.garage_tab, text="Filters")
         filter_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        filter_frame.columnconfigure(5, weight=1)
+        filter_frame.columnconfigure(1, weight=1)
 
         ttk.Label(filter_frame, text="Search:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
         self.progress_search_var = tk.StringVar()
@@ -591,7 +591,6 @@ class FH6TrackerGUI(tk.Tk):
 
     def build_live_tab(self):
         self.live_tab.columnconfigure(0, weight=1)
-        self.live_tab.rowconfigure(1, weight=1)
 
         info_frame = ttk.LabelFrame(self.live_tab, text="Current Session")
         info_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -632,13 +631,14 @@ class FH6TrackerGUI(tk.Tk):
             detect_frame = ttk.LabelFrame(self.live_tab, text="Auto Garage Detection")
             detect_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
             detect_frame.columnconfigure(0, weight=1)
-            ttk.Label(detect_frame, textvariable=self.detection_status_var, wraplength=760, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
+            ttk.Label(detect_frame, textvariable=self.detection_status_var, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
             self.tag_detected_button = ttk.Button(detect_frame, text="Tag Detected Car", command=self.tag_detected_car)
             self.tag_detected_button.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
 
     def build_methods_tab(self):
         self.methods_tab.columnconfigure(0, weight=1)
-        self.methods_tab.rowconfigure(2, weight=1)
+        self.methods_tab.rowconfigure(2, weight=2)
+        self.methods_tab.rowconfigure(4, weight=1)
 
         control_frame = ttk.LabelFrame(self.methods_tab, text="Track a Method")
         control_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -656,7 +656,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(control_frame, textvariable=self.method_timer_var, font=("Consolas", 12, "bold")).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=4)
 
         self.method_status_var = tk.StringVar(value="Select a method and click Start Tracking")
-        ttk.Label(control_frame, textvariable=self.method_status_var, foreground="#555555", wraplength=600).grid(row=2, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(control_frame, textvariable=self.method_status_var, foreground="#555555").grid(row=2, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 6))
 
         self.method_start_credits_var = tk.StringVar(value="Starting credits: -")
         self.method_current_credits_var = tk.StringVar(value="Current credits: -")
@@ -687,10 +687,10 @@ class FH6TrackerGUI(tk.Tk):
         summary_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
         summary_frame.columnconfigure(0, weight=1)
         self.method_summary_var = tk.StringVar(value="No history yet")
-        ttk.Label(summary_frame, textvariable=self.method_summary_var, wraplength=900, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        ttk.Label(summary_frame, textvariable=self.method_summary_var, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
         txn_frame = ttk.LabelFrame(self.methods_tab, text="Credit Transactions (auto-detected)")
-        txn_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
+        txn_frame.grid(row=4, column=0, sticky="nsew", padx=8, pady=(0, 8))
         txn_frame.columnconfigure(0, weight=1)
         txn_frame.rowconfigure(0, weight=1)
 
@@ -873,13 +873,15 @@ class FH6TrackerGUI(tk.Tk):
         rate_frame = ttk.LabelFrame(self.stats_tab, text="Credit Rate (Live)")
         rate_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
         rate_frame.columnconfigure(0, weight=1)
+        rate_frame.rowconfigure(0, weight=1)
         self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
-        self.rate_canvas.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+        self.rate_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         self.rate_stats_var = tk.StringVar(value="No rate data yet")
         ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
     def build_settings_tab(self):
         self.settings_tab.columnconfigure(0, weight=1)
+        self.settings_tab.rowconfigure(2, weight=1)
 
         settings_frame = ttk.LabelFrame(self.settings_tab, text="Tracker Behavior")
         settings_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -908,7 +910,6 @@ class FH6TrackerGUI(tk.Tk):
                 "Balanced: recommended.  "
                 "Performance: best in-game FPS (dashboard updates every ~4s)."
             ),
-            wraplength=760,
             justify="left",
             foreground="#555555",
         ).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
@@ -916,7 +917,7 @@ class FH6TrackerGUI(tk.Tk):
 
         ocr_frame = ttk.LabelFrame(self.settings_tab, text="Automatic Credit Tracking (OCR)")
         ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        ocr_frame.columnconfigure(5, weight=1)
+        ocr_frame.columnconfigure(1, weight=1)
 
         ttk.Checkbutton(ocr_frame, text="Auto-track credits by reading the on-screen balance while Forza is open", variable=self.credit_ocr_var).grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=6)
 
@@ -952,18 +953,19 @@ class FH6TrackerGUI(tk.Tk):
         preview_frame = ttk.LabelFrame(self.settings_tab, text="OCR Region Preview")
         preview_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
         preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
 
         preview_inner = ttk.Frame(preview_frame)
         preview_inner.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
         preview_inner.columnconfigure(0, weight=1)
 
         self._preview_canvas = tk.Canvas(preview_inner, bg="#2b2b2b", height=90, highlightthickness=1, highlightbackground="#555555")
-        self._preview_canvas.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._preview_canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         self._preview_canvas.create_text(150, 45, text="No preview yet — click Refresh", fill="#888888", tags="placeholder")
         ttk.Button(preview_inner, text="Refresh\nPreview", command=self._refresh_ocr_preview).grid(row=0, column=1, sticky="ns")
 
         self._preview_info_var = tk.StringVar(value="")
-        ttk.Label(preview_frame, textvariable=self._preview_info_var, foreground="#555555", wraplength=760).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(preview_frame, textvariable=self._preview_info_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
         export_frame = ttk.LabelFrame(self.settings_tab, text="Export & Backup")
         export_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -1278,7 +1280,7 @@ class FH6TrackerGUI(tk.Tk):
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(2, weight=1)
 
-        ttk.Label(dialog, text=prompt, wraplength=490, justify="left").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
+        ttk.Label(dialog, text=prompt, justify="left").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
 
         search_var = tk.StringVar()
         ttk.Entry(dialog, textvariable=search_var).grid(row=1, column=0, sticky="ew", padx=10)
