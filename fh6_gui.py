@@ -407,6 +407,7 @@ class FH6TrackerGUI(tk.Tk):
         self._last_ocr_scan_time = 0
         self._credit_rate_points = []
         self.forza_running_prev = None
+        self._forza_running_cache = False
         self.known_owned = set(load_json_file(OWNED_FILE, {"owned": []}).get("owned", []))
         self.detected_car_id = None
         self._notice_after_id = None
@@ -828,7 +829,6 @@ class FH6TrackerGUI(tk.Tk):
         total_gains = sum(t["amount"] for t in txns if t.get("amount", 0) > 0)
         count = len(txns)
         self.txn_summary_var.set(f"{count} transactions total | Total gains: +{format_credits(total_gains)}")
-        self.refresh_transactions()
 
     def build_stats_tab(self):
         self.stats_tab.columnconfigure(0, weight=1)
@@ -1146,6 +1146,7 @@ class FH6TrackerGUI(tk.Tk):
         self.known_owned = set(self._owned_cache)
 
     def refresh_loop(self):
+        self._forza_running_cache = has_running_forza_process() or has_running_forza_window()
         self.update_forza_session_state()
         self.detect_credit_popup_change()
         self._update_ocr_confidence_indicator()
@@ -1175,8 +1176,6 @@ class FH6TrackerGUI(tk.Tk):
                     return
         except Exception:
             pass
-        for fn in tab_map.values():
-            fn()
 
     def refresh_owned_cars(self):
         self.refresh_collection()
@@ -1197,7 +1196,6 @@ class FH6TrackerGUI(tk.Tk):
             self.detected_car_id = None
             self.detection_status_var.set("Start the tracker and drive a car in Forza to auto-detect it.")
 
-        self.detect_credit_popup_change()
         session_credits = self.get_session_credits()
         self.vars["session_credits_var"].set(format_credits(session_credits))
 
@@ -1349,12 +1347,13 @@ class FH6TrackerGUI(tk.Tk):
 
         session_credits = self.get_session_credits()
         self.stats_session_var.set(f"Session credits: {format_credits(session_credits)}")
-        if has_running_forza_window() or has_running_forza_process():
+        if self._forza_running_cache:
             self.stats_window_var.set("Forza window detected")
         else:
             self.stats_window_var.set("Waiting for Forza window...")
 
-        total_value = sum(int(price) for _, price in build_progress_data(master_db, owned_names)[1])
+        owned_set = {normalize_car_name(n) for n in owned_names}
+        total_value = sum(int(price) for car, price in master_db.items() if normalize_car_name(car) in owned_set)
         self.stats_total_value_var.set(f"Collection value: {format_credits(total_value)}")
 
         self._draw_credit_history()
@@ -1601,22 +1600,29 @@ class FH6TrackerGUI(tk.Tk):
         now = time.monotonic()
         if now - self.last_credit_scan_time < self._ocr_interval_seconds():
             return
-        if not (has_running_forza_process() or has_running_forza_window()):
+        if not self._forza_running_cache:
             return
         self.last_credit_scan_time = now
         self._ocr_total_count += 1
         self._last_ocr_scan_time = now
 
         region_set = self.get_credit_region() is not None
-        text = self._ocr_credit_text()
+        if not region_set:
+            return
+
+        image = self._grab_credit_image()
+        if image is None:
+            return
+
+        text = self._ocr_credit_text_from_image(image)
         self._last_ocr_raw_text = text or ""
-        if (not text or not text.strip()) and not region_set:
+        if not text or not text.strip():
             return
 
         change = detect_credit_change_from_text(text, self.last_credit_balance) if text else None
         balance = parse_credit_balance_from_text(text) if text else None
-        if balance is None and region_set:
-            balance = self._read_region_balance()
+        if balance is None:
+            balance = parse_balance_number_only(self._ocr_numeric_text_from_image(image))
 
         if balance is not None:
             if self.last_credit_balance is None:
@@ -1783,16 +1789,14 @@ class FH6TrackerGUI(tk.Tk):
     def _grab_credit_image(self, region=None):
         if region is None:
             region = self.get_credit_region()
+        if not region:
+            return None
         try:
             if ImageGrab is not None:
-                if region:
-                    x, y, w, h = region
-                    return ImageGrab.grab(bbox=(x, y, x + w, y + h))
-                return ImageGrab.grab()
+                x, y, w, h = region
+                return ImageGrab.grab(bbox=(x, y, x + w, y + h))
             if pyautogui is not None:
-                if region:
-                    return pyautogui.screenshot(region=tuple(region))
-                return pyautogui.screenshot()
+                return pyautogui.screenshot(region=tuple(region))
         except Exception:
             return None
         return None
@@ -1815,7 +1819,7 @@ class FH6TrackerGUI(tk.Tk):
         if height < 120:
             scale = min(4, max(2, round(120 / height)))
             new_width, new_height = image.size
-            image = image.resize((new_width * scale, new_height * scale), Image.LANCZOS)
+            image = image.resize((new_width * scale, new_height * scale), Image.BILINEAR)
         return image
 
     def _set_tesseract_path(self):
@@ -1850,6 +1854,26 @@ class FH6TrackerGUI(tk.Tk):
     def _read_region_balance(self, region=None):
         """Read just the number from a boxed credit region using the numeric OCR pass."""
         return parse_balance_number_only(self._ocr_credit_text(region=region, numeric=True))
+
+    def _ocr_credit_text_from_image(self, image):
+        """Run OCR on an already-captured image (avoids re-capturing the screen)."""
+        if pytesseract is None or image is None:
+            return ""
+        self._set_tesseract_path()
+        try:
+            return pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 6").strip()
+        except Exception:
+            return ""
+
+    def _ocr_numeric_text_from_image(self, image):
+        """Run numeric-only OCR on an already-captured image."""
+        if pytesseract is None or image is None:
+            return ""
+        self._set_tesseract_path()
+        try:
+            return pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
+        except Exception:
+            return ""
 
     def test_credit_ocr(self):
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
