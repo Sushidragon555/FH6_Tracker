@@ -432,6 +432,7 @@ class FH6TrackerGUI(tk.Tk):
         self.bind("<Control-f>", lambda e: self.search_entry.focus_set())
         self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
         self.bind("<Control-r>", lambda e: self.refresh_all())
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def create_widgets(self):
         self.columnconfigure(0, weight=1)
@@ -2886,6 +2887,12 @@ class FH6TrackerGUI(tk.Tk):
         self.style.configure("TLabel", background=bg, foreground=fg)
         self.style.configure("Listbox", background=field_bg, foreground=fg)
         self.style.configure("Text", background=field_bg, foreground=fg)
+
+    def _on_close(self):
+        self.end_session()
+        self.stop_tracker()
+        self.destroy()
+
 
     def _update_tracker_button(self):
         self.start_stop_button.configure(text=tracker_button_label(self.tracker_running))
