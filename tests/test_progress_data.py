@@ -11,7 +11,7 @@ def test_progress_data_excludes_owned_cars():
     master_db = {'Car A': 1000, 'Car B': 2000, 'Car C': 3000}
     owned = ['Car B']
     missing, owned_cars, total_cost = module.build_progress_data(master_db, owned)
-    assert missing == [('Car A', 1000), ('Car C', 3000)]
+    assert missing == [('Car C', 3000), ('Car A', 1000)]
     assert owned_cars == [('Car B', 2000)]
     assert total_cost == 4000
 
