@@ -9,6 +9,8 @@ venv/
 
 # Runtime data / generated files (grow at runtime; not part of the app)
 telemetry_log.csv
+fh6_tracker.log
+*.tmp
 
 # PyInstaller build output
 build/
