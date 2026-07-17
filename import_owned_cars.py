@@ -30,6 +30,15 @@ def load_owned_cars_from_file(path):
 def save_owned_cars(cars, path=None):
     target = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "owned_cars.json")
     data = {"owned": list(dict.fromkeys(cars))}
-    with open(target, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=4)
+    tmp = target + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=4)
+        os.replace(tmp, target)
+    except (OSError, PermissionError, TypeError, ValueError):
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
     return target

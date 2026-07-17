@@ -2,6 +2,7 @@ import csv
 import ctypes
 import importlib
 import json
+import logging
 import os
 import re
 import subprocess
@@ -11,6 +12,27 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 import car_lookup
+
+
+APP_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fh6_tracker.log")
+logger = logging.getLogger("fh6_tracker")
+try:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(APP_LOG_FILE, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+        force=True,
+    )
+except Exception:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True,
+    )
 from import_owned_cars import load_owned_cars_from_file, parse_owned_cars_text, save_owned_cars
 
 try:
@@ -87,7 +109,7 @@ def parse_credit_number(value):
 
 def parse_credit_balance_from_text(text):
 
-    print(f">>> DEBUG RAW TEXT: '{text}'")
+    logger.debug("OCR raw text: '%s'", text)
 
     if not text:
         return None
@@ -104,7 +126,7 @@ def parse_credit_balance_from_text(text):
         if match:
             found_str = match.group(1)
             result = parse_credit_number(found_str)
-            print(f" [MATCH FOUND] string: '{found_str}' -> Value: {result}")
+            logger.debug("OCR match found: string='%s' -> Value=%s", found_str, result)
             return result
     return None
 
@@ -191,9 +213,26 @@ def detect_credit_change_from_text(text, previous_balance=None):
     return None
 
 
+def _safe_write_json(filepath, data):
+    """Atomically write JSON to *filepath* via a temp file, with error handling."""
+    tmp = filepath + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=4)
+        os.replace(tmp, filepath)
+        return True
+    except (OSError, TypeError, ValueError) as exc:
+        logger.error("Failed to write %s: %s", filepath, exc)
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
 def save_settings(settings):
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as handle:
-        json.dump(settings, handle, indent=4)
+    _safe_write_json(SETTINGS_FILE, settings)
 
 
 def normalize_car_name(name):
@@ -274,6 +313,23 @@ def _find_tesseract():
     for p in candidates:
         if os.path.isfile(p):
             return p
+    try:
+        import shutil
+        path = shutil.which("tesseract")
+        if path:
+            return path
+    except Exception:
+        pass
+    if os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Tesseract-OCR") as key:
+                install_dir = winreg.QueryValueEx(key, "InstallDir")[0]
+                tesseract_path = os.path.join(install_dir, "tesseract.exe")
+                if os.path.isfile(tesseract_path):
+                    return tesseract_path
+        except Exception:
+            pass
     return None
 
 
@@ -418,16 +474,23 @@ class FH6TrackerGUI(tk.Tk):
         self._method_timer_after_id = None
         self._master_db_cache = load_json_file(MASTER_FILE, {})
         self._owned_cache = load_json_file(OWNED_FILE, {"owned": []}).get("owned", [])
-        self._master_db_mtime = os.path.getmtime(MASTER_FILE) if os.path.exists(MASTER_FILE) else 0
-        self._owned_mtime = os.path.getmtime(OWNED_FILE) if os.path.exists(OWNED_FILE) else 0
+        try:
+            self._master_db_mtime = os.path.getmtime(MASTER_FILE) if os.path.exists(MASTER_FILE) else 0
+        except (OSError, PermissionError):
+            self._master_db_mtime = 0
+        try:
+            self._owned_mtime = os.path.getmtime(OWNED_FILE) if os.path.exists(OWNED_FILE) else 0
+        except (OSError, PermissionError):
+            self._owned_mtime = 0
+        self._last_auto_added_car = None
         self.goal_summary_var = tk.StringVar(value="No active goal")
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
         self.refresh_all()
-        self.after(self._refresh_interval_ms(), self.refresh_loop)
+        self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
         self.after(2000, self._check_forza_auto_start)
-        self.after(1000, self._update_session_timer)
+        self._session_timer_after_id = self.after(1000, self._update_session_timer)
 
         self.bind("<Control-f>", lambda e: self.search_entry.focus_set())
         self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
@@ -474,7 +537,7 @@ class FH6TrackerGUI(tk.Tk):
         self.credit_h_var = tk.StringVar(value=str(region[3]))
         self.tesseract_path_var = tk.StringVar(value=self.settings.get("tesseract_path", ""))
         self.performance_var = tk.StringVar(value=self.settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE))
-        ttk.Button(controls, text="Save Settings", command=self.save_auto_start_setting).grid(row=0, column=2, padx=(8, 8), sticky="w")
+        ttk.Button(controls, text="Save Settings", command=self.save_all_settings).grid(row=0, column=2, padx=(8, 8), sticky="w")
 
         self.notebook = ttk.Notebook(self)
         self.notebook.grid(row=2, column=0, sticky="nsew")
@@ -750,7 +813,9 @@ class FH6TrackerGUI(tk.Tk):
         self._method_start_time = None
         if self._method_timer_after_id:
             self.after_cancel(self._method_timer_after_id)
-            self._method_timer_after_id = None
+        self._method_timer_after_id = None
+        self._refresh_after_id = None
+        self._session_timer_after_id = None
         self.method_start_stop_btn.configure(text="Start Tracking")
         self.method_status_var.set(
             f"Last: {entry['method']} — {format_credits(credits_earned)} in "
@@ -786,8 +851,7 @@ class FH6TrackerGUI(tk.Tk):
         history = self._load_methods_history()
         history["sessions"].append(entry)
         history["sessions"] = history["sessions"][-200:]
-        with open(METHODS_FILE, "w", encoding="utf-8") as handle:
-            json.dump(history, handle, indent=4)
+        _safe_write_json(METHODS_FILE, history)
 
     def refresh_methods_panel(self):
         history = self._load_methods_history()
@@ -917,7 +981,7 @@ class FH6TrackerGUI(tk.Tk):
             justify="left",
             foreground="#555555",
         ).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
-        ttk.Button(settings_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=5, column=0, sticky="w", padx=8, pady=(6, 8))
+        ttk.Button(settings_frame, text="Apply Settings", command=self.save_all_settings).grid(row=5, column=0, sticky="w", padx=8, pady=(6, 8))
 
         ocr_frame = ttk.LabelFrame(self.settings_tab, text="Automatic Credit Tracking (OCR)")
         ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -941,7 +1005,7 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Label(ocr_frame, text="Tesseract path:").grid(row=3, column=0, sticky="w", padx=8)
         ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var, width=50).grid(row=3, column=1, columnspan=4, sticky="ew", padx=(2, 8))
-        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_auto_start_setting).grid(row=3, column=5, sticky="w", padx=8)
+        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_all_settings).grid(row=3, column=5, sticky="w", padx=8)
 
         self._ocr_confidence_color = tk.StringVar(value="gray")
         self._ocr_confidence_text = tk.StringVar(value="No scans yet")
@@ -1088,8 +1152,7 @@ class FH6TrackerGUI(tk.Tk):
         return load_json_file(CREDIT_TRANSACTIONS_FILE, {"transactions": []})
 
     def _save_credit_transactions(self):
-        with open(CREDIT_TRANSACTIONS_FILE, "w", encoding="utf-8") as handle:
-            json.dump(self._credit_transactions, handle, indent=4)
+        _safe_write_json(CREDIT_TRANSACTIONS_FILE, self._credit_transactions)
 
     def _log_credit_transaction(self, amount, balance_before, balance_after):
         entry = {
@@ -1156,8 +1219,9 @@ class FH6TrackerGUI(tk.Tk):
         self.update_forza_session_state()
         self.detect_credit_popup_change()
         self._update_ocr_confidence_indicator()
+        self._check_tracker_health()
         self._refresh_active_tab()
-        self.after(self._refresh_interval_ms(), self.refresh_loop)
+        self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
         self.update_forza_session_state()
@@ -1229,7 +1293,8 @@ class FH6TrackerGUI(tk.Tk):
 
     def on_new_owned_car(self, car_name):
         self.known_owned.add(car_name)
-        self.show_notice(f"\u2713 You now own: {car_name}")
+        self._last_auto_added_car = car_name
+        self.show_notice(f"\u2713 Auto-added: {car_name}  (undo in Collection tab)")
 
     def show_notice(self, text):
         self.notice_var.set(text)
@@ -1447,8 +1512,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def _save_credit_history(self, history):
         history_file = os.path.join(BASE_DIR, "credit_history.json")
-        with open(history_file, "w", encoding="utf-8") as handle:
-            json.dump(history, handle, indent=4)
+        _safe_write_json(history_file, history)
 
     def _record_session_to_history(self):
         credits = self.get_session_credits()
@@ -1705,8 +1769,7 @@ class FH6TrackerGUI(tk.Tk):
         }
 
     def save_session_state(self):
-        with open(SESSION_STATE_FILE, "w", encoding="utf-8") as handle:
-            json.dump(self.session_state, handle, indent=4)
+        _safe_write_json(SESSION_STATE_FILE, self.session_state)
 
     def get_session_credits(self):
         return self.session_state.get("session_credits", 0)
@@ -2102,6 +2165,8 @@ class FH6TrackerGUI(tk.Tk):
                 break
 
         if best_balance is None:
+            self.show_notice("Running full-text OCR pass...")
+            self.update_idletasks()
             for y_start in range(0, top_strip_h, strip_h // 2):
                 strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
                 strip = self._upscale_for_ocr(strip)
@@ -2194,8 +2259,7 @@ class FH6TrackerGUI(tk.Tk):
         owned = owned_data.get("owned", [])
         if car_name not in owned:
             owned.append(car_name)
-            with open(OWNED_FILE, "w", encoding="utf-8") as handle:
-                json.dump({"owned": owned}, handle, indent=4)
+            _safe_write_json(OWNED_FILE, {"owned": owned})
             self._invalidate_owned_cache()
             messagebox.showinfo("Car added", f"Added {car_name} to your owned list.")
         else:
@@ -2273,21 +2337,23 @@ class FH6TrackerGUI(tk.Tk):
         selection = self.owned_listbox.curselection()
         if not selection:
             if hasattr(self, "last_selected_car") and self.last_selected_car:
-                car_name = self.last_selected_car
+                display = self.last_selected_car
             else:
                 messagebox.showwarning("No selection", "Select a car from the owned list first.")
                 return
         else:
-            car_name = self.owned_listbox.get(selection[0])
-            self.last_selected_car = car_name
+            display = self.owned_listbox.get(selection[0])
+            self.last_selected_car = display
+        car_name = extract_car_name_from_list_entry(display)
+        if not car_name:
+            return
         if not messagebox.askyesno("Remove car", f"Remove '{car_name}' from your owned list?"):
             return
         owned_data = load_json_file(OWNED_FILE, {"owned": []})
         owned = owned_data.get("owned", [])
         if car_name in owned:
             owned.remove(car_name)
-            with open(OWNED_FILE, "w", encoding="utf-8") as handle:
-                json.dump({"owned": owned}, handle, indent=4)
+            _safe_write_json(OWNED_FILE, {"owned": owned})
             self._invalidate_owned_cache()
         self.refresh_all()
 
@@ -2399,8 +2465,6 @@ class FH6TrackerGUI(tk.Tk):
                 for name, path in data_files:
                     if os.path.exists(path):
                         zf.write(path, name)
-                if os.path.exists(MASTER_FILE):
-                    zf.write(MASTER_FILE, "fh6_master_list.json")
             messagebox.showinfo("Backup complete", f"Created backup: {os.path.basename(file_path)}")
         except Exception as exc:
             messagebox.showerror("Backup failed", f"Could not create backup: {exc}")
@@ -2695,8 +2759,7 @@ class FH6TrackerGUI(tk.Tk):
         return load_json_file(SESSION_GOALS_FILE, {"goals": [], "active_goal": None})
 
     def save_session_goals(self, data):
-        with open(SESSION_GOALS_FILE, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=4)
+        _safe_write_json(SESSION_GOALS_FILE, data)
 
     def start_session_goal(self):
         if not self.goal_active_var.get():
@@ -2705,7 +2768,10 @@ class FH6TrackerGUI(tk.Tk):
             return
 
         try:
-            target_credits = int(self.goal_credits_var.get().replace(",", "").replace("K", "000").replace("M", "000000"))
+            raw = self.goal_credits_var.get().strip()
+            target_credits = parse_credit_number(raw)
+            if target_credits is None:
+                raise ValueError
             target_duration = int(self.goal_duration_var.get())
         except ValueError:
             messagebox.showwarning("Invalid input", "Enter valid numbers for target credits and duration.")
@@ -2769,7 +2835,7 @@ class FH6TrackerGUI(tk.Tk):
         except Exception:
             return time.time()
 
-    def save_auto_start_setting(self):
+    def save_all_settings(self):
         previous_mode = self.settings.get("performance_mode")
         self.settings["auto_start_forza"] = bool(self.auto_start_var.get())
         self.settings["launch_tracker_on_start"] = bool(self.launch_tracker_var.get())
@@ -2830,6 +2896,17 @@ class FH6TrackerGUI(tk.Tk):
         self.status_var.set("Status: Stopped")
         self._update_tracker_button()
 
+    def _check_tracker_health(self):
+        if not self.tracker_running:
+            return
+        if self.tracker_process and self.tracker_process.poll() is not None:
+            self.tracker_process = None
+            self.tracker_running = False
+            self.last_status = "Crashed"
+            self.status_var.set("Status: Crashed")
+            self._update_tracker_button()
+            self.show_notice("Tracker process stopped unexpectedly.")
+
     def _check_forza_auto_start(self):
         if not self.settings.get("auto_start_forza", False):
             return
@@ -2853,7 +2930,7 @@ class FH6TrackerGUI(tk.Tk):
                 self.vars["session_time_var"].set("-")
         else:
             self.vars["session_time_var"].set("Not in session")
-        self.after(1000, self._update_session_timer)
+        self._session_timer_after_id = self.after(1000, self._update_session_timer)
 
     def apply_theme(self, theme_name):
         theme_name = theme_name or "light"
@@ -2889,6 +2966,13 @@ class FH6TrackerGUI(tk.Tk):
         self.style.configure("Text", background=field_bg, foreground=fg)
 
     def _on_close(self):
+        for after_id in (self._refresh_after_id, self._session_timer_after_id,
+                         self._method_timer_after_id, self._notice_after_id):
+            if after_id is not None:
+                try:
+                    self.after_cancel(after_id)
+                except Exception:
+                    pass
         self.end_session()
         self.stop_tracker()
         self.destroy()
