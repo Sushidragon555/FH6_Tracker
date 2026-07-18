@@ -9,6 +9,10 @@ import subprocess
 import sys
 import time
 import tkinter as tk
+import webbrowser
+import zipfile
+from collections import Counter
+from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 import car_lookup
@@ -33,7 +37,7 @@ except Exception:
         handlers=[logging.StreamHandler(sys.stdout)],
         force=True,
     )
-from import_owned_cars import load_owned_cars_from_file, parse_owned_cars_text, save_owned_cars
+from import_owned_cars import load_owned_cars_from_file, parse_owned_cars_text
 
 try:
     pyautogui = importlib.import_module("pyautogui")
@@ -41,12 +45,14 @@ try:
     ImageGrab = importlib.import_module("PIL.ImageGrab")
     Image = importlib.import_module("PIL.Image")
     ImageOps = importlib.import_module("PIL.ImageOps")
+    ImageTk = importlib.import_module("PIL.ImageTk")
 except Exception:  # pragma: no cover - optional OCR dependencies
     pyautogui = None
     pytesseract = None
     ImageGrab = None
     Image = None
     ImageOps = None
+    ImageTk = None
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -241,10 +247,6 @@ def normalize_car_name(name):
     lowered = name.strip().lower()
     lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
     return " ".join(lowered.split())
-
-
-def parse_owned_cars_input(text):
-    return parse_owned_cars_text(text)
 
 
 def extract_car_name_from_list_entry(entry):
@@ -600,6 +602,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(filter_frame, text="Year:").grid(row=0, column=4, sticky="w", padx=(8, 4), pady=6)
         self.progress_year_var = tk.StringVar()
         ttk.Entry(filter_frame, textvariable=self.progress_year_var, width=8).grid(row=0, column=5, padx=(4, 8), pady=6, sticky="w")
+        self.progress_year_var.trace_add("write", lambda *_: self._validate_year_entry())
 
         ttk.Label(filter_frame, text="Min Value:").grid(row=0, column=6, sticky="w", padx=(8, 4), pady=6)
         self.collection_min_value_var = tk.StringVar()
@@ -646,15 +649,25 @@ class FH6TrackerGUI(tk.Tk):
         self.owned_frame.columnconfigure(0, weight=1)
         self.owned_frame.rowconfigure(0, weight=1)
 
-        self.unowned_listbox = tk.Listbox(self.missing_frame, height=24, font=("Consolas", 10))
-        self.unowned_listbox.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        missing_search_frame = ttk.Frame(self.missing_frame)
+        missing_search_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(6, 0))
+        missing_search_frame.columnconfigure(1, weight=1)
+        ttk.Label(missing_search_frame, text="Filter:").grid(row=0, column=0, padx=(0, 4))
+        self._missing_search_var = tk.StringVar()
+        self._missing_search_entry = ttk.Entry(missing_search_frame, textvariable=self._missing_search_var, width=30)
+        self._missing_search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        ttk.Button(missing_search_frame, text="Clear", command=lambda: (self._missing_search_var.set(""), self.refresh_collection())).grid(row=0, column=2)
+        self._missing_search_var.trace_add("write", lambda *_: self.refresh_collection())
+
+        self.unowned_listbox = tk.Listbox(self.missing_frame, height=22, font=("Consolas", 10))
+        self.unowned_listbox.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
         self.unowned_listbox.bind("<Double-1>", lambda event: self.add_selected_missing_car())
         self._add_missing_context_menu()
         missing_scrollbar = ttk.Scrollbar(self.missing_frame, orient="vertical", command=self.unowned_listbox.yview)
-        missing_scrollbar.grid(row=0, column=1, sticky="ns", pady=8)
+        missing_scrollbar.grid(row=1, column=1, sticky="ns", pady=8)
         self.unowned_listbox.configure(yscrollcommand=missing_scrollbar.set)
         self.missing_frame.columnconfigure(0, weight=1)
-        self.missing_frame.rowconfigure(0, weight=1)
+        self.missing_frame.rowconfigure(1, weight=1)
 
     def build_live_tab(self):
         self.live_tab.columnconfigure(0, weight=1)
@@ -814,8 +827,6 @@ class FH6TrackerGUI(tk.Tk):
         if self._method_timer_after_id:
             self.after_cancel(self._method_timer_after_id)
         self._method_timer_after_id = None
-        self._refresh_after_id = None
-        self._session_timer_after_id = None
         self.method_start_stop_btn.configure(text="Start Tracking")
         self.method_status_var.set(
             f"Last: {entry['method']} — {format_credits(credits_earned)} in "
@@ -998,6 +1009,8 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Entry(ocr_frame, textvariable=self.credit_w_var, width=7).grid(row=2, column=2, padx=(2, 8))
         ttk.Label(ocr_frame, text="H").grid(row=2, column=3, sticky="e")
         ttk.Entry(ocr_frame, textvariable=self.credit_h_var, width=7).grid(row=2, column=4, padx=(2, 8))
+        for var in (self.credit_x_var, self.credit_y_var, self.credit_w_var, self.credit_h_var):
+            var.trace_add("write", lambda *_, v=var: v.set(re.sub(r"[^0-9]", "", v.get())))
 
         ttk.Button(ocr_frame, text="Capture Area", command=self.capture_credit_area).grid(row=1, column=5, sticky="w", padx=8)
         ttk.Button(ocr_frame, text="Test OCR", command=self.test_credit_ocr).grid(row=2, column=5, sticky="w", padx=8)
@@ -1247,9 +1260,6 @@ class FH6TrackerGUI(tk.Tk):
         except Exception:
             pass
 
-    def refresh_owned_cars(self):
-        self.refresh_collection()
-
     def refresh_live_data(self):
         latest = self.read_latest_telemetry_row()
         if latest:
@@ -1335,7 +1345,8 @@ class FH6TrackerGUI(tk.Tk):
         self.refresh_all()
 
     def _choose_master_car(self, title, prompt, preselect=None):
-        master_db = load_json_file(MASTER_FILE, {})
+        self._check_cache_reload()
+        master_db = self._master_db_cache
         all_cars = sorted(name for name in master_db if name and name != "Year Make Model")
         if not all_cars:
             messagebox.showwarning("No car list", "The master car list is empty.")
@@ -1636,15 +1647,25 @@ class FH6TrackerGUI(tk.Tk):
             except Exception:
                 pass
 
+        missing_filter = self._missing_search_var.get().strip().lower()
+        if missing_filter:
+            filtered_missing = [(c, p) for c, p in missing if missing_filter in c.lower()]
+        else:
+            filtered_missing = missing
+
         self.unowned_listbox.delete(0, tk.END)
-        for car, price in missing[:120]:
+        display_limit = 120
+        for car, price in filtered_missing[:display_limit]:
             self.unowned_listbox.insert(tk.END, f"{car} | {format_credits(price)}")
+        if len(filtered_missing) > display_limit:
+            self.unowned_listbox.insert(tk.END, f"--- {len(filtered_missing) - display_limit} more — refine your filter ---")
 
         total_owned_value = sum(price for _, price in owned_cars)
         total_missing = len(missing)
         self.collection_summary_var.set(
             f"{len(owned_names)} owned ({format_credits(total_owned_value)} value) • "
             f"{total_missing} still missing ({format_credits(total_cost)} to buy)"
+            + (f" • Showing {len(filtered_missing)}" if missing_filter else "")
         )
 
     def clear_collection_filters(self):
@@ -1655,8 +1676,15 @@ class FH6TrackerGUI(tk.Tk):
         self.collection_max_value_var.set("")
         self.refresh_collection()
 
+    def _validate_year_entry(self):
+        raw = self.progress_year_var.get()
+        cleaned = re.sub(r"[^0-9]", "", raw)
+        if cleaned != raw:
+            self.progress_year_var.set(cleaned)
+
     def populate_progress_manufacturers(self):
-        master_db = load_json_file(MASTER_FILE, {})
+        self._check_cache_reload()
+        master_db = self._master_db_cache
         manufacturers = sorted({car.split()[1] if len(car.split()) > 1 else "" for car in master_db.keys() if car})
         manufacturers = [m for m in manufacturers if m]
         self.progress_manufacturer_dropdown['values'] = manufacturers
@@ -1917,7 +1945,8 @@ class FH6TrackerGUI(tk.Tk):
         config = "--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM" if numeric else "--psm 6"
         try:
             return pytesseract.image_to_string(self._upscale_for_ocr(image), config=config).strip()
-        except Exception:
+        except Exception as exc:
+            logger.warning("OCR failed: %s", exc)
             return ""
 
     def _read_region_balance(self, region=None):
@@ -1931,7 +1960,8 @@ class FH6TrackerGUI(tk.Tk):
         self._set_tesseract_path()
         try:
             return pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 6").strip()
-        except Exception:
+        except Exception as exc:
+            logger.warning("OCR from image failed: %s", exc)
             return ""
 
     def _ocr_numeric_text_from_image(self, image):
@@ -1941,7 +1971,8 @@ class FH6TrackerGUI(tk.Tk):
         self._set_tesseract_path()
         try:
             return pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Numeric OCR failed: %s", exc)
             return ""
 
     def test_credit_ocr(self):
@@ -2090,7 +2121,6 @@ class FH6TrackerGUI(tk.Tk):
             new_w = max(1, int(img_w * scale))
             new_h = max(1, int(img_h * scale))
             resized = image.resize((new_w, new_h), Image.LANCZOS) if Image is not None else image
-            from PIL import ImageTk
             self._preview_photo = ImageTk.PhotoImage(resized)
             self._preview_canvas.create_image(cw // 2, ch // 2, image=self._preview_photo, anchor="center")
         except Exception as exc:
@@ -2217,7 +2247,6 @@ class FH6TrackerGUI(tk.Tk):
         self._ocr_raw_text_var.set(raw or "(empty)")
 
     def current_timestamp(self):
-        from datetime import datetime, timezone
         return datetime.now(timezone.utc).isoformat()
 
     def read_latest_telemetry_row(self):
@@ -2255,15 +2284,14 @@ class FH6TrackerGUI(tk.Tk):
         if not car_name:
             messagebox.showwarning("Missing input", "Enter a car name first.")
             return
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = owned_data.get("owned", [])
+        owned = list(self._owned_cache)
         if car_name not in owned:
             owned.append(car_name)
             _safe_write_json(OWNED_FILE, {"owned": owned})
             self._invalidate_owned_cache()
-            messagebox.showinfo("Car added", f"Added {car_name} to your owned list.")
+            self.show_notice(f"Added {car_name} to your owned list.")
         else:
-            messagebox.showinfo("Already present", f"{car_name} is already in your owned list.")
+            self.show_notice(f"{car_name} is already in your owned list.")
         self.add_car_var.set("")
         self.refresh_all()
 
@@ -2271,19 +2299,18 @@ class FH6TrackerGUI(tk.Tk):
         text = simpledialog.askstring("Import owned cars", "Paste your car names, one per line or separated by commas:")
         if text is None:
             return
-        cars = parse_owned_cars_input(text)
+        cars = parse_owned_cars_text(text)
         if not cars:
             messagebox.showwarning("No cars found", "Paste at least one car name first.")
             return
 
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = owned_data.get("owned", [])
+        owned = list(self._owned_cache)
         new_cars = [car for car in cars if car not in owned]
         if new_cars:
             owned.extend(new_cars)
-            save_owned_cars(owned, OWNED_FILE)
+            _safe_write_json(OWNED_FILE, {"owned": owned})
             self._invalidate_owned_cache()
-        messagebox.showinfo("Import complete", f"Imported {len(new_cars)} new cars into your owned list.")
+        self.show_notice(f"Imported {len(new_cars)} new cars into your owned list.")
         self.refresh_all()
 
     def import_owned_cars_from_file(self):
@@ -2302,14 +2329,13 @@ class FH6TrackerGUI(tk.Tk):
             messagebox.showwarning("No cars found", "The selected file did not contain any readable car names.")
             return
 
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = owned_data.get("owned", [])
+        owned = list(self._owned_cache)
         new_cars = [car for car in cars if car not in owned]
         if new_cars:
             owned.extend(new_cars)
-            save_owned_cars(owned, OWNED_FILE)
+            _safe_write_json(OWNED_FILE, {"owned": owned})
             self._invalidate_owned_cache()
-        messagebox.showinfo("Import complete", f"Imported {len(new_cars)} new cars from {os.path.basename(file_path)}.")
+        self.show_notice(f"Imported {len(new_cars)} new cars from {os.path.basename(file_path)}.")
         self.refresh_all()
 
     def on_owned_list_select(self, event=None):
@@ -2326,11 +2352,11 @@ class FH6TrackerGUI(tk.Tk):
         if not car_name:
             return
 
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = owned_data.get("owned", [])
-        owned = add_car_to_owned_list(owned, car_name)
-        save_owned_cars(owned, OWNED_FILE)
-        self._invalidate_owned_cache()
+        owned = list(self._owned_cache)
+        if car_name not in owned:
+            owned.append(car_name)
+            _safe_write_json(OWNED_FILE, {"owned": owned})
+            self._invalidate_owned_cache()
         self.refresh_all()
 
     def remove_selected_car(self):
@@ -2349,61 +2375,12 @@ class FH6TrackerGUI(tk.Tk):
             return
         if not messagebox.askyesno("Remove car", f"Remove '{car_name}' from your owned list?"):
             return
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = owned_data.get("owned", [])
+        owned = list(self._owned_cache)
         if car_name in owned:
             owned.remove(car_name)
             _safe_write_json(OWNED_FILE, {"owned": owned})
             self._invalidate_owned_cache()
         self.refresh_all()
-
-    def _add_owned_context_menu(self):
-        self.owned_context_menu = tk.Menu(self, tearoff=0)
-        self.owned_context_menu.add_command(label="Remove Selected", command=self.remove_selected_car)
-        self.owned_context_menu.add_command(label="Copy Name", command=lambda: self._copy_selection(self.owned_listbox))
-        self.owned_context_menu.add_command(label="Export to CSV", command=self.export_owned_to_csv)
-        self.owned_context_menu.add_separator()
-        self.owned_context_menu.add_command(label="Select All", command=lambda: self.owned_listbox.selection_set(0, tk.END))
-        self.owned_listbox.bind("<Button-3>", self._show_owned_context_menu)
-        self.owned_listbox.bind("<Control-Button-1>", self._show_owned_context_menu)
-
-    def _add_missing_context_menu(self):
-        self.missing_context_menu = tk.Menu(self, tearoff=0)
-        self.missing_context_menu.add_command(label="Add to Owned", command=self.add_selected_missing_car)
-        self.missing_context_menu.add_command(label="Copy Name", command=lambda: self._copy_selection(self.unowned_listbox))
-        self.missing_context_menu.add_command(label="Search Online", command=self._search_car_online)
-        self.missing_context_menu.add_separator()
-        self.missing_context_menu.add_command(label="Select All", command=lambda: self.unowned_listbox.selection_set(0, tk.END))
-        self.unowned_listbox.bind("<Button-3>", self._show_missing_context_menu)
-        self.unowned_listbox.bind("<Control-Button-1>", self._show_missing_context_menu)
-
-    def _show_owned_context_menu(self, event):
-        try:
-            self.owned_context_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.owned_context_menu.grab_release()
-
-    def _show_missing_context_menu(self, event):
-        try:
-            self.missing_context_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.missing_context_menu.grab_release()
-
-    def _copy_selection(self, listbox):
-        selection = listbox.curselection()
-        if selection:
-            text = "\n".join(listbox.get(i) for i in selection)
-            self.clipboard_clear()
-            self.clipboard_append(text)
-
-    def _search_car_online(self):
-        selection = self.unowned_listbox.curselection()
-        if selection:
-            car_name = extract_car_name_from_list_entry(self.unowned_listbox.get(selection[0]))
-            if car_name:
-                import webbrowser
-                query = car_name.replace(" ", "+")
-                webbrowser.open(f"https://www.google.com/search?q={query}+Forza+Horizon")
 
     def export_owned_to_csv(self):
         file_path = filedialog.asksaveasfilename(
@@ -2413,16 +2390,15 @@ class FH6TrackerGUI(tk.Tk):
         )
         if not file_path:
             return
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = owned_data.get("owned", [])
-        master_db = load_json_file(MASTER_FILE, {})
+        owned = sorted(self._owned_cache)
+        master_db = self._master_db_cache
         with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["Car", "Price"])
-            for car in sorted(owned):
+            for car in owned:
                 price = master_db.get(car, 0)
                 writer.writerow([car, price])
-        messagebox.showinfo("Export complete", f"Exported {len(owned)} cars to {os.path.basename(file_path)}")
+        self.show_notice(f"Exported {len(owned)} cars to {os.path.basename(file_path)}")
 
     def export_collection_to_csv(self):
         file_path = filedialog.asksaveasfilename(
@@ -2432,19 +2408,17 @@ class FH6TrackerGUI(tk.Tk):
         )
         if not file_path:
             return
-        master_db = load_json_file(MASTER_FILE, {})
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = set(owned_data.get("owned", []))
+        master_db = self._master_db_cache
+        owned = set(self._owned_cache)
         with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["Car", "Price", "Owned"])
             for car, price in sorted(master_db.items()):
                 if car and car != "Year Make Model":
                     writer.writerow([car, price, "Yes" if car in owned else "No"])
-        messagebox.showinfo("Export complete", f"Exported {len(master_db)} cars to {os.path.basename(file_path)}")
+        self.show_notice(f"Exported {len(master_db)} cars to {os.path.basename(file_path)}")
 
     def backup_all_data(self):
-        import zipfile
         file_path = filedialog.asksaveasfilename(
             defaultextension=".zip",
             filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
@@ -2465,12 +2439,11 @@ class FH6TrackerGUI(tk.Tk):
                 for name, path in data_files:
                     if os.path.exists(path):
                         zf.write(path, name)
-            messagebox.showinfo("Backup complete", f"Created backup: {os.path.basename(file_path)}")
+            self.show_notice(f"Created backup: {os.path.basename(file_path)}")
         except Exception as exc:
             messagebox.showerror("Backup failed", f"Could not create backup: {exc}")
 
     def restore_from_backup(self):
-        import zipfile
         file_path = filedialog.askopenfilename(
             filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
             title="Restore from Backup"
@@ -2479,6 +2452,10 @@ class FH6TrackerGUI(tk.Tk):
             return
         try:
             with zipfile.ZipFile(file_path, "r") as zf:
+                for member in zf.namelist():
+                    resolved = os.path.realpath(os.path.join(BASE_DIR, member))
+                    if not resolved.startswith(os.path.realpath(BASE_DIR) + os.sep):
+                        raise ValueError(f"Path traversal detected: {member}")
                 zf.extractall(BASE_DIR)
             self._invalidate_owned_cache()
             self._master_db_cache = load_json_file(MASTER_FILE, {})
@@ -2486,7 +2463,7 @@ class FH6TrackerGUI(tk.Tk):
             self.settings = load_settings()
             self.apply_theme(self.settings.get("theme", "light"))
             self.refresh_all()
-            messagebox.showinfo("Restore complete", "Data restored from backup. GUI refreshed.")
+            self.show_notice("Data restored from backup.")
         except Exception as exc:
             messagebox.showerror("Restore failed", f"Could not restore backup: {exc}")
 
@@ -2566,26 +2543,23 @@ class FH6TrackerGUI(tk.Tk):
         file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")], title="Export Selected Cars")
         if not file_path:
             return
-        master_db = load_json_file(MASTER_FILE, {})
         with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["Car", "Price"])
             for car in cars:
-                writer.writerow([car, master_db.get(car, 0)])
-        messagebox.showinfo("Export complete", f"Exported {len(cars)} cars")
+                writer.writerow([car, self._master_db_cache.get(car, 0)])
+        self.show_notice(f"Exported {len(cars)} cars")
 
     def _search_selected_car(self):
         selection = self.owned_listbox.curselection()
         if selection:
             car = extract_car_name_from_list_entry(self.owned_listbox.get(selection[0]))
-            import webbrowser
             webbrowser.open(f"https://www.google.com/search?q={car.replace(' ', '+')}+Forza+Horizon")
 
     def _search_selected_missing(self):
         selection = self.unowned_listbox.curselection()
         if selection:
             car = extract_car_name_from_list_entry(self.unowned_listbox.get(selection[0]))
-            import webbrowser
             webbrowser.open(f"https://www.google.com/search?q={car.replace(' ', '+')}+Forza+Horizon")
 
     def _copy_selected_car_name(self):
@@ -2607,13 +2581,12 @@ class FH6TrackerGUI(tk.Tk):
         if not selection:
             return
         car = extract_car_name_from_list_entry(self.unowned_listbox.get(selection[0]))
-        master_db = load_json_file(MASTER_FILE, {})
-        price = master_db.get(car, 0)
+        self._check_cache_reload()
+        price = self._master_db_cache.get(car, 0)
         messagebox.showinfo(car, f"Car: {car}\nPrice: {format_credits(price)} ({price:,} CR)")
 
     def compute_recommendations(self, master_db, owned_names, method="all"):
         """Generate smart recommendations for missing cars."""
-        from collections import Counter
         owned_norm = {normalize_car_name(n) for n in owned_names if n}
         missing = []
         manufacturer_counts = Counter()
@@ -2738,8 +2711,7 @@ class FH6TrackerGUI(tk.Tk):
             messagebox.showinfo("No selection", "Select one or more cars from the recommendations list.")
             return
 
-        owned_data = load_json_file(OWNED_FILE, {"owned": []})
-        owned = owned_data.get("owned", [])
+        owned = list(self._owned_cache)
         added = 0
         for item_id in selection:
             car = self.recommendations_tree.item(item_id, "values")[0]
@@ -2748,11 +2720,11 @@ class FH6TrackerGUI(tk.Tk):
                 added += 1
 
         if added:
-            save_owned_cars(owned, OWNED_FILE)
+            _safe_write_json(OWNED_FILE, {"owned": owned})
             self._invalidate_owned_cache()
-            messagebox.showinfo("Added", f"Added {added} car(s) to your owned list.")
+            self.show_notice(f"Added {added} car(s) to your owned list.")
         else:
-            messagebox.showinfo("Already owned", "All selected cars are already in your owned list.")
+            self.show_notice("All selected cars are already in your owned list.")
         self.refresh_all()
 
     def load_session_goals(self):
@@ -2830,7 +2802,6 @@ class FH6TrackerGUI(tk.Tk):
 
     def _parse_iso_time(self, iso_str):
         try:
-            from datetime import datetime, timezone
             return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
         except Exception:
             return time.time()
@@ -2855,7 +2826,7 @@ class FH6TrackerGUI(tk.Tk):
             self.start_tracker()
         else:
             self.after(0, self._check_forza_auto_start)
-        messagebox.showinfo("Settings saved", "Tracker launch settings updated.")
+        self.show_notice("Settings saved.")
 
     def toggle_tracker(self):
         if self.tracker_running:
@@ -2899,7 +2870,14 @@ class FH6TrackerGUI(tk.Tk):
     def _check_tracker_health(self):
         if not self.tracker_running:
             return
-        if self.tracker_process and self.tracker_process.poll() is not None:
+        if self.tracker_process is None:
+            self.tracker_running = False
+            self.last_status = "Crashed"
+            self.status_var.set("Status: Crashed")
+            self._update_tracker_button()
+            self.show_notice("Tracker process missing.")
+            return
+        if self.tracker_process.poll() is not None:
             self.tracker_process = None
             self.tracker_running = False
             self.last_status = "Crashed"
@@ -2920,7 +2898,6 @@ class FH6TrackerGUI(tk.Tk):
     def _update_session_timer(self):
         if self.session_state.get("session_started") and self.session_state.get("session_start_time"):
             try:
-                from datetime import datetime, timezone
                 start = datetime.fromisoformat(self.session_state["session_start_time"])
                 elapsed = datetime.now(timezone.utc) - start
                 hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
@@ -2950,20 +2927,33 @@ class FH6TrackerGUI(tk.Tk):
 
         self.configure(bg=bg)
         self.style.theme_use("clam")
-        self.style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg)
+        self.style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg, selectbackground=accent, selectforeground="white")
         self.style.configure("TFrame", background=bg)
         self.style.configure("TLabelframe", background=bg)
         self.style.configure("TLabelframe.Label", background=bg, foreground=fg)
         self.style.configure("TNotebook", background=bg, borderwidth=0)
-        self.style.configure("TNotebook.Tab", background=button_bg, foreground=fg)
+        self.style.configure("TNotebook.Tab", background=button_bg, foreground=fg, padding=[10, 4])
         self.style.map("TNotebook.Tab", background=[("selected", accent), ("active", button_bg)], foreground=[("selected", "white"), ("active", fg)])
-        self.style.configure("TButton", background=button_bg, foreground=fg)
+        self.style.configure("TButton", background=button_bg, foreground=fg, bordercolor=accent)
         self.style.map("TButton", background=[("active", accent), ("pressed", accent)], foreground=[("active", "white")])
         self.style.configure("TEntry", fieldbackground=field_bg, foreground=fg)
-        self.style.configure("TCombobox", fieldbackground=field_bg, foreground=fg)
+        self.style.configure("TCombobox", fieldbackground=field_bg, foreground=fg, arrowcolor=fg)
         self.style.configure("TLabel", background=bg, foreground=fg)
-        self.style.configure("Listbox", background=field_bg, foreground=fg)
-        self.style.configure("Text", background=field_bg, foreground=fg)
+        self.style.configure("TProgressbar", background=accent, troughcolor=field_bg, bordercolor=bg)
+        self.style.configure("Treeview", background=field_bg, foreground=fg, fieldbackground=field_bg)
+        self.style.configure("Treeview.Heading", background=button_bg, foreground=fg, fieldbackground=button_bg)
+        self.style.map("Treeview.Heading", background=[("active", accent)])
+        self.style.configure("Vertical.TScrollbar", background=button_bg, troughcolor=field_bg, arrowcolor=fg)
+        self.style.configure("Horizontal.TScrollbar", background=button_bg, troughcolor=field_bg, arrowcolor=fg)
+        self.style.configure("Listbox", background=field_bg, foreground=fg, selectbackground=accent)
+        self.style.configure("Text", background=field_bg, foreground=fg, insertbackground=fg)
+        if theme_name == "dark":
+            self.style.configure("Canvas", background=field_bg)
+        self.update_idletasks()
+        for canvas in (getattr(self, "history_canvas", None), getattr(self, "rate_canvas", None),
+                       getattr(self, "_preview_canvas", None)):
+            if canvas:
+                canvas.configure(bg=field_bg if theme_name == "dark" else "white")
 
     def _on_close(self):
         for after_id in (self._refresh_after_id, self._session_timer_after_id,
