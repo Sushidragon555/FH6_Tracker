@@ -485,6 +485,9 @@ class FH6TrackerGUI(tk.Tk):
         except (OSError, PermissionError):
             self._owned_mtime = 0
         self._last_auto_added_car = None
+        self._prev_thumb = None
+        self._last_change_check_time = 0.0
+        self._last_fullscreen_scan_time = 0.0
         self.goal_summary_var = tk.StringVar(value="No active goal")
         self.style = ttk.Style(self)
         self.create_widgets()
@@ -726,6 +729,9 @@ class FH6TrackerGUI(tk.Tk):
             self._live_ocr_raw_var = tk.StringVar(value="")
             ttk.Label(ocr_status_frame, text="Raw text:").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
             ttk.Label(ocr_status_frame, textvariable=self._live_ocr_raw_var, foreground="#888888").grid(row=2, column=1, sticky="w", padx=(4, 8), pady=(0, 6))
+            self._live_popup_var = tk.StringVar(value="")
+            ttk.Label(ocr_status_frame, text="Last popup:").grid(row=3, column=0, sticky="w", padx=8, pady=(0, 6))
+            ttk.Label(ocr_status_frame, textvariable=self._live_popup_var, foreground="#888888").grid(row=3, column=1, sticky="w", padx=(4, 8), pady=(0, 6))
 
     def build_methods_tab(self):
         self.methods_tab.columnconfigure(0, weight=1)
@@ -1043,6 +1049,12 @@ class FH6TrackerGUI(tk.Tk):
         self._ocr_raw_text_var = tk.StringVar(value="")
         ttk.Label(conf_frame, textvariable=self._ocr_raw_text_var, foreground="#888888").pack(side="left")
 
+        test_popup_frame = ttk.Frame(ocr_frame)
+        test_popup_frame.grid(row=5, column=0, columnspan=6, sticky="w", padx=8, pady=(4, 8))
+        ttk.Button(test_popup_frame, text="Test Popup Detection", command=self._test_popup_scan).pack(side="left", padx=(0, 8))
+        self._popup_test_var = tk.StringVar(value="")
+        ttk.Label(test_popup_frame, textvariable=self._popup_test_var, foreground="#555555").pack(side="left")
+
         preview_frame = ttk.LabelFrame(self.settings_tab, text="OCR Region Preview")
         preview_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
         preview_frame.columnconfigure(0, weight=1)
@@ -1320,6 +1332,7 @@ class FH6TrackerGUI(tk.Tk):
                 self._live_ocr_status_var.set("OCR disabled — enable in Settings tab")
                 self._live_ocr_balance_var.set("")
                 self._live_ocr_raw_var.set("")
+                self._live_popup_var.set("")
 
     def auto_register_from_telemetry(self, latest):
         car_id = latest.get("car_id")
@@ -1827,6 +1840,7 @@ class FH6TrackerGUI(tk.Tk):
                 self.last_credit_balance += change
             self._log_credit_transaction(change, old_balance or 0, self.last_credit_balance or 0)
             self._ocr_success_count += 1
+            self._live_popup_var.set(f"{format_credits(change)} at {datetime.now().strftime('%H:%M:%S')}")
             self.show_notice(f"Popup detected: {format_credits(change)}")
 
     def detect_credit_popup_change(self):
@@ -2186,6 +2200,38 @@ class FH6TrackerGUI(tk.Tk):
         else:
             debug_lines.insert(0, "No credit balance found in the captured area.")
             messagebox.showinfo("OCR test", "\n\n".join(debug_lines))
+
+    def _test_popup_scan(self):
+        self._popup_test_var.set("Scanning...")
+        self.update_idletasks()
+        if pytesseract is None or ImageGrab is None:
+            self._popup_test_var.set("OCR not installed")
+            return
+        self._set_tesseract_path()
+        try:
+            full = ImageGrab.grab()
+        except Exception as exc:
+            self._popup_test_var.set(f"Capture failed: {exc}")
+            return
+        w, h = full.size
+        scale = min(800 / max(w, 1), 1.0)
+        if scale < 1.0 and Image is not None:
+            small = full.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        else:
+            small = full
+        try:
+            text = pytesseract.image_to_string(small, config="--psm 6").strip()
+        except Exception as exc:
+            self._popup_test_var.set(f"OCR error: {exc}")
+            return
+        summary = text[:200].replace("\n", " | ")
+        change = detect_credit_change_from_text(text)
+        parts = [f"Raw: '{summary}'"]
+        if change:
+            parts.append(f"Change detected: {format_credits(change)}")
+        else:
+            parts.append("No credit change pattern found")
+        self._popup_test_var.set(" | ".join(parts))
 
     def capture_credit_area(self):
         try:
