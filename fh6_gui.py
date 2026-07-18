@@ -1311,7 +1311,7 @@ class FH6TrackerGUI(tk.Tk):
                 elif not self._forza_running_cache:
                     self._live_ocr_status_var.set("OCR enabled — waiting for Forza to open")
                 else:
-                    self._live_ocr_status_var.set("OCR active — scanning every few seconds")
+                    self._live_ocr_status_var.set("OCR active — balance + popup scanning")
                 bal = self.last_credit_balance
                 self._live_ocr_balance_var.set(format_credits(bal) if bal is not None else "Not yet detected")
                 raw = self._last_ocr_raw_text
@@ -1731,6 +1731,66 @@ class FH6TrackerGUI(tk.Tk):
         manufacturers = [m for m in manufacturers if m]
         self.progress_manufacturer_dropdown['values'] = manufacturers
 
+    def _scan_fullscreen_popups(self, now):
+        """Run a full-screen OCR scan looking for credit popup text anywhere on screen.
+        Runs at a slower cadence (every 30s) and uses a downscaled image for speed.
+        """
+        fullscreen_interval = 30
+        last = getattr(self, "_last_fullscreen_scan_time", 0)
+        if now - last < fullscreen_interval:
+            return
+        self._last_fullscreen_scan_time = now
+
+        try:
+            if ImageGrab is not None:
+                full = ImageGrab.grab()
+            elif pyautogui is not None:
+                full = pyautogui.screenshot()
+            else:
+                return
+        except Exception:
+            return
+
+        # Downscale to ~800px wide for fast OCR
+        w, h = full.size
+        scale = min(800 / max(w, 1), 1.0)
+        if scale < 1.0 and Image is not None:
+            small = full.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        else:
+            small = full
+
+        try:
+            text = pytesseract.image_to_string(small, config="--psm 6").strip()
+        except Exception:
+            return
+
+        if not text:
+            return
+
+        # Look for credit change patterns anywhere in the full text
+        change = detect_credit_change_from_text(text, self.last_credit_balance)
+        if change is None or change == 0:
+            # Also try pure number detection for popups like "+50,000 CR"
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                amount = parse_credit_number(line.split()[0]) if line.split() else None
+                if amount and amount >= 1000:
+                    keywords = ["earn", "won", "reward", "received", "gain", "bonus", "+"]
+                    if any(k in line.lower() for k in keywords):
+                        change = amount
+                        break
+
+        if change is not None and change != 0:
+            old_balance = self.last_credit_balance
+            self.update_session_credits(change)
+            if self.last_credit_balance is not None:
+                self.last_credit_balance += change
+            self._log_credit_transaction(change, old_balance or 0, self.last_credit_balance or 0)
+            self._ocr_success_count += 1
+            self.show_notice(f"Detected credit change from popup: {format_credits(change)}")
+
     def detect_credit_popup_change(self):
         if pyautogui is None or pytesseract is None or ImageGrab is None:
             return
@@ -1745,6 +1805,9 @@ class FH6TrackerGUI(tk.Tk):
         self.last_credit_scan_time = now
         self._ocr_total_count += 1
         self._last_ocr_scan_time = now
+
+        # Full-screen popup scan (runs every 30s regardless of region setting)
+        self._scan_fullscreen_popups(now)
 
         region_set = self.get_credit_region() is not None
         if not region_set:
