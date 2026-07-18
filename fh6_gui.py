@@ -1732,14 +1732,46 @@ class FH6TrackerGUI(tk.Tk):
         self.progress_manufacturer_dropdown['values'] = manufacturers
 
     def _scan_fullscreen_popups(self, now):
-        """Run a full-screen OCR scan looking for credit popup text anywhere on screen.
-        Runs at a slower cadence (every 30s) and uses a downscaled image for speed.
+        """Detect screen changes and scan for credit popups.
+
+        Every ~2s takes a tiny (160x90) snapshot and compares it to the previous
+        frame.  If the screen changed significantly (a popup appeared), it immediately
+        grabs a full-res frame and runs OCR on it.  A forced full scan also runs
+        every 30s as a safety net.
         """
+        # --- Change detection (fast, every ~2s) ---
+        change_detect_interval = 2.0
+        last_change_check = getattr(self, "_last_change_check_time", 0)
+        detected_change = False
+        if now - last_change_check >= change_detect_interval:
+            self._last_change_check_time = now
+            try:
+                if ImageGrab is not None:
+                    tiny = ImageGrab.grab()
+                elif pyautogui is not None:
+                    tiny = pyautogui.screenshot()
+                else:
+                    return
+                if Image is not None:
+                    tiny = tiny.resize((160, 90), Image.LANCZOS)
+                # Convert to grayscale bytes for fast comparison
+                gray = tiny.convert("L") if Image is not None else tiny
+                thumb = list(gray.getdata()) if hasattr(gray, "getdata") else []
+                prev = getattr(self, "_prev_thumb", None)
+                if prev and len(thumb) == len(prev):
+                    diff = sum(abs(a - b) for a, b in zip(thumb, prev)) / max(len(thumb), 1)
+                    detected_change = diff > 8.0
+                self._prev_thumb = thumb
+            except Exception:
+                pass
+
+        # --- Periodic full-scan safety net (every 30s) ---
         fullscreen_interval = 30
-        last = getattr(self, "_last_fullscreen_scan_time", 0)
-        if now - last < fullscreen_interval:
+        last_full = getattr(self, "_last_fullscreen_scan_time", 0)
+        if not detected_change and now - last_full < fullscreen_interval:
             return
-        self._last_fullscreen_scan_time = now
+        if detected_change or now - last_full >= fullscreen_interval:
+            self._last_fullscreen_scan_time = now
 
         try:
             if ImageGrab is not None:
@@ -1751,7 +1783,6 @@ class FH6TrackerGUI(tk.Tk):
         except Exception:
             return
 
-        # Downscale to ~800px wide for fast OCR
         w, h = full.size
         scale = min(800 / max(w, 1), 1.0)
         if scale < 1.0 and Image is not None:
@@ -1767,18 +1798,25 @@ class FH6TrackerGUI(tk.Tk):
         if not text:
             return
 
-        # Look for credit change patterns anywhere in the full text
         change = detect_credit_change_from_text(text, self.last_credit_balance)
         if change is None or change == 0:
-            # Also try pure number detection for popups like "+50,000 CR"
             for line in text.splitlines():
                 line = line.strip()
                 if not line:
                     continue
-                amount = parse_credit_number(line.split()[0]) if line.split() else None
+                tokens = line.split()
+                if not tokens:
+                    continue
+                amount = parse_credit_number(tokens[0])
                 if amount and amount >= 1000:
                     keywords = ["earn", "won", "reward", "received", "gain", "bonus", "+"]
                     if any(k in line.lower() for k in keywords):
+                        change = amount
+                        break
+                # Also check last token for patterns like "50,000 CR"
+                if len(tokens) > 1 and tokens[-1].lower() in ("cr", "credits", "credit"):
+                    amount = parse_credit_number(tokens[-2])
+                    if amount and amount >= 1000:
                         change = amount
                         break
 
@@ -1789,7 +1827,7 @@ class FH6TrackerGUI(tk.Tk):
                 self.last_credit_balance += change
             self._log_credit_transaction(change, old_balance or 0, self.last_credit_balance or 0)
             self._ocr_success_count += 1
-            self.show_notice(f"Detected credit change from popup: {format_credits(change)}")
+            self.show_notice(f"Popup detected: {format_credits(change)}")
 
     def detect_credit_popup_change(self):
         if pyautogui is None or pytesseract is None or ImageGrab is None:
