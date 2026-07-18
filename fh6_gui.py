@@ -715,6 +715,18 @@ class FH6TrackerGUI(tk.Tk):
             self.tag_detected_button = ttk.Button(detect_frame, text="Tag Detected Car", command=self.tag_detected_car)
             self.tag_detected_button.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
 
+            ocr_status_frame = ttk.LabelFrame(self.live_tab, text="Auto Credit Tracking Status")
+            ocr_status_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=(10, 0))
+            ocr_status_frame.columnconfigure(1, weight=1)
+            self._live_ocr_status_var = tk.StringVar(value="OCR disabled — enable in Settings tab")
+            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_status_var, foreground="#555555").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 4))
+            self._live_ocr_balance_var = tk.StringVar(value="")
+            ttk.Label(ocr_status_frame, text="Last balance:").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
+            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_balance_var, font=("Consolas", 11, "bold")).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=(0, 4))
+            self._live_ocr_raw_var = tk.StringVar(value="")
+            ttk.Label(ocr_status_frame, text="Raw text:").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
+            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_raw_var, foreground="#888888").grid(row=2, column=1, sticky="w", padx=(4, 8), pady=(0, 6))
+
     def build_methods_tab(self):
         self.methods_tab.columnconfigure(0, weight=1)
         self.methods_tab.rowconfigure(2, weight=2)
@@ -1204,7 +1216,7 @@ class FH6TrackerGUI(tk.Tk):
         return (vals_sorted[n // 2 - 1] + vals_sorted[n // 2]) // 2
 
     def _ocr_confidence_label(self):
-        if not self.settings.get("credit_ocr_enabled", False):
+        if not self.credit_ocr_var.get():
             return "gray", "OCR disabled"
         region = self.get_credit_region()
         if not region:
@@ -1290,6 +1302,24 @@ class FH6TrackerGUI(tk.Tk):
 
         session_credits = self.get_session_credits()
         self.vars["session_credits_var"].set(format_credits(session_credits))
+
+        if pyautogui is not None and pytesseract is not None and ImageGrab is not None:
+            if self.credit_ocr_var.get():
+                region = self.get_credit_region()
+                if not region:
+                    self._live_ocr_status_var.set("OCR enabled but no region set — use Settings tab")
+                elif not self._forza_running_cache:
+                    self._live_ocr_status_var.set("OCR enabled — waiting for Forza to open")
+                else:
+                    self._live_ocr_status_var.set("OCR active — scanning every few seconds")
+                bal = self.last_credit_balance
+                self._live_ocr_balance_var.set(format_credits(bal) if bal is not None else "Not yet detected")
+                raw = self._last_ocr_raw_text
+                self._live_ocr_raw_var.set((raw or "")[:80] or "(no scan yet)")
+            else:
+                self._live_ocr_status_var.set("OCR disabled — enable in Settings tab")
+                self._live_ocr_balance_var.set("")
+                self._live_ocr_raw_var.set("")
 
     def auto_register_from_telemetry(self, latest):
         car_id = latest.get("car_id")
@@ -1704,7 +1734,7 @@ class FH6TrackerGUI(tk.Tk):
     def detect_credit_popup_change(self):
         if pyautogui is None or pytesseract is None or ImageGrab is None:
             return
-        if not self.settings.get("credit_ocr_enabled", False):
+        if not self.credit_ocr_var.get():
             return
 
         now = time.monotonic()
@@ -2187,17 +2217,18 @@ class FH6TrackerGUI(tk.Tk):
 
         self._set_tesseract_path()
         img_w, img_h = full_image.size
-        top_strip_h = int(img_h * 0.15)
         best_balance = None
-        best_region = None
         best_y = 0
         strip_h = 40
 
-        for y_start in range(0, top_strip_h, strip_h // 2):
+        digit_config = "--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM"
+
+        # Scan the top portion of the screen for a credit-like number
+        for y_start in range(0, int(img_h * 0.15), strip_h // 2):
             strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
             strip = self._upscale_for_ocr(strip)
             try:
-                text = pytesseract.image_to_string(strip, config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
+                text = pytesseract.image_to_string(strip, config=digit_config).strip()
             except Exception:
                 continue
             balance = parse_balance_number_only(text)
@@ -2206,10 +2237,11 @@ class FH6TrackerGUI(tk.Tk):
                 best_y = y_start
                 break
 
+        # Fallback: full-text pass
         if best_balance is None:
             self.show_notice("Running full-text OCR pass...")
             self.update_idletasks()
-            for y_start in range(0, top_strip_h, strip_h // 2):
+            for y_start in range(0, int(img_h * 0.15), strip_h // 2):
                 strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
                 strip = self._upscale_for_ocr(strip)
                 try:
@@ -2227,20 +2259,31 @@ class FH6TrackerGUI(tk.Tk):
             messagebox.showinfo("Auto-detect", "Could not find the credit balance.\n\nTips:\n- Make sure Forza is showing the credit display (e.g. main menu or pause screen)\n- Try manually capturing the area instead")
             return
 
-        # Refine: find horizontal extent of the number within the strip
+        # Refine: scan horizontally within the strip to find the number's left/right edges
         refine_strip = full_image.crop((0, best_y, img_w, best_y + strip_h))
-        try:
-            full_text = pytesseract.image_to_string(self._upscale_for_ocr(refine_strip), config="--psm 7").strip()
-        except Exception:
-            full_text = ""
-        # Estimate center of the credit number on screen
-        cx = img_w // 2
-        cw = min(500, img_w // 2)
-        ch = min(120, strip_h + 60)
-        detected_x = max(0, cx - cw // 2)
-        detected_y = max(0, best_y - 20)
-        detected_w = cw
-        detected_h = ch
+        found_x_start = None
+        found_x_end = None
+        scan_step = 20
+        for x_start in range(0, img_w - scan_step, scan_step):
+            segment = refine_strip.crop((x_start, 0, x_start + scan_step, strip_h))
+            segment = self._upscale_for_ocr(segment)
+            try:
+                seg_text = pytesseract.image_to_string(segment, config=digit_config).strip()
+            except Exception:
+                continue
+            if any(c.isdigit() for c in seg_text):
+                if found_x_start is None:
+                    found_x_start = x_start
+                found_x_end = x_start + scan_step
+
+        if found_x_start is None:
+            found_x_start = img_w // 2 - 150
+            found_x_end = img_w // 2 + 150
+        padding = 20
+        detected_x = max(0, found_x_start - padding)
+        detected_w = min(img_w - detected_x, found_x_end - found_x_start + padding * 2)
+        detected_y = max(0, best_y - 5)
+        detected_h = min(img_h - detected_y, strip_h + 15)
 
         self.credit_x_var.set(str(detected_x))
         self.credit_y_var.set(str(detected_y))
