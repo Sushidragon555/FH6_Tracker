@@ -1058,6 +1058,18 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(export_frame, text="Restore from Backup", command=self.restore_from_backup).grid(row=1, column=1, padx=(4, 8), pady=6, sticky="w")
         ttk.Button(export_frame, text="Keyboard Shortcuts", command=self.show_shortcuts_help).grid(row=0, column=2, rowspan=2, padx=(8, 8), pady=6, sticky="ns")
 
+        update_frame = ttk.LabelFrame(self.settings_tab, text="Updates")
+        update_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
+        update_frame.columnconfigure(1, weight=1)
+
+        self._update_status_var = tk.StringVar(value="")
+        ttk.Label(update_frame, textvariable=self._update_status_var, foreground="#555555").grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 0))
+
+        ttk.Button(update_frame, text="Check for Updates", command=self._check_for_updates).grid(row=1, column=0, padx=8, pady=6, sticky="w")
+        ttk.Button(update_frame, text="Restart App", command=self._restart_app).grid(row=1, column=1, padx=(4, 8), pady=6, sticky="w")
+
+        self._update_pending = False
+
     def build_logs_tab(self):
         self.logs_tab.columnconfigure(0, weight=1)
         self.logs_tab.rowconfigure(0, weight=1)
@@ -2496,6 +2508,43 @@ class FH6TrackerGUI(tk.Tk):
             tree.insert("", "end", values=(key, action))
 
         ttk.Button(dialog, text="Close", command=dialog.destroy).grid(row=1, column=0, pady=(0, 10))
+
+    def _check_for_updates(self):
+        self._update_status_var.set("Checking for updates...")
+        self.update_idletasks()
+        try:
+            result = subprocess.run(
+                ["git", "pull", "--ff-only"],
+                capture_output=True, text=True, timeout=30,
+                cwd=BASE_DIR,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            if result.returncode != 0:
+                msg = (result.stderr or result.stdout or "").strip()
+                self._update_status_var.set(f"Update failed: {msg[:120]}")
+                return
+            output = result.stdout.strip()
+            if output and "Already up to date" not in output:
+                self._update_status_var.set("Updates applied! Restart to use the latest version.")
+                self._update_pending = True
+            else:
+                self._update_status_var.set("Already up to date.")
+        except FileNotFoundError:
+            self._update_status_var.set("Git not found. Install git to enable updates.")
+        except subprocess.TimeoutExpired:
+            self._update_status_var.set("Update timed out (network issue?).")
+
+    def _restart_app(self):
+        pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = sys.executable
+        try:
+            subprocess.Popen([pythonw, os.path.join(BASE_DIR, "fh6_gui.py")],
+                             cwd=BASE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        except Exception as exc:
+            messagebox.showerror("Restart failed", f"Could not restart: {exc}")
+            return
+        self._on_close()
 
     def _add_owned_context_menu(self):
         self.owned_context_menu = tk.Menu(self, tearoff=0)
