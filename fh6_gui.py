@@ -3121,17 +3121,17 @@ class FH6TrackerGUI(tk.Tk):
         if self.tracker_process is None:
             self.tracker_running = False
             self.last_status = "Crashed"
-            self.status_var.set("Status: Crashed")
+            self.status_var.set("Status: Tracker unavailable")
             self._update_tracker_button()
-            self.show_notice("Tracker process missing.")
+            self.show_notice("Telemetry tracker unavailable (port in use or process missing).")
             return
         if self.tracker_process.poll() is not None:
             self.tracker_process = None
             self.tracker_running = False
             self.last_status = "Crashed"
-            self.status_var.set("Status: Crashed")
+            self.status_var.set("Status: Tracker unavailable")
             self._update_tracker_button()
-            self.show_notice("Tracker process stopped unexpectedly.")
+            self.show_notice("Telemetry tracker stopped. Credit OCR still active.")
 
     def _check_forza_auto_start(self):
         if not self.settings.get("auto_start_forza", False):
