@@ -1780,13 +1780,15 @@ class FH6TrackerGUI(tk.Tk):
             except Exception:
                 pass
 
-        # --- Periodic full-scan safety net (every 30s) ---
-        fullscreen_interval = 30
+        # --- Periodic full-scan safety net ---
+        # Run a full scan immediately on the very first call (last_full=0),
+        # then every 12s after that (matches default OCR interval).
+        fullscreen_interval = 12
         last_full = getattr(self, "_last_fullscreen_scan_time", 0)
-        if not detected_change and now - last_full < fullscreen_interval:
-            return False
-        if detected_change or now - last_full >= fullscreen_interval:
+        if last_full == 0 or detected_change or now - last_full >= fullscreen_interval:
             self._last_fullscreen_scan_time = now
+        else:
+            return False
 
         try:
             if ImageGrab is not None:
