@@ -343,6 +343,7 @@ def load_settings():
         "theme": settings.get("theme", "light"),
         "credit_ocr_enabled": settings.get("credit_ocr_enabled", True),
         "credit_region": settings.get("credit_region"),
+        "payout_region": settings.get("payout_region"),
         "performance_mode": settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE),
         "tesseract_path": settings.get("tesseract_path") or _find_tesseract() or "",
     }
@@ -541,6 +542,11 @@ class FH6TrackerGUI(tk.Tk):
         self.credit_y_var = tk.StringVar(value=str(region[1]))
         self.credit_w_var = tk.StringVar(value=str(region[2]))
         self.credit_h_var = tk.StringVar(value=str(region[3]))
+        payout_region = self.settings.get("payout_region") or [1450, 415, 410, 45]
+        self.payout_x_var = tk.StringVar(value=str(payout_region[0]))
+        self.payout_y_var = tk.StringVar(value=str(payout_region[1]))
+        self.payout_w_var = tk.StringVar(value=str(payout_region[2]))
+        self.payout_h_var = tk.StringVar(value=str(payout_region[3]))
         self.tesseract_path_var = tk.StringVar(value=self.settings.get("tesseract_path", ""))
         self.performance_var = tk.StringVar(value=self.settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE))
         ttk.Button(controls, text="Save Settings", command=self.save_all_settings).grid(row=0, column=2, padx=(8, 8), sticky="w")
@@ -1056,15 +1062,34 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(ocr_frame, text="Test OCR", command=self.test_credit_ocr).grid(row=2, column=5, sticky="w", padx=8)
         ttk.Button(ocr_frame, text="Auto-Detect Region", command=self.auto_calibrate_region).grid(row=1, column=6, sticky="w", padx=8)
 
-        ttk.Label(ocr_frame, text="Tesseract path:").grid(row=3, column=0, sticky="w", padx=8)
-        ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var).grid(row=3, column=1, columnspan=4, sticky="ew", padx=(2, 8))
+        ttk.Separator(ocr_frame, orient="horizontal").grid(row=3, column=0, columnspan=7, sticky="ew", padx=8, pady=6)
+
+        ttk.Label(ocr_frame, text="Payout popup area (pixels):").grid(row=4, column=0, sticky="w", padx=8, pady=4)
+        ttk.Label(ocr_frame, text="X").grid(row=4, column=1, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.payout_x_var, width=7).grid(row=4, column=2, padx=(2, 8))
+        ttk.Label(ocr_frame, text="Y").grid(row=4, column=3, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.payout_y_var, width=7).grid(row=4, column=4, padx=(2, 8))
+        ttk.Label(ocr_frame, text="W").grid(row=5, column=1, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.payout_w_var, width=7).grid(row=5, column=2, padx=(2, 8))
+        ttk.Label(ocr_frame, text="H").grid(row=5, column=3, sticky="e")
+        ttk.Entry(ocr_frame, textvariable=self.payout_h_var, width=7).grid(row=5, column=4, padx=(2, 8))
+        for var in (self.payout_x_var, self.payout_y_var, self.payout_w_var, self.payout_h_var):
+            var.trace_add("write", lambda *_, v=var: v.set(re.sub(r"[^0-9]", "", v.get())))
+
+        ttk.Button(ocr_frame, text="Capture Area", command=self.capture_payout_area).grid(row=4, column=5, sticky="w", padx=8)
+        ttk.Button(ocr_frame, text="Test OCR", command=self.test_payout_ocr).grid(row=5, column=5, sticky="w", padx=8)
+
+        ttk.Separator(ocr_frame, orient="horizontal").grid(row=6, column=0, columnspan=7, sticky="ew", padx=8, pady=6)
+
+        ttk.Label(ocr_frame, text="Tesseract path:").grid(row=7, column=0, sticky="w", padx=8)
+        ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var).grid(row=7, column=1, columnspan=4, sticky="ew", padx=(2, 8))
         ocr_frame.columnconfigure(1, weight=1)
-        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_all_settings).grid(row=3, column=5, sticky="w", padx=8)
+        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_all_settings).grid(row=7, column=5, sticky="w", padx=8)
 
         self._ocr_confidence_color = tk.StringVar(value="gray")
         self._ocr_confidence_text = tk.StringVar(value="No scans yet")
         conf_frame = ttk.Frame(ocr_frame)
-        conf_frame.grid(row=4, column=0, columnspan=6, sticky="w", padx=8, pady=(0, 4))
+        conf_frame.grid(row=8, column=0, columnspan=7, sticky="w", padx=8, pady=(0, 4))
         self._conf_indicator_label = ttk.Label(conf_frame, text="\u25cf", font=("Segoe UI", 14))
         self._conf_indicator_label.pack(side="left", padx=(0, 6))
         ttk.Label(conf_frame, textvariable=self._ocr_confidence_text).pack(side="left")
@@ -1073,7 +1098,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(conf_frame, textvariable=self._ocr_raw_text_var, foreground="#888888").pack(side="left")
 
         test_popup_frame = ttk.Frame(ocr_frame)
-        test_popup_frame.grid(row=5, column=0, columnspan=6, sticky="w", padx=8, pady=(4, 8))
+        test_popup_frame.grid(row=9, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 8))
         ttk.Button(test_popup_frame, text="Test Popup Detection", command=self._test_popup_scan).pack(side="left", padx=(0, 8))
         self._popup_test_var = tk.StringVar(value="")
         ttk.Label(test_popup_frame, textvariable=self._popup_test_var, foreground="#555555").pack(side="left")
@@ -1342,12 +1367,17 @@ class FH6TrackerGUI(tk.Tk):
         if pyautogui is not None and pytesseract is not None and ImageGrab is not None:
             if self.credit_ocr_var.get():
                 region = self.get_credit_region()
+                payout = self.get_payout_region()
                 if not self._forza_running_cache:
                     self._live_ocr_status_var.set("OCR enabled — waiting for Forza to open")
+                elif region and payout:
+                    self._live_ocr_status_var.set("OCR active — balance region + payout popup scanning")
                 elif region:
-                    self._live_ocr_status_var.set("OCR active — region + popup scanning")
+                    self._live_ocr_status_var.set("OCR active — balance region + fullscreen popup scanning")
+                elif payout:
+                    self._live_ocr_status_var.set("OCR active — payout popup scanning only")
                 else:
-                    self._live_ocr_status_var.set("OCR active — popup scanning only")
+                    self._live_ocr_status_var.set("OCR active — fullscreen popup scanning only")
                 bal = self.last_credit_balance or self.get_session_credits()
                 self._live_ocr_balance_var.set(format_credits(bal))
                 raw = self._last_ocr_raw_text
@@ -1777,17 +1807,25 @@ class FH6TrackerGUI(tk.Tk):
     def _scan_fullscreen_popups(self, now, force=False):
         """Detect screen changes and scan for credit popups.
 
-        Every ~2s takes a tiny (160x90) snapshot and compares it to the previous
-        frame.  If the screen changed significantly (a popup appeared), it immediately
-        grabs a full-res frame and runs OCR on it.  A forced full scan also runs
-        every 12s as a safety net.
+        If a payout region is configured (post-race "Credits: XX,XXX" banner),
+        grabs just that small region and runs OCR directly.
 
-        When *force* is True (via F5 hotkey), all rate-limiting is skipped and a
-        full-screen capture + OCR runs immediately.
+        Otherwise, every ~2s takes a tiny (160x90) snapshot and compares it to
+        the previous frame.  If the screen changed significantly (a popup
+        appeared), it immediately grabs a full-res frame and runs OCR on it.
+        A forced full scan also runs every 12s as a safety net.
+
+        When *force* is True (via F5 hotkey), all rate-limiting is skipped and
+        a capture + OCR runs immediately.
 
         Returns True if a credit change was detected and handled, False otherwise.
         """
         self._set_tesseract_path()
+
+        payout_region = self.get_payout_region()
+        if payout_region is not None:
+            return self._scan_payout_region(payout_region, force)
+
         detected_change = force
         if not force:
             # --- Change detection (fast, every ~2s) ---
@@ -1836,12 +1874,36 @@ class FH6TrackerGUI(tk.Tk):
         except Exception:
             return False
 
-        w, h = full.size
+        return self._ocr_and_parse_image(full)
+
+    def _scan_payout_region(self, region, force=False):
+        """Grab just the payout banner region, OCR it, and look for a credit amount.
+
+        The region is expected to capture a "Credits: 150,000" banner from the
+        post-race payout screen.  Because the area is small and targeted, no
+        change-detection thumbnail is needed — OCR is fast enough to run on
+        every poll cycle.
+        """
+        image = self._grab_credit_image(region=region)
+        if image is None:
+            return False
+        return self._ocr_and_parse_image(image)
+
+    def _ocr_and_parse_image(self, image):
+        """Run OCR on *image* and check the resulting text for a credit change.
+
+        Shared by the payout-region path and the full-screen fallback path.
+        Returns True if a credit change was detected and handled, False otherwise.
+        """
+        if Image is not None:
+            image = self._upscale_for_ocr(image)
+
+        w, h = image.size
         scale = min(800 / max(w, 1), 1.0)
         if scale < 1.0 and Image is not None:
-            small = full.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            small = image.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
         else:
-            small = full
+            small = image
 
         try:
             text = pytesseract.image_to_string(small, config="--psm 6").strip()
@@ -2091,6 +2153,27 @@ class FH6TrackerGUI(tk.Tk):
             return tuple(int(v) for v in region)
         return None
 
+    def get_payout_region(self):
+        region = self.settings.get("payout_region")
+        if region and len(region) == 4 and int(region[2]) > 0 and int(region[3]) > 0:
+            w, h = int(region[2]), int(region[3])
+            if w > 800 or h > 200:
+                return None
+            return tuple(int(v) for v in region)
+        return None
+
+    def _read_payout_region_fields(self):
+        try:
+            x = int(self.payout_x_var.get() or 0)
+            y = int(self.payout_y_var.get() or 0)
+            w = int(self.payout_w_var.get() or 0)
+            h = int(self.payout_h_var.get() or 0)
+        except (ValueError, AttributeError):
+            return None
+        if w > 0 and h > 0:
+            return [x, y, w, h]
+        return None
+
     def _grab_credit_image(self, region=None):
         if region is None:
             region = self.get_credit_region()
@@ -2259,17 +2342,33 @@ class FH6TrackerGUI(tk.Tk):
             self._popup_test_var.set("OCR not installed")
             return
         self._set_tesseract_path()
-        try:
-            full = ImageGrab.grab()
-        except Exception as exc:
-            self._popup_test_var.set(f"Capture failed: {exc}")
-            return
-        w, h = full.size
-        scale = min(800 / max(w, 1), 1.0)
-        if scale < 1.0 and Image is not None:
-            small = full.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+        payout_region = self.get_payout_region()
+        if payout_region is not None:
+            image = self._grab_credit_image(region=payout_region)
+            if image is None:
+                self._popup_test_var.set("Payout region capture failed")
+                return
+            if Image is not None:
+                image = self._upscale_for_ocr(image)
+            w, h = image.size
+            scale = min(800 / max(w, 1), 1.0)
+            if scale < 1.0 and Image is not None:
+                small = image.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            else:
+                small = image
         else:
-            small = full
+            try:
+                full = ImageGrab.grab()
+            except Exception as exc:
+                self._popup_test_var.set(f"Capture failed: {exc}")
+                return
+            w, h = full.size
+            scale = min(800 / max(w, 1), 1.0)
+            if scale < 1.0 and Image is not None:
+                small = full.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            else:
+                small = full
         try:
             text = pytesseract.image_to_string(small, config="--psm 6").strip()
         except Exception as exc:
@@ -2278,6 +2377,8 @@ class FH6TrackerGUI(tk.Tk):
         summary = text[:200].replace("\n", " | ")
         change = detect_credit_change_from_text(text)
         parts = [f"Raw: '{summary}'"]
+        if payout_region is not None:
+            parts.insert(0, "Using payout region")
         if change:
             parts.append(f"Change detected: {format_credits(change)}")
         else:
@@ -2341,6 +2442,122 @@ class FH6TrackerGUI(tk.Tk):
 
         except Exception as exc:
             messagebox.showerror("Capture failed", f"Could not open the capture overlay: {exc}")
+
+    def capture_payout_area(self):
+        try:
+            overlay = tk.Toplevel(self)
+            overlay.attributes("-fullscreen", True)
+            overlay.attributes("-alpha", 0.25)
+            overlay.configure(bg="black", cursor="crosshair")
+            canvas = tk.Canvas(overlay, bg="black", highlightthickness=0)
+            canvas.pack(fill="both", expand=True)
+            ttk.Label(overlay, text="Drag a box around the payout banner (Credits: XX,XXX), then release. Press Esc to cancel.").place(x=20, y=20)
+
+            state = {"start": None, "rect": None, "cstart": (0, 0)}
+
+            def on_press(event):
+                state["start"] = (event.x_root, event.y_root)
+                state["cstart"] = (event.x, event.y)
+                if state["rect"]:
+                    canvas.delete(state["rect"])
+                state["rect"] = canvas.create_rectangle(event.x, event.y, event.x, event.y, outline="#00ff00", width=2)
+
+            def on_drag(event):
+                if state["rect"]:
+                    cx, cy = state["cstart"]
+                    canvas.coords(state["rect"], cx, cy, event.x, event.y)
+
+            def on_release(event):
+                if not state["start"]:
+                    overlay.destroy()
+                    return
+                x0, y0 = state["start"]
+                x1, y1 = event.x_root, event.y_root
+                overlay.destroy()
+                x, y = int(min(x0, x1)), int(min(y0, y1))
+                w, h = int(abs(x1 - x0)), int(abs(y1 - y0))
+                if w > 4 and h > 4:
+                    if w > 800 or h > 200:
+                        self.show_notice("Region too large — drag a tight box around just the payout banner.")
+                        overlay.destroy()
+                        return
+                    self.payout_x_var.set(str(x))
+                    self.payout_y_var.set(str(y))
+                    self.payout_w_var.set(str(w))
+                    self.payout_h_var.set(str(h))
+                    self.settings["payout_region"] = [x, y, w, h]
+                    save_settings(self.settings)
+                    self.show_notice(f"Payout region set to ({x}, {y}) {w}x{h} and saved.")
+
+            def on_cancel(_event):
+                overlay.destroy()
+
+            canvas.bind("<ButtonPress-1>", on_press)
+            canvas.bind("<B1-Motion>", on_drag)
+            canvas.bind("<ButtonRelease-1>", on_release)
+            overlay.bind("<Escape>", on_cancel)
+            overlay.focus_force()
+
+        except Exception as exc:
+            messagebox.showerror("Capture failed", f"Could not open the capture overlay: {exc}")
+
+    def test_payout_ocr(self):
+        """Test OCR on the configured payout region and show diagnostic info."""
+        if pytesseract is None or (ImageGrab is None and pyautogui is None):
+            messagebox.showwarning(
+                "OCR unavailable",
+                "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
+            )
+            return
+        region = self._read_payout_region_fields()
+
+        debug_lines = []
+        if region is None:
+            debug_lines.append("Payout region: NOT SET. Click 'Capture Area' first.")
+        else:
+            x, y, w, h = region
+            debug_lines.append(f"Payout region: x={x} y={y} w={w} h={h}")
+
+        if os.name == 'nt':
+            self._set_tesseract_path()
+            debug_lines.append(f"Tesseract: {pytesseract.pytesseract.tesseract_cmd}")
+            debug_lines.append(f"Exists: {os.path.isfile(pytesseract.pytesseract.tesseract_cmd)}")
+
+        image = self._grab_credit_image(region=region)
+        if image is None:
+            debug_lines.append("Capture: FAILED (image is None)")
+            messagebox.showinfo("Payout OCR test", "\n".join(debug_lines))
+            return
+
+        try:
+            w_img, h_img = image.size
+            debug_lines.append(f"Image size: {w_img}x{h_img}")
+        except Exception:
+            debug_lines.append("Image size: unknown")
+
+        try:
+            debug_path = os.path.join(BASE_DIR, "ocr_debug_capture.png")
+            image.save(debug_path)
+            debug_lines.append(f"Saved capture: {debug_path}")
+        except Exception as exc:
+            debug_lines.append(f"Could not save debug image: {exc}")
+
+        try:
+            text = pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 6").strip()
+        except Exception as exc:
+            debug_lines.append(f"Tesseract ERROR: {exc}")
+            text = ""
+
+        raw = " ".join(text.split())[:200]
+        debug_lines.append(f"Raw text: {raw or '(nothing detected)'}")
+
+        change = detect_credit_change_from_text(text)
+        if change:
+            debug_lines.insert(0, f"Detected payout: {format_credits(change)} ({change:,})")
+        else:
+            debug_lines.insert(0, "No credit change pattern found in captured text.")
+
+        messagebox.showinfo("Payout OCR test", "\n\n".join(debug_lines))
 
     def _refresh_ocr_preview(self):
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
@@ -3113,6 +3330,7 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["theme"] = self.theme_var.get() or "light"
         self.settings["credit_ocr_enabled"] = bool(self.credit_ocr_var.get())
         self.settings["credit_region"] = self._read_region_fields()
+        self.settings["payout_region"] = self._read_payout_region_fields()
         self.settings["tesseract_path"] = self.tesseract_path_var.get().strip()
         self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
         save_settings(self.settings)
