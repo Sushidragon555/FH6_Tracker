@@ -2046,6 +2046,9 @@ class FH6TrackerGUI(tk.Tk):
     def get_credit_region(self):
         region = self.settings.get("credit_region")
         if region and len(region) == 4 and int(region[2]) > 0 and int(region[3]) > 0:
+            w, h = int(region[2]), int(region[3])
+            if w > 500 or h > 200:
+                return None
             return tuple(int(v) for v in region)
         return None
 
@@ -2276,6 +2279,10 @@ class FH6TrackerGUI(tk.Tk):
                 x, y = int(min(x0, x1)), int(min(y0, y1))
                 w, h = int(abs(x1 - x0)), int(abs(y1 - y0))
                 if w > 4 and h > 4:
+                    if w > 500 or h > 200:
+                        self.show_notice("Region too large — drag a tight box around just the credit number, not the whole screen.")
+                        overlay.destroy()
+                        return
                     self.credit_x_var.set(str(x))
                     self.credit_y_var.set(str(y))
                     self.credit_w_var.set(str(w))
@@ -2380,14 +2387,12 @@ class FH6TrackerGUI(tk.Tk):
         best_y = 0
         best_x = 0
         strip_h = 40
-        # HUD credit balance is typically in the top-left quadrant
-        scan_max_x = min(img_w // 2, 1200)
 
         digit_config = "--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM"
 
         # Full-text pass first (looks for "CR"/"Credits" keywords — more specific)
         for y_start in range(0, int(img_h * 0.15), strip_h // 2):
-            strip = full_image.crop((0, y_start, scan_max_x, y_start + strip_h))
+            strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
             strip = self._upscale_for_ocr(strip)
             try:
                 text = pytesseract.image_to_string(strip, config="--psm 6").strip()
@@ -2402,7 +2407,7 @@ class FH6TrackerGUI(tk.Tk):
         # Fallback: digit-only pass if keywords failed
         if best_balance is None:
             for y_start in range(0, int(img_h * 0.15), strip_h // 2):
-                strip = full_image.crop((0, y_start, scan_max_x, y_start + strip_h))
+                strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
                 strip = self._upscale_for_ocr(strip)
                 try:
                     text = pytesseract.image_to_string(strip, config=digit_config).strip()
@@ -2420,11 +2425,11 @@ class FH6TrackerGUI(tk.Tk):
             return
 
         # Refine: scan horizontally within the strip to find the number's left/right edges
-        refine_strip = full_image.crop((0, best_y, scan_max_x, best_y + strip_h))
+        refine_strip = full_image.crop((0, best_y, img_w, best_y + strip_h))
         found_x_start = None
         found_x_end = None
         scan_step = 20
-        for x_start in range(0, scan_max_x - scan_step, scan_step):
+        for x_start in range(0, img_w - scan_step, scan_step):
             segment = refine_strip.crop((x_start, 0, x_start + scan_step, strip_h))
             segment = self._upscale_for_ocr(segment)
             try:
@@ -2437,11 +2442,11 @@ class FH6TrackerGUI(tk.Tk):
                 found_x_end = x_start + scan_step
 
         if found_x_start is None:
-            found_x_start = 20
-            found_x_end = 300
+            found_x_start = img_w // 2 - 150
+            found_x_end = img_w // 2 + 150
         padding = 20
         detected_x = max(0, found_x_start - padding)
-        detected_w = min(scan_max_x - detected_x, found_x_end - found_x_start + padding * 2)
+        detected_w = min(img_w - detected_x, found_x_end - found_x_start + padding * 2)
         detected_y = max(0, best_y - 5)
         detected_h = min(img_h - detected_y, strip_h + 15)
 
