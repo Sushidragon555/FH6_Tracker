@@ -1324,8 +1324,8 @@ class FH6TrackerGUI(tk.Tk):
                     self._live_ocr_status_var.set("OCR active — region + popup scanning")
                 else:
                     self._live_ocr_status_var.set("OCR active — popup scanning only")
-                bal = self.last_credit_balance
-                self._live_ocr_balance_var.set(format_credits(bal) if bal is not None else "Not yet detected")
+                bal = self.last_credit_balance or self.get_session_credits()
+                self._live_ocr_balance_var.set(format_credits(bal))
                 raw = self._last_ocr_raw_text
                 self._live_ocr_raw_var.set((raw or "")[:80] or "(no scan yet)")
             else:
@@ -1838,11 +1838,12 @@ class FH6TrackerGUI(tk.Tk):
         self._last_ocr_raw_text = text[:80] or text
 
         if change is not None and change != 0:
+            if self.last_credit_balance is None:
+                self.last_credit_balance = max(0, self.get_session_credits())
             old_balance = self.last_credit_balance
             self.update_session_credits(change)
-            if self.last_credit_balance is not None:
-                self.last_credit_balance += change
-            self._log_credit_transaction(change, old_balance or 0, self.last_credit_balance or 0)
+            self.last_credit_balance += change
+            self._log_credit_transaction(change, old_balance, self.last_credit_balance)
             self._ocr_success_count += 1
             self._live_popup_var.set(f"{format_credits(change)} at {datetime.now().strftime('%H:%M:%S')}")
             self.show_notice(f"Popup detected: {format_credits(change)}")
