@@ -2280,6 +2280,9 @@ class FH6TrackerGUI(tk.Tk):
                     self.credit_y_var.set(str(y))
                     self.credit_w_var.set(str(w))
                     self.credit_h_var.set(str(h))
+                    self.settings["credit_region"] = [x, y, w, h]
+                    save_settings(self.settings)
+                    self.show_notice(f"Region set to ({x}, {y}) {w}x{h} and saved.")
 
             def on_cancel(_event):
                 overlay.destroy()
@@ -2375,36 +2378,37 @@ class FH6TrackerGUI(tk.Tk):
         img_w, img_h = full_image.size
         best_balance = None
         best_y = 0
+        best_x = 0
         strip_h = 40
+        # HUD credit balance is typically in the top-left quadrant
+        scan_max_x = min(img_w // 2, 1200)
 
         digit_config = "--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM"
 
-        # Scan the top portion of the screen for a credit-like number
+        # Full-text pass first (looks for "CR"/"Credits" keywords — more specific)
         for y_start in range(0, int(img_h * 0.15), strip_h // 2):
-            strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
+            strip = full_image.crop((0, y_start, scan_max_x, y_start + strip_h))
             strip = self._upscale_for_ocr(strip)
             try:
-                text = pytesseract.image_to_string(strip, config=digit_config).strip()
+                text = pytesseract.image_to_string(strip, config="--psm 6").strip()
             except Exception:
                 continue
-            balance = parse_balance_number_only(text)
+            balance = parse_credit_balance_from_text(text)
             if balance is not None and balance >= 1000:
                 best_balance = balance
                 best_y = y_start
                 break
 
-        # Fallback: full-text pass
+        # Fallback: digit-only pass if keywords failed
         if best_balance is None:
-            self.show_notice("Running full-text OCR pass...")
-            self.update_idletasks()
             for y_start in range(0, int(img_h * 0.15), strip_h // 2):
-                strip = full_image.crop((0, y_start, img_w, y_start + strip_h))
+                strip = full_image.crop((0, y_start, scan_max_x, y_start + strip_h))
                 strip = self._upscale_for_ocr(strip)
                 try:
-                    text = pytesseract.image_to_string(strip, config="--psm 6").strip()
+                    text = pytesseract.image_to_string(strip, config=digit_config).strip()
                 except Exception:
                     continue
-                balance = parse_credit_balance_from_text(text)
+                balance = parse_balance_number_only(text)
                 if balance is not None and balance >= 1000:
                     best_balance = balance
                     best_y = y_start
@@ -2416,11 +2420,11 @@ class FH6TrackerGUI(tk.Tk):
             return
 
         # Refine: scan horizontally within the strip to find the number's left/right edges
-        refine_strip = full_image.crop((0, best_y, img_w, best_y + strip_h))
+        refine_strip = full_image.crop((0, best_y, scan_max_x, best_y + strip_h))
         found_x_start = None
         found_x_end = None
         scan_step = 20
-        for x_start in range(0, img_w - scan_step, scan_step):
+        for x_start in range(0, scan_max_x - scan_step, scan_step):
             segment = refine_strip.crop((x_start, 0, x_start + scan_step, strip_h))
             segment = self._upscale_for_ocr(segment)
             try:
@@ -2433,11 +2437,11 @@ class FH6TrackerGUI(tk.Tk):
                 found_x_end = x_start + scan_step
 
         if found_x_start is None:
-            found_x_start = img_w // 2 - 150
-            found_x_end = img_w // 2 + 150
+            found_x_start = 20
+            found_x_end = 300
         padding = 20
         detected_x = max(0, found_x_start - padding)
-        detected_w = min(img_w - detected_x, found_x_end - found_x_start + padding * 2)
+        detected_w = min(scan_max_x - detected_x, found_x_end - found_x_start + padding * 2)
         detected_y = max(0, best_y - 5)
         detected_h = min(img_h - detected_y, strip_h + 15)
 
@@ -2445,6 +2449,10 @@ class FH6TrackerGUI(tk.Tk):
         self.credit_y_var.set(str(detected_y))
         self.credit_w_var.set(str(detected_w))
         self.credit_h_var.set(str(detected_h))
+
+        # Auto-save so it takes effect immediately
+        self.settings["credit_region"] = [detected_x, detected_y, detected_w, detected_h]
+        save_settings(self.settings)
 
         self.show_notice(f"Auto-detected region: ({detected_x}, {detected_y}) {detected_w}x{detected_h} — balance ~{format_credits(best_balance)}")
         self._refresh_ocr_preview()
