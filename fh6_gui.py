@@ -500,6 +500,7 @@ class FH6TrackerGUI(tk.Tk):
         self.bind("<Control-f>", lambda e: self.search_entry.focus_set())
         self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
         self.bind("<Control-r>", lambda e: self.refresh_all())
+        self.bind("<F5>", lambda e: self._force_popup_scan())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def create_widgets(self):
@@ -1744,51 +1745,60 @@ class FH6TrackerGUI(tk.Tk):
         manufacturers = [m for m in manufacturers if m]
         self.progress_manufacturer_dropdown['values'] = manufacturers
 
-    def _scan_fullscreen_popups(self, now):
+    def _force_popup_scan(self):
+        """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
+        self._scan_fullscreen_popups(time.monotonic(), force=True)
+
+    def _scan_fullscreen_popups(self, now, force=False):
         """Detect screen changes and scan for credit popups.
 
         Every ~2s takes a tiny (160x90) snapshot and compares it to the previous
         frame.  If the screen changed significantly (a popup appeared), it immediately
         grabs a full-res frame and runs OCR on it.  A forced full scan also runs
-        every 30s as a safety net.
+        every 12s as a safety net.
+
+        When *force* is True (via F5 hotkey), all rate-limiting is skipped and a
+        full-screen capture + OCR runs immediately.
 
         Returns True if a credit change was detected and handled, False otherwise.
         """
-        # --- Change detection (fast, every ~2s) ---
-        change_detect_interval = 2.0
-        last_change_check = getattr(self, "_last_change_check_time", 0)
-        detected_change = False
-        if now - last_change_check >= change_detect_interval:
-            self._last_change_check_time = now
-            try:
-                if ImageGrab is not None:
-                    tiny = ImageGrab.grab()
-                elif pyautogui is not None:
-                    tiny = pyautogui.screenshot()
-                else:
-                    return False
-                if Image is not None:
-                    tiny = tiny.resize((160, 90), Image.LANCZOS)
-                # Convert to grayscale bytes for fast comparison
-                gray = tiny.convert("L") if Image is not None else tiny
-                thumb = list(gray.getdata()) if hasattr(gray, "getdata") else []
-                prev = getattr(self, "_prev_thumb", None)
-                if prev and len(thumb) == len(prev):
-                    diff = sum(abs(a - b) for a, b in zip(thumb, prev)) / max(len(thumb), 1)
-                    detected_change = diff > 8.0
-                self._prev_thumb = thumb
-            except Exception:
-                pass
+        detected_change = force
+        if not force:
+            # --- Change detection (fast, every ~2s) ---
+            change_detect_interval = 2.0
+            last_change_check = getattr(self, "_last_change_check_time", 0)
+            if now - last_change_check >= change_detect_interval:
+                self._last_change_check_time = now
+                try:
+                    if ImageGrab is not None:
+                        tiny = ImageGrab.grab()
+                    elif pyautogui is not None:
+                        tiny = pyautogui.screenshot()
+                    else:
+                        return False
+                    if Image is not None:
+                        tiny = tiny.resize((160, 90), Image.LANCZOS)
+                    # Convert to grayscale bytes for fast comparison
+                    gray = tiny.convert("L") if Image is not None else tiny
+                    thumb = list(gray.getdata()) if hasattr(gray, "getdata") else []
+                    prev = getattr(self, "_prev_thumb", None)
+                    if prev and len(thumb) == len(prev):
+                        diff = sum(abs(a - b) for a, b in zip(thumb, prev)) / max(len(thumb), 1)
+                        detected_change = diff > 8.0
+                    self._prev_thumb = thumb
+                except Exception:
+                    pass
 
-        # --- Periodic full-scan safety net ---
-        # Run a full scan immediately on the very first call (last_full=0),
-        # then every 12s after that (matches default OCR interval).
-        fullscreen_interval = 12
-        last_full = getattr(self, "_last_fullscreen_scan_time", 0)
-        if last_full == 0 or detected_change or now - last_full >= fullscreen_interval:
-            self._last_fullscreen_scan_time = now
-        else:
-            return False
+        if not force:
+            # --- Periodic full-scan safety net ---
+            # Run a full scan immediately on the very first call (last_full=0),
+            # then every 12s after that.
+            fullscreen_interval = 12
+            last_full = getattr(self, "_last_fullscreen_scan_time", 0)
+            if last_full == 0 or detected_change or now - last_full >= fullscreen_interval:
+                self._last_fullscreen_scan_time = now
+            else:
+                return False
 
         try:
             if ImageGrab is not None:
