@@ -6,6 +6,13 @@
             "type": "gain",
             "balance_before": 3,
             "balance_after": 534807
+        },
+        {
+            "timestamp": "2026-07-19T04:51:54.161126+00:00",
+            "amount": -17,
+            "type": "spend",
+            "balance_before": 0,
+            "balance_after": -17
         }
     ]
 }

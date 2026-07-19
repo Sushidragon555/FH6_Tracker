@@ -4,9 +4,9 @@
     "theme": "light",
     "credit_ocr_enabled": true,
     "credit_region": [
-        0,
-        95,
-        1720,
+        80,
+        35,
+        1820,
         55
     ],
     "performance_mode": "Performance",
