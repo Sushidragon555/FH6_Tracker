@@ -542,7 +542,7 @@ class FH6TrackerGUI(tk.Tk):
         self.credit_y_var = tk.StringVar(value=str(region[1]))
         self.credit_w_var = tk.StringVar(value=str(region[2]))
         self.credit_h_var = tk.StringVar(value=str(region[3]))
-        payout_region = self.settings.get("payout_region") or [1450, 415, 410, 45]
+        payout_region = self.settings.get("payout_region") or [0, 0, 0, 0]
         self.payout_x_var = tk.StringVar(value=str(payout_region[0]))
         self.payout_y_var = tk.StringVar(value=str(payout_region[1]))
         self.payout_w_var = tk.StringVar(value=str(payout_region[2]))
