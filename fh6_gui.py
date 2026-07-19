@@ -1751,6 +1751,8 @@ class FH6TrackerGUI(tk.Tk):
         frame.  If the screen changed significantly (a popup appeared), it immediately
         grabs a full-res frame and runs OCR on it.  A forced full scan also runs
         every 30s as a safety net.
+
+        Returns True if a credit change was detected and handled, False otherwise.
         """
         # --- Change detection (fast, every ~2s) ---
         change_detect_interval = 2.0
@@ -1764,7 +1766,7 @@ class FH6TrackerGUI(tk.Tk):
                 elif pyautogui is not None:
                     tiny = pyautogui.screenshot()
                 else:
-                    return
+                    return False
                 if Image is not None:
                     tiny = tiny.resize((160, 90), Image.LANCZOS)
                 # Convert to grayscale bytes for fast comparison
@@ -1782,7 +1784,7 @@ class FH6TrackerGUI(tk.Tk):
         fullscreen_interval = 30
         last_full = getattr(self, "_last_fullscreen_scan_time", 0)
         if not detected_change and now - last_full < fullscreen_interval:
-            return
+            return False
         if detected_change or now - last_full >= fullscreen_interval:
             self._last_fullscreen_scan_time = now
 
@@ -1792,9 +1794,9 @@ class FH6TrackerGUI(tk.Tk):
             elif pyautogui is not None:
                 full = pyautogui.screenshot()
             else:
-                return
+                return False
         except Exception:
-            return
+            return False
 
         w, h = full.size
         scale = min(800 / max(w, 1), 1.0)
@@ -1806,10 +1808,10 @@ class FH6TrackerGUI(tk.Tk):
         try:
             text = pytesseract.image_to_string(small, config="--psm 6").strip()
         except Exception:
-            return
+            return False
 
         if not text:
-            return
+            return False
 
         change = detect_credit_change_from_text(text, self.last_credit_balance)
         if change is None or change == 0:
@@ -1833,6 +1835,8 @@ class FH6TrackerGUI(tk.Tk):
                         change = amount
                         break
 
+        self._last_ocr_raw_text = text[:80] or text
+
         if change is not None and change != 0:
             old_balance = self.last_credit_balance
             self.update_session_credits(change)
@@ -1842,6 +1846,9 @@ class FH6TrackerGUI(tk.Tk):
             self._ocr_success_count += 1
             self._live_popup_var.set(f"{format_credits(change)} at {datetime.now().strftime('%H:%M:%S')}")
             self.show_notice(f"Popup detected: {format_credits(change)}")
+            return True
+
+        return False
 
     def detect_credit_popup_change(self):
         if pyautogui is None or pytesseract is None or ImageGrab is None:
@@ -1858,8 +1865,10 @@ class FH6TrackerGUI(tk.Tk):
         self._ocr_total_count += 1
         self._last_ocr_scan_time = now
 
-        # Full-screen popup scan (runs every 30s regardless of region setting)
-        self._scan_fullscreen_popups(now)
+        # Full-screen popup scan (runs change-detection every ~2s, full OCR every 30s)
+        popup_handled = self._scan_fullscreen_popups(now)
+        if popup_handled:
+            return
 
         region_set = self.get_credit_region() is not None
         if not region_set:
