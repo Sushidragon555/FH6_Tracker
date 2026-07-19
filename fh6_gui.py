@@ -457,6 +457,8 @@ class FH6TrackerGUI(tk.Tk):
         self.last_credit_scan_time = 0
         self._pending_balance = None
         self._pending_balance_count = 0
+        self._pending_fullscreen_change = None
+        self._pending_fullscreen_count = 0
         self._credit_transactions = self._load_credit_transactions()
         self._recent_balances = []
         self._last_rollback_balance = None
@@ -1907,7 +1909,8 @@ class FH6TrackerGUI(tk.Tk):
 
         try:
             text = pytesseract.image_to_string(small, config="--psm 6").strip()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Full-screen OCR failed: %s", exc)
             return False
 
         if not text:
@@ -1938,6 +1941,18 @@ class FH6TrackerGUI(tk.Tk):
         self._last_ocr_raw_text = text[:80] or text
 
         if change is not None and change != 0:
+            # Require the same change to appear twice to filter out OCR noise
+            if change == self._pending_fullscreen_change:
+                self._pending_fullscreen_count += 1
+            else:
+                self._pending_fullscreen_change = change
+                self._pending_fullscreen_count = 1
+                return False
+            if self._pending_fullscreen_count < 2:
+                return False
+            self._pending_fullscreen_change = None
+            self._pending_fullscreen_count = 0
+
             if self.last_credit_balance is None:
                 self.last_credit_balance = max(0, self.get_session_credits())
             old_balance = self.last_credit_balance
@@ -1949,6 +1964,8 @@ class FH6TrackerGUI(tk.Tk):
             self.show_notice(f"Popup detected: {format_credits(change)}")
             return True
 
+        self._pending_fullscreen_change = None
+        self._pending_fullscreen_count = 0
         return False
 
     def detect_credit_popup_change(self):
@@ -2147,9 +2164,6 @@ class FH6TrackerGUI(tk.Tk):
     def get_credit_region(self):
         region = self.settings.get("credit_region")
         if region and len(region) == 4 and int(region[2]) > 0 and int(region[3]) > 0:
-            w, h = int(region[2]), int(region[3])
-            if w > 500 or h > 200:
-                return None
             return tuple(int(v) for v in region)
         return None
 
