@@ -341,7 +341,7 @@ def load_settings():
         "auto_start_forza": settings.get("auto_start_forza", False),
         "launch_tracker_on_start": settings.get("launch_tracker_on_start", False),
         "theme": settings.get("theme", "light"),
-        "credit_ocr_enabled": settings.get("credit_ocr_enabled", False),
+        "credit_ocr_enabled": settings.get("credit_ocr_enabled", True),
         "credit_region": settings.get("credit_region"),
         "performance_mode": settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE),
         "tesseract_path": settings.get("tesseract_path") or _find_tesseract() or "",
@@ -1318,12 +1318,12 @@ class FH6TrackerGUI(tk.Tk):
         if pyautogui is not None and pytesseract is not None and ImageGrab is not None:
             if self.credit_ocr_var.get():
                 region = self.get_credit_region()
-                if not region:
-                    self._live_ocr_status_var.set("OCR enabled but no region set — use Settings tab")
-                elif not self._forza_running_cache:
+                if not self._forza_running_cache:
                     self._live_ocr_status_var.set("OCR enabled — waiting for Forza to open")
+                elif region:
+                    self._live_ocr_status_var.set("OCR active — region + popup scanning")
                 else:
-                    self._live_ocr_status_var.set("OCR active — balance + popup scanning")
+                    self._live_ocr_status_var.set("OCR active — popup scanning only")
                 bal = self.last_credit_balance
                 self._live_ocr_balance_var.set(format_credits(bal) if bal is not None else "Not yet detected")
                 raw = self._last_ocr_raw_text
