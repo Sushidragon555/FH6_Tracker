@@ -500,7 +500,7 @@ class FH6TrackerGUI(tk.Tk):
         self.bind("<Control-f>", lambda e: self.search_entry.focus_set())
         self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
         self.bind("<Control-r>", lambda e: self.refresh_all())
-        self.bind("<F5>", lambda e: self._force_popup_scan())
+        self.bind_all("<F5>", lambda e: self._force_popup_scan())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def create_widgets(self):
@@ -1747,6 +1747,8 @@ class FH6TrackerGUI(tk.Tk):
 
     def _force_popup_scan(self):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
+        self._set_tesseract_path()
+        self.show_notice("F5: scanning for popup...")
         self._scan_fullscreen_popups(time.monotonic(), force=True)
 
     def _scan_fullscreen_popups(self, now, force=False):
@@ -1762,6 +1764,7 @@ class FH6TrackerGUI(tk.Tk):
 
         Returns True if a credit change was detected and handled, False otherwise.
         """
+        self._set_tesseract_path()
         detected_change = force
         if not force:
             # --- Change detection (fast, every ~2s) ---
