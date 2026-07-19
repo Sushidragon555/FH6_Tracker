@@ -981,7 +981,30 @@ class FH6TrackerGUI(tk.Tk):
         self.settings_tab.columnconfigure(0, weight=1)
         self.settings_tab.rowconfigure(2, weight=1)
 
-        settings_frame = ttk.LabelFrame(self.settings_tab, text="Tracker Behavior")
+        # Wrap everything in a canvas+scrollbar so content always fits
+        settings_canvas = tk.Canvas(self.settings_tab, highlightthickness=0, width=700)
+        settings_scroll = ttk.Scrollbar(self.settings_tab, orient="vertical", command=settings_canvas.yview)
+        settings_canvas.configure(yscrollcommand=settings_scroll.set)
+        settings_canvas.grid(row=0, column=0, sticky="nsew")
+        settings_scroll.grid(row=0, column=1, sticky="ns")
+        self.settings_tab.rowconfigure(0, weight=1)
+        self.settings_tab.columnconfigure(0, weight=1)
+
+        settings_inner = ttk.Frame(settings_canvas)
+        settings_canvas.create_window((0, 0), window=settings_inner, anchor="nw", tags="inner")
+        settings_inner.columnconfigure(0, weight=1)
+
+        def _configure_inner(event):
+            settings_canvas.itemconfig("inner", width=settings_canvas.winfo_width())
+            settings_canvas.configure(scrollregion=settings_canvas.bbox("all"))
+
+        settings_inner.bind("<Configure>", _configure_inner)
+        settings_canvas.bind("<Configure>", _configure_inner)
+        if os.name == "nt":
+            settings_canvas.bind("<Enter>", lambda e: settings_canvas.bind_all("<MouseWheel>", lambda ev: settings_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units")))
+            settings_canvas.bind("<Leave>", lambda e: settings_canvas.unbind_all("<MouseWheel>"))
+
+        settings_frame = ttk.LabelFrame(settings_inner, text="Tracker Behavior")
         settings_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
         settings_frame.columnconfigure(1, weight=1)
 
@@ -1013,10 +1036,8 @@ class FH6TrackerGUI(tk.Tk):
         ).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
         ttk.Button(settings_frame, text="Apply Settings", command=self.save_all_settings).grid(row=5, column=0, sticky="w", padx=8, pady=(6, 8))
 
-        ocr_frame = ttk.LabelFrame(self.settings_tab, text="Automatic Credit Tracking (OCR)")
+        ocr_frame = ttk.LabelFrame(settings_inner, text="Automatic Credit Tracking (OCR)")
         ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        ocr_frame.columnconfigure(1, weight=1)
-
         ttk.Checkbutton(ocr_frame, text="Auto-track credits by reading the on-screen balance while Forza is open", variable=self.credit_ocr_var).grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=6)
 
         ttk.Label(ocr_frame, text="Credit area (pixels):").grid(row=1, column=0, sticky="w", padx=8, pady=4)
@@ -1036,7 +1057,8 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(ocr_frame, text="Auto-Detect Region", command=self.auto_calibrate_region).grid(row=1, column=6, sticky="w", padx=8)
 
         ttk.Label(ocr_frame, text="Tesseract path:").grid(row=3, column=0, sticky="w", padx=8)
-        ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var, width=50).grid(row=3, column=1, columnspan=4, sticky="ew", padx=(2, 8))
+        ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var).grid(row=3, column=1, columnspan=4, sticky="ew", padx=(2, 8))
+        ocr_frame.columnconfigure(1, weight=1)
         ttk.Button(ocr_frame, text="Apply Settings", command=self.save_all_settings).grid(row=3, column=5, sticky="w", padx=8)
 
         self._ocr_confidence_color = tk.StringVar(value="gray")
@@ -1056,16 +1078,17 @@ class FH6TrackerGUI(tk.Tk):
         self._popup_test_var = tk.StringVar(value="")
         ttk.Label(test_popup_frame, textvariable=self._popup_test_var, foreground="#555555").pack(side="left")
 
-        preview_frame = ttk.LabelFrame(self.settings_tab, text="OCR Region Preview")
-        preview_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        preview_frame = ttk.LabelFrame(settings_inner, text="OCR Region Preview")
+        preview_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.rowconfigure(0, weight=1)
 
         preview_inner = ttk.Frame(preview_frame)
-        preview_inner.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        preview_inner.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         preview_inner.columnconfigure(0, weight=1)
+        preview_inner.rowconfigure(0, weight=1)
 
-        self._preview_canvas = tk.Canvas(preview_inner, bg="#2b2b2b", height=90, highlightthickness=1, highlightbackground="#555555")
+        self._preview_canvas = tk.Canvas(preview_inner, bg="#2b2b2b", highlightthickness=1, highlightbackground="#555555")
         self._preview_canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         self._preview_canvas.create_text(150, 45, text="No preview yet — click Refresh", fill="#888888", tags="placeholder")
         ttk.Button(preview_inner, text="Refresh\nPreview", command=self._refresh_ocr_preview).grid(row=0, column=1, sticky="ns")
@@ -1073,7 +1096,7 @@ class FH6TrackerGUI(tk.Tk):
         self._preview_info_var = tk.StringVar(value="")
         ttk.Label(preview_frame, textvariable=self._preview_info_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
-        export_frame = ttk.LabelFrame(self.settings_tab, text="Export & Backup")
+        export_frame = ttk.LabelFrame(settings_inner, text="Export & Backup")
         export_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
         export_frame.columnconfigure(1, weight=1)
 
@@ -1083,7 +1106,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(export_frame, text="Restore from Backup", command=self.restore_from_backup).grid(row=1, column=1, padx=(4, 8), pady=6, sticky="w")
         ttk.Button(export_frame, text="Keyboard Shortcuts", command=self.show_shortcuts_help).grid(row=0, column=2, rowspan=2, padx=(8, 8), pady=6, sticky="ns")
 
-        update_frame = ttk.LabelFrame(self.settings_tab, text="Updates")
+        update_frame = ttk.LabelFrame(settings_inner, text="Updates")
         update_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
         update_frame.columnconfigure(1, weight=1)
 
