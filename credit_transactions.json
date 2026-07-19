@@ -1,0 +1,11 @@
+{
+    "transactions": [
+        {
+            "timestamp": "2026-07-19T02:45:19.349933+00:00",
+            "amount": 534804,
+            "type": "gain",
+            "balance_before": 3,
+            "balance_after": 534807
+        }
+    ]
+}
