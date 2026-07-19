@@ -2,6 +2,7 @@ import csv
 import io
 import os
 import socket
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -47,8 +48,13 @@ voice_override_active = False
 # ==========================================
 sock = None
 if not TEST_MODE:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_IP, UDP_PORT))
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((UDP_IP, UDP_PORT))
+    except OSError as exc:
+        print(f" [⚠️] Could not bind to UDP port {UDP_PORT}: {exc}")
+        print(" [⚠️] Telemetry logging unavailable (another instance may be running).")
+        sock = None
 
 
 # Load reference map (ordinal -> canonical name) and the master-name index once.
@@ -167,6 +173,9 @@ if TEST_MODE:
         print(f" [TEST] '{sample_car}' is already present in the owned cars file.")
     print(" [TEST] Done. Check owned_cars.json for the new entry.")
 else:
+    if sock is None:
+        print(" [⚠️] Telemetry logging skipped — socket could not be opened.")
+        sys.exit(0)
     try:
         while True:
             data, _ = sock.recvfrom(1024)
