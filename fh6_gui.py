@@ -214,7 +214,15 @@ def detect_credit_change_from_text(text, previous_balance=None):
             if match:
                 amount = parse_credit_number(match.group(1))
                 break
-        return amount if amount is not None else None
+        if amount is None:
+            return None
+        # Catch-all branch — treat it as a balance read (e.g. "CREDITS 1,050,000"),
+        # only return a delta if we know the previous balance.
+        if previous_balance is None:
+            return 0
+        if amount != previous_balance:
+            return amount - previous_balance
+        return 0
 
     return None
 
@@ -457,8 +465,6 @@ class FH6TrackerGUI(tk.Tk):
         self.last_credit_scan_time = 0
         self._pending_balance = None
         self._pending_balance_count = 0
-        self._pending_fullscreen_change = None
-        self._pending_fullscreen_count = 0
         self._credit_transactions = self._load_credit_transactions()
         self._recent_balances = []
         self._last_rollback_balance = None
@@ -1941,18 +1947,6 @@ class FH6TrackerGUI(tk.Tk):
         self._last_ocr_raw_text = text[:80] or text
 
         if change is not None and change != 0:
-            # Require the same change to appear twice to filter out OCR noise
-            if change == self._pending_fullscreen_change:
-                self._pending_fullscreen_count += 1
-            else:
-                self._pending_fullscreen_change = change
-                self._pending_fullscreen_count = 1
-                return False
-            if self._pending_fullscreen_count < 2:
-                return False
-            self._pending_fullscreen_change = None
-            self._pending_fullscreen_count = 0
-
             if self.last_credit_balance is None:
                 self.last_credit_balance = max(0, self.get_session_credits())
             old_balance = self.last_credit_balance
@@ -1964,8 +1958,6 @@ class FH6TrackerGUI(tk.Tk):
             self.show_notice(f"Popup detected: {format_credits(change)}")
             return True
 
-        self._pending_fullscreen_change = None
-        self._pending_fullscreen_count = 0
         return False
 
     def detect_credit_popup_change(self):

@@ -11,7 +11,8 @@ def test_detect_credit_change_from_text():
     assert module.detect_credit_change_from_text('You earned 12,500 credits') == 12500
     assert module.detect_credit_change_from_text('You earned 12.5k credits') == 12500
     assert module.detect_credit_change_from_text('You spent 1,200 credits') == -1200
-    assert module.detect_credit_change_from_text('Credits: 507,324') == 507324
+    assert module.detect_credit_change_from_text('Credits: 507,324') == 0  # no previous_balance
+    assert module.detect_credit_change_from_text('Credits: 507,324', 500000) == 7324  # delta
 
 
 def test_parse_balance_number_only():
