@@ -2433,10 +2433,6 @@ class FH6TrackerGUI(tk.Tk):
                 x, y = int(min(x0, x1)), int(min(y0, y1))
                 w, h = int(abs(x1 - x0)), int(abs(y1 - y0))
                 if w > 4 and h > 4:
-                    if w > 500 or h > 200:
-                        self.show_notice("Region too large — drag a tight box around just the credit number, not the whole screen.")
-                        overlay.destroy()
-                        return
                     self.credit_x_var.set(str(x))
                     self.credit_y_var.set(str(y))
                     self.credit_w_var.set(str(w))

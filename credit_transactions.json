@@ -13,6 +13,34 @@
             "type": "spend",
             "balance_before": 0,
             "balance_after": -17
+        },
+        {
+            "timestamp": "2026-07-20T00:52:28.346645+00:00",
+            "amount": 7,
+            "type": "gain",
+            "balance_before": 0,
+            "balance_after": 7
+        },
+        {
+            "timestamp": "2026-07-20T00:52:57.492247+00:00",
+            "amount": 7,
+            "type": "gain",
+            "balance_before": 7,
+            "balance_after": 14
+        },
+        {
+            "timestamp": "2026-07-20T00:53:26.023186+00:00",
+            "amount": 7,
+            "type": "gain",
+            "balance_before": 14,
+            "balance_after": 21
+        },
+        {
+            "timestamp": "2026-07-20T00:53:54.421717+00:00",
+            "amount": 7,
+            "type": "gain",
+            "balance_before": 21,
+            "balance_after": 28
         }
     ]
 }
