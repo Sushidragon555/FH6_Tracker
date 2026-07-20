@@ -4,9 +4,9 @@
     "theme": "light",
     "credit_ocr_enabled": true,
     "credit_region": [
-        0,
+        240,
         95,
-        1720,
+        1460,
         55
     ],
     "payout_region": [
