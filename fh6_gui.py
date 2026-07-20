@@ -1329,6 +1329,18 @@ class FH6TrackerGUI(tk.Tk):
         self._refresh_active_tab()
         if "session_credits_var" in self.vars:
             self.vars["session_credits_var"].set(format_credits(self.get_session_credits()))
+        if self.credit_ocr_var.get():
+            region = self.get_credit_region()
+            if not self._forza_running_cache:
+                self._live_ocr_status_var.set("OCR enabled — waiting for Forza to open")
+            elif region:
+                self._live_ocr_status_var.set("OCR active — balance region + fullscreen popup scanning")
+            else:
+                self._live_ocr_status_var.set("OCR active — fullscreen popup scanning only")
+            bal = self.last_credit_balance or self.get_session_credits()
+            self._live_ocr_balance_var.set(format_credits(bal))
+            raw = self._last_ocr_raw_text
+            self._live_ocr_raw_var.set((raw or "")[:80] or "(no scan yet)")
         self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
@@ -1371,32 +1383,11 @@ class FH6TrackerGUI(tk.Tk):
             self.detected_car_id = None
             self.detection_status_var.set("Start the tracker and drive a car in Forza to auto-detect it.")
 
-        session_credits = self.get_session_credits()
-        self.vars["session_credits_var"].set(format_credits(session_credits))
-
-        if pyautogui is not None and pytesseract is not None and ImageGrab is not None:
-            if self.credit_ocr_var.get():
-                region = self.get_credit_region()
-                payout = self.get_payout_region()
-                if not self._forza_running_cache:
-                    self._live_ocr_status_var.set("OCR enabled — waiting for Forza to open")
-                elif region and payout:
-                    self._live_ocr_status_var.set("OCR active — balance region + payout popup scanning")
-                elif region:
-                    self._live_ocr_status_var.set("OCR active — balance region + fullscreen popup scanning")
-                elif payout:
-                    self._live_ocr_status_var.set("OCR active — payout popup scanning only")
-                else:
-                    self._live_ocr_status_var.set("OCR active — fullscreen popup scanning only")
-                bal = self.last_credit_balance or self.get_session_credits()
-                self._live_ocr_balance_var.set(format_credits(bal))
-                raw = self._last_ocr_raw_text
-                self._live_ocr_raw_var.set((raw or "")[:80] or "(no scan yet)")
-            else:
-                self._live_ocr_status_var.set("OCR disabled — enable in Settings tab")
-                self._live_ocr_balance_var.set("")
-                self._live_ocr_raw_var.set("")
-                self._live_popup_var.set("")
+        if not self.credit_ocr_var.get():
+            self._live_ocr_status_var.set("OCR disabled — enable in Settings tab")
+            self._live_ocr_balance_var.set("")
+            self._live_ocr_raw_var.set("")
+            self._live_popup_var.set("")
 
     def auto_register_from_telemetry(self, latest):
         car_id = latest.get("car_id")
