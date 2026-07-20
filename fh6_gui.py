@@ -1327,6 +1327,8 @@ class FH6TrackerGUI(tk.Tk):
         self._update_ocr_confidence_indicator()
         self._check_tracker_health()
         self._refresh_active_tab()
+        if "session_credits_var" in self.vars:
+            self.vars["session_credits_var"].set(format_credits(self.get_session_credits()))
         self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
