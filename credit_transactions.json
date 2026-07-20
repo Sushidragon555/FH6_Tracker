@@ -41,6 +41,13 @@
             "type": "gain",
             "balance_before": 21,
             "balance_after": 28
+        },
+        {
+            "timestamp": "2026-07-20T01:06:29.767288+00:00",
+            "amount": 2904254,
+            "type": "gain",
+            "balance_before": 5564,
+            "balance_after": 2906243
         }
     ]
 }
