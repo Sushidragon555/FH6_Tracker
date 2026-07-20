@@ -89,14 +89,7 @@ def format_credits(amount):
     return str(amount)
 
 
-def load_json_file(path, default):
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as handle:
-            try:
-                return json.load(handle)
-            except json.JSONDecodeError:
-                return default
-    return default
+load_json_file = car_lookup.load_json_file
 
 
 def parse_credit_number(value):
@@ -158,10 +151,19 @@ def parse_balance_number_only(text):
 
 
 def detect_credit_change_from_text(text, previous_balance=None):
+    # Called by BOTH the full-screen popup scanner and the balance-region scanner.
+    # Returns a positive int (gain), negative int (spend), 0 (no change), or None (no match).
+    # The return value is used differently depending on which caller uses it:
+    #   - Popup path (_ocr_and_parse_image): applies value immediately as a transaction
+    #   - Balance path (detect_credit_popup_change): uses balance number directly,
+    #     ignores this return value unless the balance-parsing path fails.
     if not text:
         return None
 
     lowered = text.lower()
+
+    # BRANCH 1: Reward/gain keywords -> returns positive amount
+    # Text like "You earned 50,000 CR" or "Won 12,500 credits"
     if re.search(r"\b(earned|received|won|reward(?:ed)?|added|gained)\b", lowered):
         amount = None
         for pattern in [
@@ -174,6 +176,8 @@ def detect_credit_change_from_text(text, previous_balance=None):
                 break
         return amount if amount is not None else None
 
+    # BRANCH 2: Spend keywords -> returns negative amount
+    # Text like "You spent 1,200 CR" or "Paid 50,000 credits"
     if re.search(r"\b(spent|used|paid|bought|charged)\b", lowered):
         amount = None
         for pattern in [
@@ -186,6 +190,8 @@ def detect_credit_change_from_text(text, previous_balance=None):
                 break
         return -amount if amount is not None else None
 
+    # BRANCH 3: Explicit "balance" keyword -> computes delta from previous_balance
+    # Text like "Credits balance: 1,050,000" or "Balance: 500,000"
     if re.search(r"\b(balance|credits? balance|current credits?)\b", lowered):
         amount = None
         for pattern in [
@@ -204,6 +210,10 @@ def detect_credit_change_from_text(text, previous_balance=None):
             return amount - previous_balance
         return 0
 
+    # BRANCH 4: Catch-all "credits"/"CR" match (no action keyword)
+    # Text like "CREDITS 1,050,000" or "1,050,000 CR" from the HUD balance.
+    # Without an action keyword, we treat this as a balance read, not a transaction.
+    # We only return a delta if we have a previous_balance to compare against.
     if re.search(r"\bcredits?\b", lowered):
         amount = None
         for pattern in [
@@ -216,8 +226,6 @@ def detect_credit_change_from_text(text, previous_balance=None):
                 break
         if amount is None:
             return None
-        # Catch-all branch — treat it as a balance read (e.g. "CREDITS 1,050,000"),
-        # only return a delta if we know the previous balance.
         if previous_balance is None:
             return 0
         if amount != previous_balance:
@@ -249,12 +257,7 @@ def save_settings(settings):
     _safe_write_json(SETTINGS_FILE, settings)
 
 
-def normalize_car_name(name):
-    if not name:
-        return ""
-    lowered = name.strip().lower()
-    lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
-    return " ".join(lowered.split())
+normalize_car_name = car_lookup.normalize_car_name
 
 
 def extract_car_name_from_list_entry(entry):
@@ -1954,6 +1957,9 @@ class FH6TrackerGUI(tk.Tk):
         return False
 
     def detect_credit_popup_change(self):
+        # --- Entry gates ---
+        # Only proceed if OCR dependencies are installed, the checkbox is enabled,
+        # the rate-limit has elapsed, and Forza is detected as running.
         if pyautogui is None or pytesseract is None or ImageGrab is None:
             return
         if not self.credit_ocr_var.get():
@@ -1968,11 +1974,21 @@ class FH6TrackerGUI(tk.Tk):
         self._ocr_total_count += 1
         self._last_ocr_scan_time = now
 
-        # Full-screen popup scan (runs change-detection every ~2s, full OCR every 30s)
+        # --- PATH A: Full-screen popup scanner ---
+        # Runs change-detection every ~2s via thumbnail comparison. If a change is
+        # detected (or every 12s as a safety net), it grabs a full screenshot and runs
+        # OCR looking for reward/spend keywords ("earned", "won", "spent", etc.).
+        # Popups are transient, so detected changes are applied immediately.
         popup_handled = self._scan_fullscreen_popups(now)
         if popup_handled:
             return
 
+        # --- PATH B: Balance-region scanner ---
+        # Requires a configured credit_region (set via Capture Area in Settings).
+        # This path reads the HUD credit number directly using a tight screen crop,
+        # upscaled for better OCR accuracy. It uses a confirmation-gating system:
+        # the new balance must be read identically twice before recording a transaction.
+        # This prevents OCR noise from creating phantom credit gains.
         region_set = self.get_credit_region() is not None
         if not region_set:
             return
@@ -1982,6 +1998,7 @@ class FH6TrackerGUI(tk.Tk):
             logger.warning("Credit scan: _grab_credit_image returned None")
             return
 
+        # Run OCR on the cropped region image.
         text = self._ocr_credit_text_from_image(image)
         self._last_ocr_raw_text = text or ""
         if not text or not text.strip():
@@ -1990,6 +2007,9 @@ class FH6TrackerGUI(tk.Tk):
 
         logger.warning("Credit scan: raw OCR = '%s'", (text or "")[:80])
 
+        # Try to extract a balance number from the OCR text.
+        # First pass: look for keyword patterns ("Credits:", "CR", etc.)
+        # Second pass (fallback): numeric-only OCR with digit whitelist
         change = detect_credit_change_from_text(text, self.last_credit_balance) if text else None
         balance = parse_credit_balance_from_text(text) if text else None
         if balance is None:
@@ -1997,6 +2017,7 @@ class FH6TrackerGUI(tk.Tk):
             logger.warning("Credit scan: numeric pass balance = %s", balance)
 
         if balance is not None:
+            # ----- FIRST READ: No previous balance yet, just set the baseline -----
             if self.last_credit_balance is None:
                 self.last_credit_balance = balance
                 self._reset_pending_balance()
@@ -2005,6 +2026,8 @@ class FH6TrackerGUI(tk.Tk):
                 self._credit_rate_points.append((now, balance))
                 logger.warning("Credit scan: initial balance set to %s", balance)
                 return
+
+            # ----- SAME BALANCE: No change detected, reset pending counter -----
             if balance == self.last_credit_balance:
                 self._reset_pending_balance()
                 self._recent_balances.append(balance)
@@ -2013,9 +2036,10 @@ class FH6TrackerGUI(tk.Tk):
                 self._ocr_success_count += 1
                 return
 
-            # Plausibility check: reject absurdly large single-hop gains
+            # ----- BALANCE CHANGED: Compute delta, check plausibility -----
             delta = balance - self.last_credit_balance
             logger.warning("Credit scan: delta=%s (last=%s, cur=%s)", delta, self.last_credit_balance, balance)
+            # Reject if delta is negative (spend/spend) or implausibly large (OCR error)
             if delta > 100_000_000 or delta <= 0:
                 logger.warning("Credit scan: delta %s rejected by plausibility check", delta)
                 self._recent_balances.append(balance)
@@ -2026,8 +2050,8 @@ class FH6TrackerGUI(tk.Tk):
             # Use median of recent readings as the baseline to reduce jitter
             median_balance = self._median_of_recent() or self.last_credit_balance
 
-            # The reading changed. Require it to repeat on consecutive scans before acting
-            # so a single garbled OCR frame can't inject a phantom credit gain.
+            # ----- CONFIRMATION GATE: require 2 consecutive identical reads -----
+            # This prevents a single garbled OCR frame from injecting a phantom gain.
             if balance == self._pending_balance:
                 self._pending_balance_count += 1
                 logger.warning("Credit scan: pending balance confirmed count=%s", self._pending_balance_count)
@@ -2038,7 +2062,7 @@ class FH6TrackerGUI(tk.Tk):
             if self._pending_balance_count < 2:
                 return
 
-            # Confirmed — the same new balance appeared twice in a row.
+            # ----- CONFIRMED: The same new balance appeared twice in a row -----
             confirmed_delta = balance - median_balance
             logger.warning("Credit scan: confirmed! delta=%s (median=%s, new_bal=%s)", confirmed_delta, median_balance, balance)
             if confirmed_delta > 0 and confirmed_delta <= 100_000_000:
@@ -2058,6 +2082,9 @@ class FH6TrackerGUI(tk.Tk):
             if len(self._recent_balances) > 5:
                 self._recent_balances = self._recent_balances[-5:]
 
+        # ----- FALLBACK: Use detect_credit_change_from_text result directly -----
+        # Only reached if the balance-parsing path above didn't return a result.
+        # Handles cases where text contains keywords but no clean number extraction.
         if change is None or change <= 0:
             return
 
