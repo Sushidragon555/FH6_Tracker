@@ -86,7 +86,6 @@ METHOD_NAMES = [
     "Other",
 ]
 
-SESSION_GOALS_FILE = os.path.join(BASE_DIR, "session_goals.json")
 EXPORT_DIR = os.path.join(BASE_DIR, "exports")
 
 
@@ -573,7 +572,6 @@ class FH6TrackerGUI(tk.Tk):
         self._prev_thumb = None
         self._last_change_check_time = 0.0
         self._last_fullscreen_scan_time = 0.0
-        self.goal_summary_var = tk.StringVar(value="No active goal")
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
@@ -650,13 +648,11 @@ class FH6TrackerGUI(tk.Tk):
         self.logs_tab = ttk.Frame(self.notebook)
         self.methods_tab = ttk.Frame(self.notebook)
         self.recommendations_tab = ttk.Frame(self.notebook)
-        self.goals_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.garage_tab, text="Collection")
         self.notebook.add(self.live_tab, text="Live Data")
         self.notebook.add(self.methods_tab, text="Methods")
         self.notebook.add(self.stats_tab, text="Stats")
         self.notebook.add(self.recommendations_tab, text="Recommendations")
-        self.notebook.add(self.goals_tab, text="Session Goals")
         self.notebook.add(self.settings_tab, text="Settings")
         self.notebook.add(self.logs_tab, text="Logs")
 
@@ -665,7 +661,6 @@ class FH6TrackerGUI(tk.Tk):
         self.build_methods_tab()
         self.build_stats_tab()
         self.build_recommendations_tab()
-        self.build_goals_tab()
         self.build_settings_tab()
         self.build_logs_tab()
         self.populate_progress_manufacturers()
@@ -1275,63 +1270,6 @@ class FH6TrackerGUI(tk.Tk):
         self.rec_summary_var = tk.StringVar(value="Click Refresh to generate recommendations.")
         ttk.Label(self.recommendations_tab, textvariable=self.rec_summary_var, foreground="#555555").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 8))
 
-    def build_goals_tab(self):
-        self.goals_tab.columnconfigure(0, weight=1)
-        self.goals_tab.rowconfigure(2, weight=1)
-
-        goal_setup = ttk.LabelFrame(self.goals_tab, text="Session Goals")
-        goal_setup.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
-        goal_setup.columnconfigure(1, weight=1)
-
-        ttk.Label(goal_setup, text="Target Credits:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
-        self.goal_credits_var = tk.StringVar(value="1000000")
-        ttk.Entry(goal_setup, textvariable=self.goal_credits_var, width=16).grid(row=0, column=1, sticky="w", padx=(4, 8), pady=6)
-
-        ttk.Label(goal_setup, text="Target Duration (min):").grid(row=0, column=2, sticky="w", padx=(8, 4), pady=6)
-        self.goal_duration_var = tk.StringVar(value="60")
-        ttk.Entry(goal_setup, textvariable=self.goal_duration_var, width=10).grid(row=0, column=3, sticky="w", padx=(4, 8), pady=6)
-
-        ttk.Label(goal_setup, text="Method:").grid(row=1, column=0, sticky="w", padx=8, pady=6)
-        self.goal_method_var = tk.StringVar(value="Any")
-        ttk.Combobox(goal_setup, textvariable=self.goal_method_var, values=["Any"] + METHOD_NAMES, state="readonly", width=18).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=6)
-
-        self.goal_active_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(goal_setup, text="Track goal this session", variable=self.goal_active_var).grid(row=1, column=2, columnspan=2, sticky="w", padx=(8, 8), pady=6)
-        ttk.Button(goal_setup, text="Start Goal", command=self.start_session_goal).grid(row=0, column=4, rowspan=2, padx=(8, 8), pady=6, sticky="ns")
-
-        progress_frame = ttk.LabelFrame(self.goals_tab, text="Progress")
-        progress_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        progress_frame.columnconfigure(0, weight=1)
-
-        self.goal_progress_var = tk.DoubleVar(value=0.0)
-        self.goal_progress_bar = ttk.Progressbar(progress_frame, variable=self.goal_progress_var, maximum=100)
-        self.goal_progress_bar.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
-
-        self.goal_status_var = tk.StringVar(value="No active goal")
-        ttk.Label(progress_frame, textvariable=self.goal_status_var, font=("Segoe UI", 10, "bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
-
-        details_frame = ttk.LabelFrame(self.goals_tab, text="Goal Details")
-        details_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        details_frame.columnconfigure(1, weight=1)
-        details_frame.rowconfigure(0, weight=1)
-
-        self.goal_details_text = scrolledtext.ScrolledText(details_frame, wrap=tk.WORD, height=12, state="disabled")
-        self.goal_details_text.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=8, pady=8)
-
-        history_frame = ttk.LabelFrame(self.goals_tab, text="Goal History")
-        history_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
-        history_frame.columnconfigure(0, weight=1)
-
-        goal_cols = ("Date", "Method", "Target", "Earned", "Duration", "Status")
-        self.goal_history_tree = ttk.Treeview(history_frame, columns=goal_cols, show="headings", height=6)
-        for col in goal_cols:
-            self.goal_history_tree.heading(col, text=col)
-            self.goal_history_tree.column(col, width=130)
-        self.goal_history_tree.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
-        goal_hist_scroll = ttk.Scrollbar(history_frame, orient="vertical", command=self.goal_history_tree.yview)
-        goal_hist_scroll.grid(row=0, column=1, sticky="ns", pady=8)
-        self.goal_history_tree.configure(yscrollcommand=goal_hist_scroll.set)
-
     def _performance_preset(self):
         return car_lookup.get_performance_preset(self.settings.get("performance_mode"))
 
@@ -1463,7 +1401,6 @@ class FH6TrackerGUI(tk.Tk):
             self.logs_tab: self.refresh_logs_panel,
             self.methods_tab: self.refresh_methods_panel,
             self.recommendations_tab: self.refresh_recommendations,
-            self.goals_tab: self.refresh_goals_panel,
         }
         try:
             selected = self.notebook.select()
@@ -3142,7 +3079,6 @@ class FH6TrackerGUI(tk.Tk):
             ("session_state.json", SESSION_STATE_FILE),
             ("methods_history.json", METHODS_FILE),
             ("credit_history.json", os.path.join(BASE_DIR, "credit_history.json")),
-            ("session_goals.json", SESSION_GOALS_FILE),
         ]
         try:
             with zipfile.ZipFile(file_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -3481,89 +3417,6 @@ class FH6TrackerGUI(tk.Tk):
         else:
             self.show_notice("All selected cars are already in your owned list.")
         self.refresh_all()
-
-
-    # =====================================================================
-    # SESSION GOALS
-    # =====================================================================
-    def load_session_goals(self):
-        return load_json_file(SESSION_GOALS_FILE, {"goals": [], "active_goal": None})
-
-    def save_session_goals(self, data):
-        _safe_write_json(SESSION_GOALS_FILE, data)
-
-    def start_session_goal(self):
-        if not self.goal_active_var.get():
-            self.goal_progress_var.set(0)
-            self.goal_summary_var.set("Goal tracking disabled.")
-            return
-
-        try:
-            raw = self.goal_credits_var.get().strip()
-            target_credits = parse_credit_number(raw)
-            if target_credits is None:
-                raise ValueError
-            target_duration = int(self.goal_duration_var.get())
-        except ValueError:
-            messagebox.showwarning("Invalid input", "Enter valid numbers for target credits and duration.")
-            return
-
-        goal = {
-            "target_credits": target_credits,
-            "target_duration_min": target_duration,
-            "method": self.goal_method_var.get() if self.goal_method_var.get() != "Any" else None,
-            "start_time": self.current_timestamp(),
-            "start_credits": self.get_session_credits(),
-            "active": True,
-        }
-
-        data = self.load_session_goals()
-        data["active_goal"] = goal
-        data["goals"].append(goal)
-        data["goals"] = data["goals"][-50:]
-        self.save_session_goals(data)
-
-        self.goal_progress_var.set(0)
-        self.goal_summary_var.set(f"Goal: {format_credits(target_credits)} in {target_duration} min ({format_credits(target_credits * 60 // max(target_duration, 1))}/hr)")
-        self.refresh_goals_panel()
-
-    def refresh_goals_panel(self):
-        data = self.load_session_goals()
-        goal = data.get("active_goal")
-
-        if not goal or not goal.get("active"):
-            self.goal_progress_var.set(0)
-            self.goal_summary_var.set("No active goal. Set a target and click Start Goal.")
-            return
-
-        elapsed_min = max(1, (time.time() - self._parse_iso_time(goal["start_time"])) / 60) if goal.get("start_time") else 1
-        current_credits = self.get_session_credits()
-        earned = current_credits - goal.get("start_credits", 0)
-        target = goal.get("target_credits", 0)
-        target_duration = goal.get("target_duration_min", 60)
-
-        progress_pct = min(100, (earned / target * 100) if target > 0 else 0)
-        time_progress_pct = min(100, (elapsed_min / target_duration * 100)) if target_duration > 0 else 0
-
-        self.goal_progress_var.set(progress_pct)
-
-        cr_per_hour = (earned / (elapsed_min / 60)) if elapsed_min > 0 else 0
-        projected = cr_per_hour * (target_duration / 60) if cr_per_hour > 0 else 0
-
-        status = "ON TRACK" if progress_pct >= time_progress_pct * 0.9 else "BEHIND" if progress_pct < time_progress_pct * 0.9 else "AHEAD"
-        status_color = "#137333" if status == "ON TRACK" else "#c5221f" if status == "BEHIND" else "#1f6feb"
-
-        self.goal_summary_var.set(
-            f"Earned: {format_credits(earned)} / {format_credits(target)} ({progress_pct:.1f}%) | "
-            f"Rate: {format_credits(cr_per_hour)}/hr | Projected: {format_credits(projected)} | "
-            f"Time: {elapsed_min:.0f}/{target_duration} min | Status: {status}"
-        )
-
-    def _parse_iso_time(self, iso_str):
-        try:
-            return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
-        except Exception:
-            return time.time()
 
 
     # =====================================================================
