@@ -13,6 +13,9 @@ def test_detect_credit_change_from_text():
     assert module.detect_credit_change_from_text('You spent 1,200 credits') == -1200
     assert module.detect_credit_change_from_text('Credits: 507,324') == 0  # no previous_balance
     assert module.detect_credit_change_from_text('Credits: 507,324', 500000) == 7324  # delta
+    # OCR comma->dot regression: 17.314 must parse as 17314 (not 17.314 -> 17)
+    assert module.detect_credit_change_from_text('You earned 17.314 credits') == 17314
+    assert module.detect_credit_change_from_text('Credits: 17.314') == 0
 
 
 def test_parse_balance_number_only():
@@ -25,3 +28,12 @@ def test_parse_balance_number_only():
     assert module.parse_credit_balance_from_text('1,050,000') is None
     assert module.parse_balance_number_only('') is None
     assert module.parse_balance_number_only('no digits here') is None
+
+
+def test_parse_credit_number():
+    assert module.parse_credit_number('17,314') == 17314
+    assert module.parse_credit_number('17.314') == 17314  # OCR comma->dot
+    assert module.parse_credit_number('1.050.000') == 1050000  # multiple dots
+    assert module.parse_credit_number('150000') == 150000
+    assert module.parse_credit_number('12.5k') == 12500  # legitimate decimal w/ suffix
+    assert module.parse_credit_number('1.05M') == 1050000  # legitimate decimal w/ suffix
