@@ -2269,8 +2269,14 @@ class FH6TrackerGUI(tk.Tk):
         current_rect = get_forza_window_rect()
         if not current_rect:
             return region
+        # Skip adjustment if either position has negative coords (off-screen)
+        # or the window moved an implausible distance (>1000px in any direction).
+        if saved_rect[0] < 0 or saved_rect[1] < 0 or current_rect[0] < 0 or current_rect[1] < 0:
+            return region
         dx = current_rect[0] - saved_rect[0]
         dy = current_rect[1] - saved_rect[1]
+        if abs(dx) > 1000 or abs(dy) > 1000:
+            return region
         if dx == 0 and dy == 0:
             return region
         x, y, w, h = region
