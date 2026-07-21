@@ -19,3 +19,4 @@ dist/
 
 # OCR debug captures (generated at runtime when debug logging is enabled)
 ocr_debug/
+ocr_debug_capture.png
