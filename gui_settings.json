@@ -4,17 +4,22 @@
     "theme": "light",
     "credit_ocr_enabled": true,
     "credit_region": [
-        1360,
-        129,
-        180,
-        33
+        0,
+        95,
+        1720,
+        55
     ],
+    "credit_region_forza_rect": null,
+    "credit_region_locked": false,
+    "ocr_debug_logging": true,
     "payout_region": [
         1477,
         474,
         442,
         187
     ],
+    "payout_region_forza_rect": null,
+    "payout_region_locked": false,
     "performance_mode": "Quality",
     "tesseract_path": "F:\\Tesseract\\tesseract.exe"
 }
