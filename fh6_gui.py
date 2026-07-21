@@ -1737,28 +1737,38 @@ class FH6TrackerGUI(tk.Tk):
         self.history_canvas.create_text(canvas_w // 2, canvas_h - 5, text=f"Last {len(credits_list)} sessions", fill="#555555", font=("Segoe UI", 9))
 
     def refresh_logs_panel(self):
-        if not os.path.exists(LOG_FILE):
-            self.log_text.configure(state="normal")
-            self.log_text.delete("1.0", tk.END)
-            self.log_text.insert(tk.END, "No telemetry log yet.")
-            self.log_text.configure(state="disabled")
-            return
-
-        try:
-            with open(LOG_FILE, "rb") as handle:
-                handle.seek(0, os.SEEK_END)
-                size = handle.tell()
-                read_size = min(size, 8192)
-                handle.seek(size - read_size)
-                tail = handle.read().decode("utf-8", "replace")
-            lines = [line for line in tail.splitlines() if line.strip()]
-            display_lines = lines[-80:]
-        except (OSError, UnicodeDecodeError):
-            display_lines = []
+        lines = []
+        # --- Application log (OCR activity, errors) ---
+        if os.path.exists(APP_LOG_FILE):
+            try:
+                with open(APP_LOG_FILE, "rb") as handle:
+                    handle.seek(0, os.SEEK_END)
+                    size = handle.tell()
+                    read_size = min(size, 8192)
+                    handle.seek(size - read_size)
+                    tail = handle.read().decode("utf-8", "replace")
+                lines.extend(tail.splitlines()[-40:])
+            except (OSError, UnicodeDecodeError):
+                pass
+        # --- Telemetry log (car data) ---
+        if os.path.exists(LOG_FILE):
+            try:
+                with open(LOG_FILE, "rb") as handle:
+                    handle.seek(0, os.SEEK_END)
+                    size = handle.tell()
+                    read_size = min(size, 8192)
+                    handle.seek(size - read_size)
+                    tail = handle.read().decode("utf-8", "replace")
+                lines.append("---")
+                lines.append("--- Telemetry ---")
+                lines.extend(tail.splitlines()[-40:])
+            except (OSError, UnicodeDecodeError):
+                pass
 
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", tk.END)
-        self.log_text.insert(tk.END, "\n".join(display_lines) if display_lines else "No telemetry log yet.")
+        self.log_text.insert(tk.END, "\n".join(lines) if lines else "No logs yet. OCR activity will appear here.")
+        self.log_text.see(tk.END)
         self.log_text.configure(state="disabled")
 
     def refresh_collection(self):
