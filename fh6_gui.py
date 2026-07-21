@@ -64,6 +64,7 @@ except Exception:  # pragma: no cover - optional OCR dependencies
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEBUG_DIR = os.path.join(BASE_DIR, "ocr_debug")
 AUTO_LOG_PATH = os.path.join(BASE_DIR, "auto_log.py")
 OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
 MASTER_FILE = os.path.join(BASE_DIR, "fh6_master_list.json")
@@ -393,6 +394,7 @@ def load_settings():
         "credit_region": settings.get("credit_region"),
         "credit_region_forza_rect": settings.get("credit_region_forza_rect"),
         "credit_region_locked": settings.get("credit_region_locked", False),
+        "ocr_debug_logging": settings.get("ocr_debug_logging", False),
         "payout_region": settings.get("payout_region"),
         "payout_region_forza_rect": settings.get("payout_region_forza_rect"),
         "payout_region_locked": settings.get("payout_region_locked", False),
@@ -1180,10 +1182,13 @@ class FH6TrackerGUI(tk.Tk):
         ocr_frame.columnconfigure(1, weight=1)
         ttk.Button(ocr_frame, text="Apply Settings", command=self.save_all_settings).grid(row=7, column=5, sticky="w", padx=8)
 
+        self.ocr_debug_var = tk.BooleanVar(value=self.settings.get("ocr_debug_logging", False))
+        ttk.Checkbutton(ocr_frame, text="Debug logging (saves images & OCR text to ocr_debug/)", variable=self.ocr_debug_var, command=self._on_debug_toggle).grid(row=8, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 0))
+
         self._ocr_confidence_color = tk.StringVar(value="gray")
         self._ocr_confidence_text = tk.StringVar(value="No scans yet")
         conf_frame = ttk.Frame(ocr_frame)
-        conf_frame.grid(row=8, column=0, columnspan=7, sticky="w", padx=8, pady=(0, 4))
+        conf_frame.grid(row=9, column=0, columnspan=7, sticky="w", padx=8, pady=(0, 4))
         self._conf_indicator_label = ttk.Label(conf_frame, text="\u25cf", font=("Segoe UI", 14))
         self._conf_indicator_label.pack(side="left", padx=(0, 6))
         ttk.Label(conf_frame, textvariable=self._ocr_confidence_text).pack(side="left")
@@ -1192,7 +1197,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(conf_frame, textvariable=self._ocr_raw_text_var, foreground="#888888").pack(side="left")
 
         test_popup_frame = ttk.Frame(ocr_frame)
-        test_popup_frame.grid(row=9, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 8))
+        test_popup_frame.grid(row=10, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 8))
         ttk.Button(test_popup_frame, text="Test Popup Detection", command=self._test_popup_scan).pack(side="left", padx=(0, 8))
         self._popup_test_var = tk.StringVar(value="")
         ttk.Label(test_popup_frame, textvariable=self._popup_test_var, foreground="#555555").pack(side="left")
@@ -2007,6 +2012,9 @@ class FH6TrackerGUI(tk.Tk):
         Shared by the payout-region path and the full-screen fallback path.
         Returns True if a credit change was detected and handled, False otherwise.
         """
+        # Save original image for debug before any upscaling/modification
+        self._save_debug_capture(image, "popup_raw")
+
         if Image is not None:
             image = self._upscale_for_ocr(image)
 
@@ -2109,6 +2117,7 @@ class FH6TrackerGUI(tk.Tk):
         # Run OCR on the cropped region image.
         text = self._ocr_credit_text_from_image(image)
         self._last_ocr_raw_text = text or ""
+        self._save_debug_capture(image, "balance", text)
         if not text or not text.strip():
             logger.warning("Credit scan: OCR returned empty text")
             return
@@ -2351,6 +2360,24 @@ class FH6TrackerGUI(tk.Tk):
     # =====================================================================
     # SCREEN CAPTURE & OCR PRIMITIVES
     # =====================================================================
+    def _save_debug_capture(self, image, label, text=None):
+        """If debug logging is enabled, save *image* to the debug folder with a
+        timestamped filename and write OCR text alongside it."""
+        if not self.settings.get("ocr_debug_logging", False):
+            return
+        try:
+            os.makedirs(DEBUG_DIR, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:23]
+            img_path = os.path.join(DEBUG_DIR, f"{ts}_{label}.png")
+            image.save(img_path)
+            if text:
+                txt_path = os.path.join(DEBUG_DIR, f"{ts}_{label}.txt")
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+            logger.info("Debug capture saved: %s", img_path)
+        except Exception as exc:
+            logger.warning("Failed to save debug capture: %s", exc)
+
     def _grab_credit_image(self, region=None):
         if region is None:
             region = self.get_credit_region()
@@ -3550,6 +3577,16 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["payout_region_locked"] = self.payout_region_locked.get()
         save_settings(self.settings)
 
+    def _on_debug_toggle(self):
+        self.settings["ocr_debug_logging"] = self.ocr_debug_var.get()
+        save_settings(self.settings)
+        if self.ocr_debug_var.get():
+            try:
+                os.makedirs(DEBUG_DIR, exist_ok=True)
+                self.show_notice(f"OCR debug logging enabled — captures saved to {DEBUG_DIR}")
+            except Exception as exc:
+                self.show_notice(f"Could not create debug directory: {exc}")
+
     # =====================================================================
     # SETTINGS SAVE
     # =====================================================================
@@ -3570,6 +3607,7 @@ class FH6TrackerGUI(tk.Tk):
         if not self.settings.get("payout_region_locked", False):
             self.settings["payout_region_forza_rect"] = list(forza_rect) if forza_rect else self.settings.get("payout_region_forza_rect")
         self.settings["tesseract_path"] = self.tesseract_path_var.get().strip()
+        self.settings["ocr_debug_logging"] = bool(self.ocr_debug_var.get())
         self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
         save_settings(self.settings)
         self.apply_theme(self.settings["theme"])
