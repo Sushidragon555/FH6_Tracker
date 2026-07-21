@@ -16,3 +16,6 @@ fh6_tracker.log
 build/
 dist/
 *.spec
+
+# OCR debug captures (generated at runtime when debug logging is enabled)
+ocr_debug/
