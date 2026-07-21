@@ -20,3 +20,13 @@ dist/
 # OCR debug captures (generated at runtime when debug logging is enabled)
 ocr_debug/
 ocr_debug_capture.png
+
+# User-specific data (generated on first run, not shared)
+gui_settings.json
+session_state.json
+credit_transactions.json
+credit_history.json
+methods_history.json
+owned_cars.json
+.last_update
+exports/

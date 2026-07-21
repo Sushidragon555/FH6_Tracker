@@ -575,8 +575,11 @@ class FH6TrackerGUI(tk.Tk):
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
+        self._run_startup_ocr_diagnostic()
         self.refresh_all()
         self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
+        if self.settings.get("launch_tracker_on_start", False):
+            self.start_tracker()
         self.after(2000, self._check_forza_auto_start)
         self._session_timer_after_id = self.after(1000, self._update_session_timer)
 
@@ -822,6 +825,12 @@ class FH6TrackerGUI(tk.Tk):
             self._live_popup_var = tk.StringVar(value="")
             ttk.Label(ocr_status_frame, text="Last popup:").grid(row=3, column=0, sticky="w", padx=8, pady=(0, 6))
             ttk.Label(ocr_status_frame, textvariable=self._live_popup_var, foreground="#888888").grid(row=3, column=1, sticky="w", padx=(4, 8), pady=(0, 6))
+            self._live_ocr_diag_var = tk.StringVar(value="")
+            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_diag_var, foreground="#b06000").grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
+            diag_frame = ttk.Frame(ocr_status_frame)
+            diag_frame.grid(row=5, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
+            ttk.Button(diag_frame, text="Test OCR Now", command=self._run_ocr_diagnose).grid(row=0, column=0, padx=(0, 8))
+            ttk.Button(diag_frame, text="Test Popup Scan", command=self._force_popup_scan).grid(row=0, column=1)
 
     # =========================================================================
     # UI BUILDING — Methods Tab
@@ -1339,6 +1348,35 @@ class FH6TrackerGUI(tk.Tk):
         if rate >= 0.4:
             return "yellow", f"Confidence: {self._ocr_success_count}/{self._ocr_total_count} scans OK"
         return "red", f"Confidence: {self._ocr_success_count}/{self._ocr_total_count} scans OK"
+
+    def _run_startup_ocr_diagnostic(self):
+        """Run once at startup to verify OCR can work and show clear status."""
+        issues = []
+        if pyautogui is None:
+            issues.append("pyautogui not installed")
+        if pytesseract is None:
+            issues.append("pytesseract not installed")
+        if ImageGrab is None:
+            issues.append("PIL.ImageGrab not installed")
+        if pytesseract is not None:
+            self._set_tesseract_path()
+            t_path = getattr(pytesseract.pytesseract, "tesseract_cmd", "")
+            if not t_path or not os.path.isfile(str(t_path)):
+                issues.append(f"Tesseract not found at: {t_path or '(not set)'}")
+        credit_region = self.get_credit_region()
+        if not credit_region:
+            issues.append("No credit region configured (use Capture Area in Settings)")
+        payout_region = self.get_payout_region()
+        if not credit_region and not payout_region:
+            issues.append("No payout region configured either — OCR has nothing to scan")
+        if hasattr(self, "_live_ocr_status_var"):
+            if issues:
+                self._live_ocr_status_var.set("OCR issues: " + "; ".join(issues))
+            elif self.credit_ocr_var.get():
+                if credit_region:
+                    self._live_ocr_status_var.set("OCR ready — will scan when Forza opens")
+                else:
+                    self._live_ocr_status_var.set("OCR ready (popup scan only) — no credit region set")
 
     def _check_cache_reload(self):
         try:
@@ -1862,6 +1900,47 @@ class FH6TrackerGUI(tk.Tk):
     # =====================================================================
     # OCR CREDIT DETECTION
     # =====================================================================
+    def _run_ocr_diagnose(self):
+        """On-demand OCR diagnostic: checks dependencies, Tesseract, region, and runs a test capture."""
+        lines = []
+        if pyautogui is None:
+            lines.append("pyautogui: NOT INSTALLED")
+        else:
+            lines.append("pyautogui: OK")
+        if pytesseract is None:
+            lines.append("pytesseract: NOT INSTALLED")
+        else:
+            lines.append("pytesseract: OK")
+        if ImageGrab is None:
+            lines.append("PIL.ImageGrab: NOT INSTALLED")
+        else:
+            lines.append("PIL.ImageGrab: OK")
+        if pytesseract is not None:
+            self._set_tesseract_path()
+            t_path = getattr(pytesseract.pytesseract, "tesseract_cmd", "")
+            if t_path and os.path.isfile(str(t_path)):
+                lines.append(f"Tesseract: {t_path}")
+            else:
+                lines.append(f"Tesseract: NOT FOUND ({t_path or 'not set'})")
+        region = self.get_credit_region()
+        if region:
+            lines.append(f"Credit region: {region}")
+        else:
+            lines.append("Credit region: NONE (popup scan only)")
+        payout = self.get_payout_region()
+        if payout:
+            lines.append(f"Payout region: {payout}")
+        forza = self._forza_running_cache
+        lines.append(f"Forza detected: {'YES' if forza else 'NO'}")
+        forza_titles = get_visible_forza_window_titles()
+        if forza_titles:
+            lines.append(f"Forza windows: {forza_titles}")
+        result = " | ".join(lines)
+        if hasattr(self, "_live_ocr_diag_var"):
+            self._live_ocr_diag_var.set(result)
+        self.show_notice("OCR diagnostic: " + ("Forza not detected" if not forza else "check Live tab"))
+        logger.warning("OCR DIAGNOSTIC: %s", result)
+
     def _force_popup_scan(self):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
         self._set_tesseract_path()
@@ -2024,14 +2103,23 @@ class FH6TrackerGUI(tk.Tk):
         # Only proceed if OCR dependencies are installed, the checkbox is enabled,
         # the rate-limit has elapsed, and Forza is detected as running.
         if pyautogui is None or pytesseract is None or ImageGrab is None:
+            missing = [name for name, val in {
+                "pyautogui": pyautogui, "pytesseract": pytesseract, "PIL.ImageGrab": ImageGrab
+            }.items() if val is None]
+            if hasattr(self, "_live_ocr_status_var"):
+                self._live_ocr_status_var.set(f"OCR blocked — missing: {', '.join(missing)}")
             return
         if not self.credit_ocr_var.get():
+            if hasattr(self, "_live_ocr_status_var"):
+                self._live_ocr_status_var.set("OCR disabled — enable in Settings tab")
             return
 
         now = time.monotonic()
         if now - self.last_credit_scan_time < self._ocr_interval_seconds():
             return
         if not self._forza_running_cache:
+            if hasattr(self, "_live_ocr_status_var"):
+                self._live_ocr_status_var.set("OCR waiting — Forza not detected (open the game)")
             return
         self.last_credit_scan_time = now
         self._ocr_total_count += 1
