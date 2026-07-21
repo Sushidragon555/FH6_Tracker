@@ -106,14 +106,27 @@ load_json_file = car_lookup.load_json_file
 
 def parse_credit_number(value):
     cleaned = value.replace(",", "").replace(" ", "")
-    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([kKmM])?", cleaned)
+    # Check for a k/M suffix first — dots before a suffix are legitimate decimals
+    # (e.g. "12.5k" → 12,500).  Without a suffix, dots are OCR-misread thousands
+    # separators (e.g. "17.314" → 17,314).
+    suffix = None
+    if cleaned and cleaned[-1].lower() in ("k", "m"):
+        suffix = cleaned[-1].lower()
+        cleaned = cleaned[:-1]
+    if not suffix:
+        # No suffix → strip all dots (thousands-sep OCR noise)
+        cleaned = cleaned.replace(".", "")
+        if not cleaned.isdigit():
+            return None
+        return int(cleaned)
+    # With a suffix → keep the dot as a real decimal
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)", cleaned)
     if not match:
         return None
     number = float(match.group(1))
-    suffix = match.group(2)
-    if suffix and suffix.lower() == "k":
+    if suffix == "k":
         number *= 1000
-    elif suffix and suffix.lower() == "m":
+    elif suffix == "m":
         number *= 1_000_000
     return int(number)
 
@@ -378,7 +391,11 @@ def load_settings():
         "theme": settings.get("theme", "light"),
         "credit_ocr_enabled": settings.get("credit_ocr_enabled", True),
         "credit_region": settings.get("credit_region"),
+        "credit_region_forza_rect": settings.get("credit_region_forza_rect"),
+        "credit_region_locked": settings.get("credit_region_locked", False),
         "payout_region": settings.get("payout_region"),
+        "payout_region_forza_rect": settings.get("payout_region_forza_rect"),
+        "payout_region_locked": settings.get("payout_region_locked", False),
         "performance_mode": settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE),
         "tesseract_path": settings.get("tesseract_path") or _find_tesseract() or "",
     }
@@ -477,6 +494,26 @@ def get_visible_forza_window_titles():
 
 def has_running_forza_window():
     return bool(get_visible_forza_window_titles())
+
+
+def get_forza_window_rect():
+    """Return (left, top, right, bottom) of the first visible Forza window, or None."""
+    if os.name != "nt":
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        titles = get_visible_forza_window_titles()
+        if not titles:
+            return None
+        hwnd = user32.FindWindowW(None, titles[0])
+        if not hwnd:
+            return None
+        rect = ctypes.wintypes.RECT()
+        if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return (rect.left, rect.top, rect.right, rect.bottom)
+    except Exception:
+        pass
+    return None
 
 
 # =============================================================================
@@ -1114,6 +1151,8 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(ocr_frame, text="Capture Area", command=self.capture_credit_area).grid(row=1, column=5, sticky="w", padx=8)
         ttk.Button(ocr_frame, text="Test OCR", command=self.test_credit_ocr).grid(row=2, column=5, sticky="w", padx=8)
         ttk.Button(ocr_frame, text="Auto-Detect Region", command=self.auto_calibrate_region).grid(row=1, column=6, sticky="w", padx=8)
+        self.credit_region_locked = tk.BooleanVar(value=self.settings.get("credit_region_locked", False))
+        ttk.Checkbutton(ocr_frame, text="Lock", variable=self.credit_region_locked, command=self._on_credit_lock_toggle).grid(row=2, column=6, sticky="w", padx=8)
 
         ttk.Separator(ocr_frame, orient="horizontal").grid(row=3, column=0, columnspan=7, sticky="ew", padx=8, pady=6)
 
@@ -1131,6 +1170,8 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Button(ocr_frame, text="Capture Area", command=self.capture_payout_area).grid(row=4, column=5, sticky="w", padx=8)
         ttk.Button(ocr_frame, text="Test OCR", command=self.test_payout_ocr).grid(row=5, column=5, sticky="w", padx=8)
+        self.payout_region_locked = tk.BooleanVar(value=self.settings.get("payout_region_locked", False))
+        ttk.Checkbutton(ocr_frame, text="Lock", variable=self.payout_region_locked, command=self._on_payout_lock_toggle).grid(row=5, column=6, sticky="w", padx=8)
 
         ttk.Separator(ocr_frame, orient="horizontal").grid(row=6, column=0, columnspan=7, sticky="ew", padx=8, pady=6)
 
@@ -2261,10 +2302,28 @@ class FH6TrackerGUI(tk.Tk):
             return [x, y, w, h]
         return None
 
+    def _adjust_region_for_forza_window(self, region, saved_forza_rect_key):
+        """Offset *region* by the delta between the current Forza window position
+        and the position when the region was captured, so OCR follows the window."""
+        if not region:
+            return region
+        saved_rect = self.settings.get(saved_forza_rect_key)
+        if not saved_rect or len(saved_rect) != 4:
+            return region
+        current_rect = get_forza_window_rect()
+        if not current_rect:
+            return region
+        dx = current_rect[0] - saved_rect[0]
+        dy = current_rect[1] - saved_rect[1]
+        if dx == 0 and dy == 0:
+            return region
+        x, y, w, h = region
+        return (x + dx, y + dy, w, h)
+
     def get_credit_region(self):
         region = self.settings.get("credit_region")
         if region and len(region) == 4 and int(region[2]) > 0 and int(region[3]) > 0:
-            return tuple(int(v) for v in region)
+            return self._adjust_region_for_forza_window(tuple(int(v) for v in region), "credit_region_forza_rect")
         return None
 
     def get_payout_region(self):
@@ -2273,7 +2332,7 @@ class FH6TrackerGUI(tk.Tk):
             w, h = int(region[2]), int(region[3])
             if w > 800 or h > 200:
                 return None
-            return tuple(int(v) for v in region)
+            return self._adjust_region_for_forza_window(tuple(int(v) for v in region), "payout_region_forza_rect")
         return None
 
     def _read_payout_region_fields(self):
@@ -2395,14 +2454,17 @@ class FH6TrackerGUI(tk.Tk):
                 "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
             )
             return
-        region = self._read_region_fields()
+        raw_region = self._read_region_fields()
+        capture_region = self.get_credit_region()
+        if not capture_region:
+            capture_region = raw_region
 
         # Capture the image and provide diagnostics.
         debug_lines = []
-        if region is None:
+        if capture_region is None:
             debug_lines.append("Region: NOT SET (all zeros). Click 'Capture Area' first.")
         else:
-            x, y, w, h = region
+            x, y, w, h = capture_region
             debug_lines.append(f"Region: x={x} y={y} w={w} h={h}")
 
         if os.name == 'nt':
@@ -2410,7 +2472,7 @@ class FH6TrackerGUI(tk.Tk):
             debug_lines.append(f"Tesseract: {pytesseract.pytesseract.tesseract_cmd}")
             debug_lines.append(f"Exists: {os.path.isfile(pytesseract.pytesseract.tesseract_cmd)}")
 
-        image = self._grab_credit_image(region=region)
+        image = self._grab_credit_image(region=capture_region)
         if image is None:
             debug_lines.append("Capture: FAILED (image is None)")
             messagebox.showinfo("OCR test", "\n".join(debug_lines))
@@ -2508,6 +2570,9 @@ class FH6TrackerGUI(tk.Tk):
         self._popup_test_var.set(" | ".join(parts))
 
     def capture_credit_area(self):
+        if self.settings.get("credit_region_locked", False):
+            self.show_notice("Credit region is locked — unlock it in Settings to change.")
+            return
         try:
             overlay = tk.Toplevel(self)
             overlay.attributes("-fullscreen", True)
@@ -2546,6 +2611,8 @@ class FH6TrackerGUI(tk.Tk):
                     self.credit_w_var.set(str(w))
                     self.credit_h_var.set(str(h))
                     self.settings["credit_region"] = [x, y, w, h]
+                    forza_rect = get_forza_window_rect()
+                    self.settings["credit_region_forza_rect"] = list(forza_rect) if forza_rect else None
                     save_settings(self.settings)
                     self.show_notice(f"Region set to ({x}, {y}) {w}x{h} and saved.")
 
@@ -2562,6 +2629,9 @@ class FH6TrackerGUI(tk.Tk):
             messagebox.showerror("Capture failed", f"Could not open the capture overlay: {exc}")
 
     def capture_payout_area(self):
+        if self.settings.get("payout_region_locked", False):
+            self.show_notice("Payout region is locked — unlock it in Settings to change.")
+            return
         try:
             overlay = tk.Toplevel(self)
             overlay.attributes("-fullscreen", True)
@@ -2604,6 +2674,8 @@ class FH6TrackerGUI(tk.Tk):
                     self.payout_w_var.set(str(w))
                     self.payout_h_var.set(str(h))
                     self.settings["payout_region"] = [x, y, w, h]
+                    forza_rect = get_forza_window_rect()
+                    self.settings["payout_region_forza_rect"] = list(forza_rect) if forza_rect else None
                     save_settings(self.settings)
                     self.show_notice(f"Payout region set to ({x}, {y}) {w}x{h} and saved.")
 
@@ -2627,13 +2699,13 @@ class FH6TrackerGUI(tk.Tk):
                 "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
             )
             return
-        region = self._read_payout_region_fields()
+        capture_region = self.get_payout_region() or self._read_payout_region_fields()
 
         debug_lines = []
-        if region is None:
+        if capture_region is None:
             debug_lines.append("Payout region: NOT SET. Click 'Capture Area' first.")
         else:
-            x, y, w, h = region
+            x, y, w, h = capture_region
             debug_lines.append(f"Payout region: x={x} y={y} w={w} h={h}")
 
         if os.name == 'nt':
@@ -2641,7 +2713,7 @@ class FH6TrackerGUI(tk.Tk):
             debug_lines.append(f"Tesseract: {pytesseract.pytesseract.tesseract_cmd}")
             debug_lines.append(f"Exists: {os.path.isfile(pytesseract.pytesseract.tesseract_cmd)}")
 
-        image = self._grab_credit_image(region=region)
+        image = self._grab_credit_image(region=capture_region)
         if image is None:
             debug_lines.append("Capture: FAILED (image is None)")
             messagebox.showinfo("Payout OCR test", "\n".join(debug_lines))
@@ -2681,7 +2753,7 @@ class FH6TrackerGUI(tk.Tk):
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
             self._preview_info_var.set("OCR packages not installed.")
             return
-        region = self._read_region_fields()
+        region = self.get_credit_region() or self._read_region_fields()
         if region is None:
             self._preview_info_var.set("No region set — use Capture Area or Auto-Detect first.")
             return
@@ -2730,6 +2802,9 @@ class FH6TrackerGUI(tk.Tk):
         self._preview_info_var.set(info)
 
     def auto_calibrate_region(self):
+        if self.settings.get("credit_region_locked", False):
+            self.show_notice("Credit region is locked — unlock it in Settings to change.")
+            return
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
             messagebox.showwarning(
                 "OCR unavailable",
@@ -2831,6 +2906,8 @@ class FH6TrackerGUI(tk.Tk):
 
         # Auto-save so it takes effect immediately
         self.settings["credit_region"] = [detected_x, detected_y, detected_w, detected_h]
+        forza_rect = get_forza_window_rect()
+        self.settings["credit_region_forza_rect"] = list(forza_rect) if forza_rect else None
         save_settings(self.settings)
 
         self.show_notice(f"Auto-detected region: ({detected_x}, {detected_y}) {detected_w}x{detected_h} — balance ~{format_credits(best_balance)}")
@@ -3463,6 +3540,17 @@ class FH6TrackerGUI(tk.Tk):
 
 
     # =====================================================================
+    # REGION LOCK
+    # =====================================================================
+    def _on_credit_lock_toggle(self):
+        self.settings["credit_region_locked"] = self.credit_region_locked.get()
+        save_settings(self.settings)
+
+    def _on_payout_lock_toggle(self):
+        self.settings["payout_region_locked"] = self.payout_region_locked.get()
+        save_settings(self.settings)
+
+    # =====================================================================
     # SETTINGS SAVE
     # =====================================================================
     def save_all_settings(self):
@@ -3471,8 +3559,16 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["launch_tracker_on_start"] = bool(self.launch_tracker_var.get())
         self.settings["theme"] = self.theme_var.get() or "light"
         self.settings["credit_ocr_enabled"] = bool(self.credit_ocr_var.get())
-        self.settings["credit_region"] = self._read_region_fields()
-        self.settings["payout_region"] = self._read_payout_region_fields()
+        if not self.settings.get("credit_region_locked", False):
+            self.settings["credit_region"] = self._read_region_fields()
+        if not self.settings.get("payout_region_locked", False):
+            self.settings["payout_region"] = self._read_payout_region_fields()
+        # Re-anchor region to current Forza window position when manually saving
+        forza_rect = get_forza_window_rect()
+        if not self.settings.get("credit_region_locked", False):
+            self.settings["credit_region_forza_rect"] = list(forza_rect) if forza_rect else self.settings.get("credit_region_forza_rect")
+        if not self.settings.get("payout_region_locked", False):
+            self.settings["payout_region_forza_rect"] = list(forza_rect) if forza_rect else self.settings.get("payout_region_forza_rect")
         self.settings["tesseract_path"] = self.tesseract_path_var.get().strip()
         self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
         save_settings(self.settings)
