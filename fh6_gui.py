@@ -2077,6 +2077,10 @@ class FH6TrackerGUI(tk.Tk):
         change = detect_credit_change_from_text(text, self.last_credit_balance) if text else None
         balance = parse_credit_balance_from_text(text) if text else None
         if balance is None:
+            balance = parse_balance_number_only(text)
+            if balance:
+                logger.warning("Credit scan: standalone number balance = %s", balance)
+        if balance is None:
             balance = parse_balance_number_only(self._ocr_numeric_text_from_image(image))
             logger.warning("Credit scan: numeric pass balance = %s", balance)
 
@@ -2482,6 +2486,8 @@ class FH6TrackerGUI(tk.Tk):
         debug_lines.append(f"Raw text: {raw or '(nothing detected)'}")
 
         balance = parse_credit_balance_from_text(text)
+        if balance is None:
+            balance = parse_balance_number_only(text)
         if balance is None and region is not None:
             # Try numeric-only pass.
             try:
@@ -2767,6 +2773,8 @@ class FH6TrackerGUI(tk.Tk):
         except Exception:
             raw_text = ""
         balance = parse_credit_balance_from_text(raw_text)
+        if balance is None:
+            balance = parse_balance_number_only(raw_text)
         if balance is None and region is not None:
             try:
                 num_text = pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
