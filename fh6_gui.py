@@ -799,24 +799,32 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(controls_frame, text="Add Credits", command=self.add_session_credits).grid(row=0, column=2, padx=(0, 8))
         ttk.Button(controls_frame, text="Reset Session", command=self.reset_session).grid(row=0, column=3)
 
-        ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=2, column=0, sticky="w", padx=10, pady=(6, 0))
+        race_frame = ttk.Frame(self.live_tab)
+        race_frame.grid(row=2, column=0, sticky="w", padx=10, pady=(2, 4))
+        self._recording = False
+        self._record_btn = ttk.Button(race_frame, text="Start Recording", command=self._toggle_race_recording)
+        self._record_btn.grid(row=0, column=0, padx=(0, 8))
+        self._record_status_var = tk.StringVar(value="  (or press F6 in-game)")
+        ttk.Label(race_frame, textvariable=self._record_status_var, foreground="#555555").grid(row=0, column=1, sticky="w")
+
+        ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=3, column=0, sticky="w", padx=10, pady=(6, 0))
 
         self.detection_status_var = tk.StringVar(value="Start the tracker and drive a car in Forza to auto-detect it.")
         if pyautogui is None or pytesseract is None or ImageGrab is None:
-            ttk.Label(self.live_tab, text="Automatic credit tracking needs OCR packages — see Settings → Automatic Credit Tracking.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
+            ttk.Label(self.live_tab, text="Automatic credit tracking needs OCR packages — see Settings → Automatic Credit Tracking.").grid(row=4, column=0, sticky="w", padx=10, pady=(2, 0))
         else:
-            ttk.Label(self.live_tab, text="Automatic credit tracking runs when enabled in Settings and Forza is open (a new session starts each time the game opens).").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
-            ttk.Label(self.live_tab, text="Press F4 and say the car name to save it to your owned list.").grid(row=4, column=0, sticky="w", padx=10, pady=(4, 0))
+            ttk.Label(self.live_tab, text="Automatic credit tracking runs when enabled in Settings and Forza is open (a new session starts each time the game opens).").grid(row=4, column=0, sticky="w", padx=10, pady=(2, 0))
+            ttk.Label(self.live_tab, text="Press F4 and say the car name to save it to your owned list.").grid(row=5, column=0, sticky="w", padx=10, pady=(4, 0))
 
             detect_frame = ttk.LabelFrame(self.live_tab, text="Auto Garage Detection")
-            detect_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
+            detect_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=(10, 0))
             detect_frame.columnconfigure(0, weight=1)
             ttk.Label(detect_frame, textvariable=self.detection_status_var, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
             self.tag_detected_button = ttk.Button(detect_frame, text="Tag Detected Car", command=self.tag_detected_car)
             self.tag_detected_button.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
 
             ocr_status_frame = ttk.LabelFrame(self.live_tab, text="Auto Credit Tracking Status")
-            ocr_status_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=(10, 0))
+            ocr_status_frame.grid(row=7, column=0, sticky="ew", padx=10, pady=(10, 0))
             ocr_status_frame.columnconfigure(1, weight=1)
             self._live_ocr_status_var = tk.StringVar(value="OCR disabled — enable in Settings tab")
             ttk.Label(ocr_status_frame, textvariable=self._live_ocr_status_var, foreground="#555555").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 4))
@@ -2181,6 +2189,35 @@ class FH6TrackerGUI(tk.Tk):
             self._live_ocr_diag_var.set(result)
         self.show_notice("OCR diagnostic: " + ("Forza not detected" if not forza else "check Live tab"))
         logger.warning("OCR DIAGNOSTIC: %s", result)
+
+    def _toggle_race_recording(self):
+        """Start or stop manual race recording via signal file to the tracker subprocess."""
+        os.makedirs(RACES_DIR, exist_ok=True)
+        if not self._recording:
+            signal_path = os.path.join(RACES_DIR, ".record_start")
+            try:
+                with open(signal_path, "w") as f:
+                    f.write(str(time.time()))
+            except OSError as exc:
+                self.show_notice(f"Could not start recording: {exc}")
+                return
+            self._recording = True
+            self._record_btn.configure(text="Stop Recording")
+            self._record_status_var.set("Recording... press Stop or F6 in-game to finish")
+            self.show_notice("Race recording started — drive!")
+        else:
+            signal_path = os.path.join(RACES_DIR, ".record_stop")
+            try:
+                with open(signal_path, "w") as f:
+                    f.write(str(time.time()))
+            except OSError as exc:
+                self.show_notice(f"Could not stop recording: {exc}")
+                return
+            self._recording = False
+            self._record_btn.configure(text="Start Recording")
+            self._record_status_var.set("  (or press F6 in-game)")
+            self.show_notice("Race recording stopped — check Race Analysis tab")
+            self.after(1500, self.refresh_races_panel)
 
     def _force_popup_scan(self):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""

@@ -35,8 +35,9 @@ OWNED_FILE = car_lookup.OWNED_FILE
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 RACES_DIR = os.path.join(BASE_DIR, "races")
 
-# Hotkey set to F4
+# Hotkey set to F4 for voice, F6 for race recording toggle
 HOTKEY = "f4"
+RECORD_HOTKEY = "f6"
 TEST_MODE = os.environ.get("FH6_TEST_MODE", "0") == "1"
 
 # Race telemetry capture settings. Forza sends ~60 packets/sec. We sample every
@@ -76,6 +77,11 @@ race_start_timestamp = ""
 race_car_name = "Unknown Vehicle"
 race_car_id = 0
 race_packet_count = 0
+race_manual_override = False  # True when user manually triggered recording
+
+# Signal file path for GUI <-> subprocess communication
+RECORD_START_FILE = os.path.join(RACES_DIR, ".record_start")
+RECORD_STOP_FILE = os.path.join(RACES_DIR, ".record_stop")
 
 # Ensure races directory exists
 os.makedirs(RACES_DIR, exist_ok=True)
@@ -204,9 +210,62 @@ def log_car_voice():
     print("\n Resuming live telemetry display tracking...\n")
 
 
-# Register the shortcut hook safely before running the loop
+def toggle_race_recording():
+    """Toggle manual race recording on/off via F6 hotkey."""
+    global race_in_progress, race_manual_override
+    now = time.monotonic()
+    now_str = datetime.now(timezone.utc).isoformat()
+    if not race_in_progress:
+        race_manual_override = True
+        start_race({"car_ordinal": int(active_car_id) if active_car_id.isdigit() else 0,
+                     "rpm": 0, "speed_mph": 0,
+                     "timestamp_ms": int(time.time() * 1000),
+                     "engine_max_rpm": 0,
+                     "throttle": 0, "brake": 0, "steering": 0,
+                     "handbrake": 0, "gear": 0, "power": 0, "torque": 0, "boost": 0,
+                     "is_race_on": 1}, now, now_str)
+        print(f"\n [REC] Manual recording STARTED — press F6 to stop.")
+    else:
+        race_manual_override = False
+        end_race(now, now_str)
+        print(f"\n [REC] Manual recording STOPPED.")
+
+
+def _check_signal_files():
+    """Check for GUI signal files to start/stop recording."""
+    global race_manual_override
+    if os.path.exists(RECORD_START_FILE):
+        try:
+            os.remove(RECORD_START_FILE)
+        except OSError:
+            pass
+        if not race_in_progress:
+            now = time.monotonic()
+            now_str = datetime.now(timezone.utc).isoformat()
+            race_manual_override = True
+            start_race({"car_ordinal": int(active_car_id) if active_car_id.isdigit() else 0,
+                         "rpm": 0, "speed_mph": 0,
+                         "timestamp_ms": int(time.time() * 1000),
+                         "engine_max_rpm": 0,
+                         "throttle": 0, "brake": 0, "steering": 0,
+                         "handbrake": 0, "gear": 0, "power": 0, "torque": 0, "boost": 0,
+                         "is_race_on": 1}, now, now_str)
+    if os.path.exists(RECORD_STOP_FILE):
+        try:
+            os.remove(RECORD_STOP_FILE)
+        except OSError:
+            pass
+        if race_in_progress and race_manual_override:
+            now = time.monotonic()
+            now_str = datetime.now(timezone.utc).isoformat()
+            race_manual_override = False
+            end_race(now, now_str)
+
+
+# Register the shortcut hooks safely before running the loop
 if keyboard is not None:
     keyboard.add_hotkey(HOTKEY, log_car_voice)
+    keyboard.add_hotkey(RECORD_HOTKEY, lambda: toggle_race_recording())
 else:
     print(" [⚠️] Hotkey support disabled because the keyboard package is unavailable.")
 
@@ -284,11 +343,16 @@ else:
             now = time.monotonic()
             now_str = datetime.now(timezone.utc).isoformat()
 
-            # --- Race detection ---
-            if is_race_on and not race_in_progress:
-                start_race(parsed, now, now_str)
-            elif not is_race_on and race_in_progress:
-                end_race(now, now_str)
+            # --- Check for GUI signal files (every ~1s) ---
+            if race_packet_count % 60 == 0:
+                _check_signal_files()
+
+            # --- Auto race detection (only if not manually controlled) ---
+            if not race_manual_override:
+                if is_race_on and not race_in_progress:
+                    start_race(parsed, now, now_str)
+                elif not is_race_on and race_in_progress:
+                    end_race(now, now_str)
 
             # --- Race telemetry capture ---
             if race_in_progress:
