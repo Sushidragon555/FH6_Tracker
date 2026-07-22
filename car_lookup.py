@@ -4,6 +4,7 @@ Both the telemetry listener (auto_log.py) and the GUI (fh6_gui.py) use this modu
 that the reference map, the owned list, and the canonical car names stay consistent.
 """
 
+import functools
 import json
 import os
 import re
@@ -128,6 +129,7 @@ def load_json_file(path, default):
     return default
 
 
+@functools.lru_cache(maxsize=2048)
 def normalize_car_name(name):
     if not name:
         return ""

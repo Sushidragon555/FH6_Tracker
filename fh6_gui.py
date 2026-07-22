@@ -552,7 +552,7 @@ class FH6TrackerGUI(tk.Tk):
         self._credit_rate_points = []
         self.forza_running_prev = None
         self._forza_running_cache = False
-        self.known_owned = set(load_json_file(OWNED_FILE, {"owned": []}).get("owned", []))
+        self._forza_process_check_time = 0.0
         self.detected_car_id = None
         self._notice_after_id = None
         self._method_active = False
@@ -562,6 +562,7 @@ class FH6TrackerGUI(tk.Tk):
         self._method_timer_after_id = None
         self._master_db_cache = load_json_file(MASTER_FILE, {})
         self._owned_cache = load_json_file(OWNED_FILE, {"owned": []}).get("owned", [])
+        self.known_owned = set(self._owned_cache)
         try:
             self._master_db_mtime = os.path.getmtime(MASTER_FILE) if os.path.exists(MASTER_FILE) else 0
         except (OSError, PermissionError):
@@ -574,6 +575,10 @@ class FH6TrackerGUI(tk.Tk):
         self._prev_thumb = None
         self._last_change_check_time = 0.0
         self._last_fullscreen_scan_time = 0.0
+        self._collection_dirty = True
+        self._last_races_refresh_time = 0.0
+        self._last_methods_refresh_time = 0.0
+        self._last_recs_refresh_time = 0.0
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
@@ -1499,6 +1504,7 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Button(update_frame, text="Check for Updates", command=self._check_for_updates).grid(row=1, column=0, padx=8, pady=6, sticky="w")
         ttk.Button(update_frame, text="Restart App", command=self._restart_app).grid(row=1, column=1, padx=(4, 8), pady=6, sticky="w")
+        ttk.Button(update_frame, text="Send Feedback", command=self._open_feedback).grid(row=1, column=2, padx=(4, 8), pady=6, sticky="w")
 
         self._update_pending = False
 
@@ -1647,6 +1653,7 @@ class FH6TrackerGUI(tk.Tk):
             if mtime != self._owned_mtime:
                 self._owned_cache = load_json_file(OWNED_FILE, {"owned": []}).get("owned", [])
                 self._owned_mtime = mtime
+                self._collection_dirty = True
         except OSError:
             pass
 
@@ -1654,13 +1661,20 @@ class FH6TrackerGUI(tk.Tk):
         self._owned_cache = load_json_file(OWNED_FILE, {"owned": []}).get("owned", [])
         self._owned_mtime = os.path.getmtime(OWNED_FILE) if os.path.exists(OWNED_FILE) else 0
         self.known_owned = set(self._owned_cache)
+        self._collection_dirty = True
 
     # =========================================================================
     # REFRESH LOOP & TAB MANAGEMENT
     # =========================================================================
 
     def refresh_loop(self):
-        self._forza_running_cache = has_running_forza_process() or has_running_forza_window()
+        now = time.monotonic()
+        # Only spawn tasklist every 10 seconds; window check is nearly free and runs every cycle.
+        if now - self._forza_process_check_time >= 10.0:
+            self._forza_running_cache = has_running_forza_process() or has_running_forza_window()
+            self._forza_process_check_time = now
+        else:
+            self._forza_running_cache = has_running_forza_window()
         self.update_forza_session_state(running_now=self._forza_running_cache)
         self.detect_credit_popup_change()
         self._update_ocr_confidence_indicator()
@@ -1684,24 +1698,36 @@ class FH6TrackerGUI(tk.Tk):
 
     def refresh_all(self):
         self.update_forza_session_state(running_now=self._forza_running_cache)
+        self._collection_dirty = True
         self.refresh_collection()
         self._refresh_active_tab()
 
     def _refresh_active_tab(self):
+        now = time.monotonic()
         tab_map = {
             self.garage_tab: self.refresh_collection,
             self.live_tab: self.refresh_live_data,
             self.stats_tab: self.refresh_stats_panel,
             self.logs_tab: self.refresh_logs_panel,
-            self.methods_tab: self.refresh_methods_panel,
-            self.races_tab: self.refresh_races_panel,
-            self.recommendations_tab: self.refresh_recommendations,
+        }
+        # Heavy tabs are throttled to refresh every 10 seconds max.
+        throttled_tabs = {
+            self.methods_tab: (self.refresh_methods_panel, "_last_methods_refresh_time", 10.0),
+            self.races_tab: (self.refresh_races_panel, "_last_races_refresh_time", 10.0),
+            self.recommendations_tab: (self.refresh_recommendations, "_last_recs_refresh_time", 10.0),
         }
         try:
             selected = self.notebook.select()
             for widget, refresh_fn in tab_map.items():
                 if str(widget) == selected:
                     refresh_fn()
+                    return
+            for widget, (refresh_fn, attr, interval) in throttled_tabs.items():
+                if str(widget) == selected:
+                    last_time = getattr(self, attr, 0.0)
+                    if now - last_time >= interval:
+                        refresh_fn()
+                        setattr(self, attr, now)
                     return
         except Exception:
             pass
@@ -1742,13 +1768,16 @@ class FH6TrackerGUI(tk.Tk):
         self.detected_car_id = str(car_id)
         car_name = car_lookup.lookup_car_name(car_id)
         if car_name:
-            was_new = car_lookup.add_owned_car(car_name)
-            if was_new:
-                self._invalidate_owned_cache()
-                self.on_new_owned_car(car_name)
-                self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — owned \u2713")
-            else:
+            if car_name in self.known_owned:
                 self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — already owned")
+            else:
+                was_new = car_lookup.add_owned_car(car_name)
+                if was_new:
+                    self._invalidate_owned_cache()
+                    self.on_new_owned_car(car_name)
+                    self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — owned \u2713")
+                else:
+                    self.detection_status_var.set(f"Detected: {car_name}  (ID {car_id}) — already owned")
         else:
             self.detection_status_var.set(
                 f"Detected an unknown car (ID {car_id}). Click \u201cTag Detected Car\u201d to link it to your garage."
@@ -2073,6 +2102,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def _debounced_refresh_collection(self):
         """Debounce the collection refresh when triggered by keystrokes in the filter box."""
+        self._collection_dirty = True
         if hasattr(self, "_collection_refresh_after_id") and self._collection_refresh_after_id:
             self.after_cancel(self._collection_refresh_after_id)
         self._collection_refresh_after_id = self.after(200, self.refresh_collection)
@@ -2080,6 +2110,9 @@ class FH6TrackerGUI(tk.Tk):
     def refresh_collection(self):
         self._collection_refresh_after_id = None
         self._check_cache_reload()
+        if not self._collection_dirty:
+            return
+        self._collection_dirty = False
         master_db = self._master_db_cache
         owned_names = sorted(self._owned_cache)
 
@@ -2149,6 +2182,7 @@ class FH6TrackerGUI(tk.Tk):
         self.progress_year_var.set("")
         self.collection_min_value_var.set("")
         self.collection_max_value_var.set("")
+        self._collection_dirty = True
         self.refresh_collection()
 
     def _validate_year_entry(self):
@@ -2254,7 +2288,6 @@ class FH6TrackerGUI(tk.Tk):
 
     def _force_popup_scan(self):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
-        self._set_tesseract_path()
         self.show_notice("F5: scanning for popup...")
         self._scan_fullscreen_popups(time.monotonic(), force=True)
 
@@ -2274,7 +2307,6 @@ class FH6TrackerGUI(tk.Tk):
 
         Returns True if a credit change was detected and handled, False otherwise.
         """
-        self._set_tesseract_path()
 
         payout_region = self.get_payout_region()
         if payout_region is not None:
@@ -2487,7 +2519,7 @@ class FH6TrackerGUI(tk.Tk):
             balance = parse_balance_number_only(text)
             if balance:
                 logger.warning("Credit scan: standalone number balance = %s", balance)
-        if balance is None:
+        if balance is None and text.strip():
             balance = parse_balance_number_only(self._ocr_numeric_text_from_image(image))
             logger.warning("Credit scan: numeric pass balance = %s", balance)
 
@@ -2804,7 +2836,6 @@ class FH6TrackerGUI(tk.Tk):
     def _ocr_credit_text(self, region=None, numeric=False):
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
             return ""
-        self._set_tesseract_path()
         image = self._grab_credit_image(region=region)
         if image is None:
             return ""
@@ -2825,7 +2856,6 @@ class FH6TrackerGUI(tk.Tk):
         """Run OCR on an already-captured image (avoids re-capturing the screen)."""
         if pytesseract is None or image is None:
             return ""
-        self._set_tesseract_path()
         try:
             return pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 6").strip()
         except Exception as exc:
@@ -2836,7 +2866,6 @@ class FH6TrackerGUI(tk.Tk):
         """Run numeric-only OCR on an already-captured image."""
         if pytesseract is None or image is None:
             return ""
-        self._set_tesseract_path()
         try:
             return pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
         except Exception as exc:
@@ -3620,6 +3649,9 @@ class FH6TrackerGUI(tk.Tk):
             return
         self._on_close()
 
+    def _open_feedback(self):
+        webbrowser.open("https://github.com/Sushidragon555/FH6_Tracker/issues/new")
+
 
     # =====================================================================
     # CONTEXT MENUS (Owned + Missing)
@@ -3904,6 +3936,8 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
         save_settings(self.settings)
         self.apply_theme(self.settings["theme"])
+        if pytesseract is not None:
+            self._set_tesseract_path()
         # The tracker process reads the logging interval once at startup, so restart it to
         # pick up a changed performance mode.
         if self.settings["performance_mode"] != previous_mode and self.tracker_running:
