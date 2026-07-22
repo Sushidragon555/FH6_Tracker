@@ -538,6 +538,7 @@ class FH6TrackerGUI(tk.Tk):
         self.tracker_running = False
         self.session_state = self.load_session_state()
         self.last_credit_balance = None
+        self._session_start_balance = None
         self.last_credit_scan_time = 0
         self._pending_balance = None
         self._pending_balance_count = 0
@@ -2454,6 +2455,8 @@ class FH6TrackerGUI(tk.Tk):
             # ----- FIRST READ: No previous balance yet, just set the baseline -----
             if self.last_credit_balance is None:
                 self.last_credit_balance = balance
+                if self._session_start_balance is None:
+                    self._session_start_balance = balance
                 self._reset_pending_balance()
                 self._recent_balances = [balance]
                 self._ocr_success_count += 1
@@ -2547,6 +2550,9 @@ class FH6TrackerGUI(tk.Tk):
         _safe_write_json(SESSION_STATE_FILE, self.session_state)
 
     def get_session_credits(self):
+        if self._session_start_balance is not None and self.last_credit_balance is not None:
+            earned = self.last_credit_balance - self._session_start_balance
+            return max(0, earned)
         return self.session_state.get("session_credits", 0)
 
     def add_session_credits(self):
@@ -2580,6 +2586,8 @@ class FH6TrackerGUI(tk.Tk):
             "session_credits": 0,
         }
         self.save_session_state()
+        self.last_credit_balance = None
+        self._session_start_balance = None
         self.refresh_live_data()
 
     def start_new_session(self, auto=False):
@@ -2590,6 +2598,7 @@ class FH6TrackerGUI(tk.Tk):
         }
         self.save_session_state()
         self.last_credit_balance = None
+        self._session_start_balance = None
         if auto:
             self.show_notice("New Forza session started — tracking credits from now.")
 
