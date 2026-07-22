@@ -777,7 +777,7 @@ class FH6TrackerGUI(tk.Tk):
             ("Speed", "speed_var"),
             ("Car ID", "car_id_var"),
             ("Car Name", "car_name_var"),
-            ("Session Credits", "session_credits_var"),
+            ("Credits Earned", "session_credits_var"),
             ("Session Time", "session_time_var"),
         ]
         self.vars = {}
