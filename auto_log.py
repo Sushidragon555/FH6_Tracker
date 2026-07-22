@@ -141,7 +141,7 @@ def end_race(now_mono, timestamp_str):
     race_in_progress = False
     duration = now_mono - race_start_time_mono
     if duration < RACE_MIN_DURATION or len(race_buffer) < 10:
-        print(f"\n [🏁] Race ended ({duration:.1f}s) — too short, discarding.")
+        print(f"\n [🏁] Race ended ({duration:.1f}s, {len(race_buffer)} samples) — too short to analyze (need {RACE_MIN_DURATION}s min).")
         race_buffer = []
         return
     save_race(race_buffer, race_car_name, race_car_id, race_start_timestamp, timestamp_str, duration)
@@ -303,8 +303,14 @@ else:
         print(" [⚠️] Telemetry logging skipped — socket could not be opened.")
         sys.exit(0)
     try:
+        sock.settimeout(1.0)
         while True:
-            data, _ = sock.recvfrom(1024)
+            try:
+                data, _ = sock.recvfrom(1024)
+            except socket.timeout:
+                _check_signal_files()
+                print(" Waiting for Forza telemetry...                     ", end="\r")
+                continue
 
             parsed = car_lookup.parse_packet(data)
             if parsed is None:
@@ -343,8 +349,8 @@ else:
             now = time.monotonic()
             now_str = datetime.now(timezone.utc).isoformat()
 
-            # --- Check for GUI signal files (every ~1s) ---
-            if race_packet_count % 60 == 0:
+            # --- Check for GUI signal files (~6x/sec during race, every packet when idle) ---
+            if race_packet_count % 10 == 0:
                 _check_signal_files()
 
             # --- Auto race detection (only if not manually controlled) ---

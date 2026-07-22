@@ -758,7 +758,7 @@ class FH6TrackerGUI(tk.Tk):
         self._missing_search_entry = ttk.Entry(missing_search_frame, textvariable=self._missing_search_var, width=30)
         self._missing_search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         ttk.Button(missing_search_frame, text="Clear", command=lambda: (self._missing_search_var.set(""), self.refresh_collection())).grid(row=0, column=2)
-        self._missing_search_var.trace_add("write", lambda *_: self.refresh_collection())
+        self._missing_search_var.trace_add("write", lambda *_: self._debounced_refresh_collection())
 
         self.unowned_listbox = tk.Listbox(self.missing_frame, height=22, font=("Consolas", 10))
         self.unowned_listbox.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
@@ -1109,8 +1109,11 @@ class FH6TrackerGUI(tk.Tk):
         for fname in files:
             fpath = os.path.join(RACES_DIR, fname)
             try:
+                # Read only the first 1 KB to grab metadata; avoids loading
+                # potentially huge samples arrays into memory.
                 with open(fpath, "r", encoding="utf-8") as fh:
-                    data = json.load(fh)
+                    head = fh.read(1024)
+                data = json.loads(head.split('"samples"')[0].rstrip(",")) if '"samples"' in head else json.loads(head)
                 car = data.get("car_name", "?")[:28]
                 dur = data.get("duration_seconds", 0)
                 start = data.get("start_time", "")[:16].replace("T", " ")
@@ -1654,7 +1657,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def refresh_loop(self):
         self._forza_running_cache = has_running_forza_process() or has_running_forza_window()
-        self.update_forza_session_state()
+        self.update_forza_session_state(running_now=self._forza_running_cache)
         self.detect_credit_popup_change()
         self._update_ocr_confidence_indicator()
         self._check_tracker_health()
@@ -1676,7 +1679,7 @@ class FH6TrackerGUI(tk.Tk):
         self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
-        self.update_forza_session_state()
+        self.update_forza_session_state(running_now=self._forza_running_cache)
         self.refresh_collection()
         self._refresh_active_tab()
 
@@ -1880,9 +1883,14 @@ class FH6TrackerGUI(tk.Tk):
         else:
             self.stats_window_var.set("Waiting for Forza window...")
 
-        owned_set = {normalize_car_name(n) for n in owned_names}
-        total_value = sum(int(price) for car, price in master_db.items() if normalize_car_name(car) in owned_set)
-        self.stats_total_value_var.set(f"Collection value: {format_credits(total_value)}")
+        # Cache the collection value — only recompute when the owned list size
+        # changes, since the master DB is essentially static.
+        owned_key = owned_count
+        if getattr(self, "_cached_total_value_key", None) != owned_key:
+            owned_set = {normalize_car_name(n) for n in owned_names}
+            self._cached_total_value = sum(int(price) for car, price in master_db.items() if normalize_car_name(car) in owned_set)
+            self._cached_total_value_key = owned_key
+        self.stats_total_value_var.set(f"Collection value: {format_credits(self._cached_total_value)}")
 
         self._draw_credit_history()
         self._draw_credit_rate_chart()
@@ -2059,7 +2067,14 @@ class FH6TrackerGUI(tk.Tk):
         self.log_text.see(tk.END)
         self.log_text.configure(state="disabled")
 
+    def _debounced_refresh_collection(self):
+        """Debounce the collection refresh when triggered by keystrokes in the filter box."""
+        if hasattr(self, "_collection_refresh_after_id") and self._collection_refresh_after_id:
+            self.after_cancel(self._collection_refresh_after_id)
+        self._collection_refresh_after_id = self.after(200, self.refresh_collection)
+
     def refresh_collection(self):
+        self._collection_refresh_after_id = None
         self._check_cache_reload()
         master_db = self._master_db_cache
         owned_names = sorted(self._owned_cache)
@@ -2195,6 +2210,9 @@ class FH6TrackerGUI(tk.Tk):
         """Start or stop manual race recording via signal file to the tracker subprocess."""
         os.makedirs(RACES_DIR, exist_ok=True)
         if not self._recording:
+            if not self.tracker_running:
+                self.show_notice("Start the tracker first (click Start Tracker).")
+                return
             signal_path = os.path.join(RACES_DIR, ".record_start")
             try:
                 with open(signal_path, "w") as f:
@@ -2218,7 +2236,17 @@ class FH6TrackerGUI(tk.Tk):
             self._record_btn.configure(text="Start Recording")
             self._record_status_var.set("  (or press F6 in-game)")
             self.show_notice("Race recording stopped — check Race Analysis tab")
-            self.after(1500, self.refresh_races_panel)
+            # Refresh twice: once quickly to catch fast saves, once after a
+            # longer delay in case the subprocess was still processing the stop.
+            self.after(500, self.refresh_races_panel)
+            self.after(3000, self._auto_select_latest_race)
+
+    def _auto_select_latest_race(self):
+        """Select the first (most recent) race in the list and display its charts."""
+        children = self.race_list_tree.get_children()
+        if children:
+            self.race_list_tree.selection_set(children[0])
+            self._on_race_select(None)
 
     def _force_popup_scan(self):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
@@ -2256,14 +2284,18 @@ class FH6TrackerGUI(tk.Tk):
             if now - last_change_check >= change_detect_interval:
                 self._last_change_check_time = now
                 try:
+                    # Grab only the top-right 480x270 region where the credit HUD
+                    # lives, instead of the full 1920x1080 screen. This is ~16x
+                    # fewer pixels and makes the thumbnail comparison nearly free.
+                    _snap_region = (1440, 0, 1920, 270)
                     if ImageGrab is not None:
-                        tiny = ImageGrab.grab()
+                        tiny = ImageGrab.grab(region=_snap_region)
                     elif pyautogui is not None:
-                        tiny = pyautogui.screenshot()
+                        tiny = pyautogui.screenshot(region=_snap_region)
                     else:
                         return False
                     if Image is not None:
-                        tiny = tiny.resize((160, 90), Image.LANCZOS)
+                        tiny = tiny.resize((80, 45), Image.LANCZOS)
                     # Convert to grayscale bytes for fast comparison
                     gray = tiny.convert("L") if Image is not None else tiny
                     thumb = list(gray.getdata()) if hasattr(gray, "getdata") else []
@@ -2287,10 +2319,14 @@ class FH6TrackerGUI(tk.Tk):
                 return False
 
         try:
+            # Grab only the top-right 640x400 region where credit popups appear.
+            # This is ~8x fewer pixels than a full 1920x1080 capture and
+            # drastically reduces the time pytesseract takes to OCR.
+            _ocr_region = (1280, 0, 1920, 400)
             if ImageGrab is not None:
-                full = ImageGrab.grab()
+                full = ImageGrab.grab(region=_ocr_region)
             elif pyautogui is not None:
-                full = pyautogui.screenshot()
+                full = pyautogui.screenshot(region=_ocr_region)
             else:
                 return False
         except Exception:
@@ -2610,8 +2646,9 @@ class FH6TrackerGUI(tk.Tk):
         if auto:
             self.show_notice(f"Forza closed — this session earned {format_credits(total)} credits.")
 
-    def update_forza_session_state(self):
-        running_now = has_running_forza_process() or has_running_forza_window()
+    def update_forza_session_state(self, running_now=None):
+        if running_now is None:
+            running_now = has_running_forza_process() or has_running_forza_window()
         if self.forza_running_prev is None:
             self.forza_running_prev = running_now
             return
