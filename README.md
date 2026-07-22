@@ -26,7 +26,7 @@ Built with Python and Tkinter. Uses UDP telemetry from the game and Tesseract OC
 
 1. **Clone or download** this repository:
    ```
-   git clone https://github.com/your-repo/FH6_Tracker.git
+   git clone https://github.com/Sushidragon555/FH6_Tracker.git
    ```
 
 2. **Double-click `Launch FH6 Tracker.bat`** -- this will:
