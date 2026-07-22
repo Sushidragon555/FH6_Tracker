@@ -646,6 +646,10 @@ class FH6TrackerGUI(tk.Tk):
         self.notebook.grid(row=2, column=0, sticky="nsew")
         self.notebook.enable_traversal()
 
+        self.watermark = tk.Label(self, text="Sushidragon555", font=("Bahnschrift", 9, "italic"),
+                                  anchor="se", padx=8, pady=4)
+        self.watermark.grid(row=3, column=0, sticky="se")
+
         self.garage_tab = ttk.Frame(self.notebook)
         self.live_tab = ttk.Frame(self.notebook)
         self.stats_tab = ttk.Frame(self.notebook)
@@ -4045,6 +4049,9 @@ class FH6TrackerGUI(tk.Tk):
                        getattr(self, "_preview_canvas", None)):
             if canvas:
                 canvas.configure(bg=field_bg if theme_name == "dark" else "white")
+        if hasattr(self, "watermark"):
+            wm_fg = "#555555" if theme_name == "light" else "#888888"
+            self.watermark.configure(bg=bg, fg=wm_fg)
 
 
     # =====================================================================
