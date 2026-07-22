@@ -72,6 +72,7 @@ LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.json")
 METHODS_FILE = os.path.join(BASE_DIR, "methods_history.json")
 CREDIT_TRANSACTIONS_FILE = os.path.join(BASE_DIR, "credit_transactions.json")
+RACES_DIR = os.path.join(BASE_DIR, "races")
 METHOD_NAMES = [
     "Wheelspins",
     "Super Wheelspins",
@@ -650,10 +651,12 @@ class FH6TrackerGUI(tk.Tk):
         self.settings_tab = ttk.Frame(self.notebook)
         self.logs_tab = ttk.Frame(self.notebook)
         self.methods_tab = ttk.Frame(self.notebook)
+        self.races_tab = ttk.Frame(self.notebook)
         self.recommendations_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.garage_tab, text="Collection")
         self.notebook.add(self.live_tab, text="Live Data")
         self.notebook.add(self.methods_tab, text="Methods")
+        self.notebook.add(self.races_tab, text="Race Analysis")
         self.notebook.add(self.stats_tab, text="Stats")
         self.notebook.add(self.recommendations_tab, text="Recommendations")
         self.notebook.add(self.settings_tab, text="Settings")
@@ -662,6 +665,7 @@ class FH6TrackerGUI(tk.Tk):
         self.build_garage_tab()
         self.build_live_tab()
         self.build_methods_tab()
+        self.build_races_tab()
         self.build_stats_tab()
         self.build_recommendations_tab()
         self.build_settings_tab()
@@ -1029,6 +1033,242 @@ class FH6TrackerGUI(tk.Tk):
         total_gains = sum(t["amount"] for t in txns if t.get("amount", 0) > 0)
         count = len(txns)
         self.txn_summary_var.set(f"{count} transactions total | Total gains: +{format_credits(total_gains)}")
+
+    def build_races_tab(self):
+        self.races_tab.columnconfigure(1, weight=1)
+        self.races_tab.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(self.races_tab)
+        left.grid(row=0, column=0, sticky="ns", padx=(8, 4), pady=8)
+
+        ttk.Label(left, text="Past Races", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=4, pady=(0, 4))
+        self.race_list_tree = ttk.Treeview(left, columns=("date", "car", "duration"), show="headings", height=18, selectmode="browse")
+        self.race_list_tree.heading("date", text="Date")
+        self.race_list_tree.heading("car", text="Car")
+        self.race_list_tree.heading("duration", text="Time")
+        self.race_list_tree.column("date", width=130)
+        self.race_list_tree.column("car", width=160)
+        self.race_list_tree.column("duration", width=50)
+        self.race_list_tree.pack(fill="y", expand=True)
+        self.race_list_tree.bind("<<TreeviewSelect>>", self._on_race_select)
+
+        ttk.Button(left, text="Refresh List", command=self.refresh_races_panel).pack(fill="x", padx=4, pady=(4, 0))
+
+        right = ttk.Frame(self.races_tab)
+        right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+
+        self._race_info_var = tk.StringVar(value="Select a race from the list to analyze it.")
+        ttk.Label(right, textvariable=self._race_info_var, font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", pady=(0, 6))
+
+        chart_frame = ttk.Frame(right)
+        chart_frame.grid(row=1, column=0, sticky="nsew")
+        chart_frame.columnconfigure(0, weight=1)
+        chart_frame.rowconfigure(0, weight=1)
+        chart_frame.rowconfigure(1, weight=1)
+        chart_frame.rowconfigure(2, weight=1)
+
+        self._race_canvas_speed = tk.Canvas(chart_frame, height=120, highlightthickness=0)
+        self._race_canvas_speed.grid(row=0, column=0, sticky="nsew", pady=(0, 4))
+        self._race_canvas_inputs = tk.Canvas(chart_frame, height=120, highlightthickness=0)
+        self._race_canvas_inputs.grid(row=1, column=0, sticky="nsew", pady=(0, 4))
+        self._race_canvas_steer = tk.Canvas(chart_frame, height=80, highlightthickness=0)
+        self._race_canvas_steer.grid(row=2, column=0, sticky="nsew")
+
+        stats_frame = ttk.LabelFrame(right, text="Race Summary")
+        stats_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        stats_frame.columnconfigure(1, weight=1)
+        self._race_stats_var = tk.StringVar(value="")
+        ttk.Label(stats_frame, textvariable=self._race_stats_var, justify="left", wraplength=600).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=6)
+
+        tips_frame = ttk.LabelFrame(right, text="Driving Tips")
+        tips_frame.grid(row=3, column=0, sticky="ew", pady=(6, 0))
+        self._race_tips_var = tk.StringVar(value="")
+        ttk.Label(tips_frame, textvariable=self._race_tips_var, justify="left", wraplength=600, foreground="#1f6feb").grid(row=0, column=0, sticky="w", padx=8, pady=6)
+
+        self._selected_race_data = None
+
+    def refresh_races_panel(self):
+        for item in self.race_list_tree.get_children():
+            self.race_list_tree.delete(item)
+        os.makedirs(RACES_DIR, exist_ok=True)
+        files = sorted(
+            [f for f in os.listdir(RACES_DIR) if f.endswith(".json")],
+            reverse=True,
+        )
+        for fname in files:
+            fpath = os.path.join(RACES_DIR, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                car = data.get("car_name", "?")[:28]
+                dur = data.get("duration_seconds", 0)
+                start = data.get("start_time", "")[:16].replace("T", " ")
+                mins = int(dur) // 60
+                secs = int(dur) % 60
+                self.race_list_tree.insert("", "end", iid=fname, values=(start, car, f"{mins}:{secs:02d}"))
+            except Exception:
+                pass
+
+    def _on_race_select(self, _event):
+        sel = self.race_list_tree.selection()
+        if not sel:
+            return
+        fname = sel[0]
+        fpath = os.path.join(RACES_DIR, fname)
+        try:
+            with open(fpath, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception:
+            return
+        self._selected_race_data = data
+        self._render_race_analysis(data)
+
+    def _render_race_analysis(self, data):
+        car = data.get("car_name", "Unknown")
+        dur = data.get("duration_seconds", 0)
+        start = data.get("start_time", "")[:16].replace("T", " ")
+        samples = data.get("samples", [])
+        mins = int(dur) // 60
+        secs = int(dur) % 60
+        self._race_info_var.set(f"{car}  |  {start}  |  {mins}:{secs:02d}  |  {len(samples)} samples")
+
+        self._draw_speed_chart(samples)
+        self._draw_inputs_chart(samples)
+        self._draw_steering_chart(samples)
+        self._compute_race_stats(samples, dur)
+        self._generate_driving_tips(samples, dur)
+
+    def _draw_chart(self, canvas, data, fields, colors, labels, y_min=0.0, y_max=1.0, title=""):
+        canvas.delete("all")
+        w = canvas.winfo_width()
+        h = canvas.winfo_height()
+        if w < 50 or h < 50 or not data:
+            canvas.create_text(w // 2, h // 2, text="No data", fill="#888888")
+            return
+        pad_l, pad_r, pad_t, pad_b = 50, 10, 20, 20
+        cw = w - pad_l - pad_r
+        ch = h - pad_t - pad_b
+        if cw < 10 or ch < 10:
+            return
+        t_max = data[-1].get("t", 1) or 1
+        canvas.create_text(pad_l, pad_t - 8, text=title, anchor="nw", fill="#555555", font=("Segoe UI", 8))
+        canvas.create_line(pad_l, pad_t, pad_l, pad_t + ch, fill="#cccccc")
+        canvas.create_line(pad_l, pad_t + ch, pad_l + cw, pad_t + ch, fill="#cccccc")
+        for i in range(5):
+            y = pad_t + ch - (i / 4) * ch
+            val = y_min + (i / 4) * (y_max - y_min)
+            canvas.create_line(pad_l - 4, y, pad_l, y, fill="#cccccc")
+            canvas.create_text(pad_l - 6, y, text=f"{val:.0f}", anchor="e", fill="#888888", font=("Segoe UI", 7))
+        for field, color, label in zip(fields, colors, labels):
+            points = []
+            step = max(1, len(data) // 300)
+            for i in range(0, len(data), step):
+                t = data[i].get("t", 0)
+                v = data[i].get(field, 0)
+                x = pad_l + (t / t_max) * cw
+                y = pad_t + ch - ((v - y_min) / max(y_max - y_min, 0.001)) * ch
+                points.append((x, y))
+            if len(points) >= 2:
+                flat = [c for p in points for c in p]
+                canvas.create_line(flat, fill=color, width=1.5, smooth=True)
+            if points:
+                lx, ly = points[-1]
+                canvas.create_text(lx + 4, ly, text=label, anchor="w", fill=color, font=("Segoe UI", 7))
+
+    def _draw_speed_chart(self, samples):
+        self._draw_chart(
+            self._race_canvas_speed, samples,
+            fields=["spd"], colors=["#1f6feb"], labels=["MPH"],
+            y_min=0, y_max=max((s.get("spd", 0) for s in samples), default=100) * 1.1,
+            title="Speed (MPH)",
+        )
+
+    def _draw_inputs_chart(self, samples):
+        self._draw_chart(
+            self._race_canvas_inputs, samples,
+            fields=["thr", "brk"], colors=["#137333", "#c5221f"], labels=["Throttle", "Brake"],
+            y_min=0, y_max=1.0,
+            title="Throttle / Brake",
+        )
+
+    def _draw_steering_chart(self, samples):
+        max_steer = max((abs(s.get("str", 0)) for s in samples), default=1) * 1.2
+        max_steer = max(max_steer, 0.5)
+        self._draw_chart(
+            self._race_canvas_steer, samples,
+            fields=["str"], colors=["#b06000"], labels=["Steering"],
+            y_min=-max_steer, y_max=max_steer,
+            title="Steering",
+        )
+
+    def _compute_race_stats(self, samples, duration):
+        if not samples:
+            self._race_stats_var.set("No data")
+            return
+        speeds = [s.get("spd", 0) for s in samples]
+        throttles = [s.get("thr", 0) for s in samples]
+        brakes = [s.get("brk", 0) for s in samples]
+        gears = [s.get("gear", 0) for s in samples]
+        hpms = [s.get("pwr", 0) / 746 for s in samples]
+        avg_speed = sum(speeds) / len(speeds)
+        max_speed = max(speeds)
+        avg_throttle = sum(throttles) / len(throttles) * 100
+        avg_brake = sum(brakes) / len(brakes) * 100
+        pct_braking = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        pct_throttle = sum(1 for t in throttles if t > 0.1) / len(throttles) * 100
+        max_hp = max(hpms) if hpms else 0
+        gear_usage = {}
+        for g in gears:
+            if g > 0:
+                gear_usage[g] = gear_usage.get(g, 0) + 1
+        top_gear = max(gear_usage, key=gear_usage.get) if gear_usage else 0
+        stats = (
+            f"Avg Speed: {avg_speed:.0f} MPH  |  Max Speed: {max_speed:.0f} MPH  |  "
+            f"Max Power: {max_hp:.0f} HP\n"
+            f"Throttle Active: {pct_throttle:.0f}%  |  Braking: {pct_braking:.0f}%  |  "
+            f"Avg Throttle: {avg_throttle:.0f}%  |  Avg Brake: {avg_brake:.0f}%\n"
+            f"Most Used Gear: {top_gear}  |  "
+            f"Gears Used: {', '.join(str(g) for g in sorted(gear_usage.keys()))}"
+        )
+        self._race_stats_var.set(stats)
+
+    def _generate_driving_tips(self, samples, duration):
+        if not samples or len(samples) < 20:
+            self._race_tips_var.set("Not enough data for tips (need a longer race).")
+            return
+        tips = []
+        brakes = [s.get("brk", 0) for s in samples]
+        throttles = [s.get("thr", 0) for s in samples]
+        steers = [s.get("str", 0) for s in samples]
+        speeds = [s.get("spd", 0) for s in samples]
+        gears = [s.get("gear", 0) for s in samples]
+        rpm_list = [s.get("rpm", 0) for s in samples]
+        pct_braking = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        if pct_braking > 25:
+            tips.append(f"You're braking {pct_braking:.0f}% of the time — try braking later and harder instead of early and gentle.")
+        elif pct_braking < 5 and max(speeds) > 80:
+            tips.append("Very little braking detected — you might be coasting through corners instead of braking firmly and turning in.")
+        brake_transitions = sum(1 for i in range(1, len(brakes)) if brakes[i] > 0.3 and brakes[i - 1] < 0.1)
+        if brake_transitions > 20 and duration > 10:
+            tips.append(f"频繁 braking ({brake_transitions} times) — try to brake once per corner instead of pumping the pedal.")
+        pct_throttle = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+        if pct_throttle < 30 and max(speeds) > 50:
+            tips.append("Low throttle usage — you may be over-slowing for corners. Trust the car's grip and get on the power earlier.")
+        steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+        if steer_smoothness > 0.08:
+            tips.append(f"Steering is very jerky (avg change: {steer_smoothness:.3f}) — smooth inputs are faster. Try smaller, more deliberate steering movements.")
+        max_rpm = max(rpm_list) if rpm_list else 0
+        high_rpm_pct = sum(1 for r in rpm_list if r > 6000) / max(len(rpm_list), 1) * 100
+        if high_rpm_pct > 50:
+            tips.append(f"Spending {high_rpm_pct:.0f}% of time above 6000 RPM — consider upshifting earlier for better acceleration.")
+        avg_speed = sum(speeds) / len(speeds)
+        if avg_speed < 40:
+            tips.append(f"Average speed is only {avg_speed:.0f} MPH — you might be over-braking or taking lines that are too tight.")
+        if not tips:
+            tips.append("Your driving looks solid! Focus on consistency lap-to-lap to keep improving.")
+        self._race_tips_var.set("\n".join(f"• {t}" for t in tips))
 
     def build_stats_tab(self):
         self.stats_tab.columnconfigure(0, weight=1)
@@ -1438,6 +1678,7 @@ class FH6TrackerGUI(tk.Tk):
             self.stats_tab: self.refresh_stats_panel,
             self.logs_tab: self.refresh_logs_panel,
             self.methods_tab: self.refresh_methods_panel,
+            self.races_tab: self.refresh_races_panel,
             self.recommendations_tab: self.refresh_recommendations,
         }
         try:

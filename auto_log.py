@@ -33,10 +33,17 @@ UDP_IP = "0.0.0.0"
 UDP_PORT = 9999
 OWNED_FILE = car_lookup.OWNED_FILE
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
+RACES_DIR = os.path.join(BASE_DIR, "races")
 
 # Hotkey set to F4
 HOTKEY = "f4"
 TEST_MODE = os.environ.get("FH6_TEST_MODE", "0") == "1"
+
+# Race telemetry capture settings. Forza sends ~60 packets/sec. We sample every
+# RACE_SAMPLE_EVERY-th packet to get ~20Hz capture, keeping file sizes manageable
+# (~300KB per 3-minute race) while capturing enough detail for useful analysis.
+RACE_SAMPLE_EVERY = 3
+RACE_MIN_DURATION = 5.0
 
 # Global state trackers
 current_mapped_car_name = "Unknown Vehicle"
@@ -61,6 +68,18 @@ if not TEST_MODE:
 id_reference = car_lookup.load_reference()
 canonical_index = car_lookup.build_canonical_index()
 
+# Race detection state
+race_in_progress = False
+race_buffer = []
+race_start_time_mono = 0.0
+race_start_timestamp = ""
+race_car_name = "Unknown Vehicle"
+race_car_id = 0
+race_packet_count = 0
+
+# Ensure races directory exists
+os.makedirs(RACES_DIR, exist_ok=True)
+
 
 def save_owned_car(car_name):
     return car_lookup.add_owned_car(car_name)
@@ -73,6 +92,54 @@ def append_telemetry_row(rpm, speed_mph, car_id, car_name):
         if not file_exists or os.path.getsize(LOG_FILE) == 0:
             writer.writerow(["timestamp", "rpm", "speed_mph", "car_id", "car_name"])
         writer.writerow([datetime.now(timezone.utc).isoformat(), rpm, speed_mph, car_id, car_name])
+
+
+def save_race(buffer, car_name, car_id, start_time, end_time, duration):
+    """Write the race telemetry buffer to a JSON file in the races directory."""
+    import json as _json
+    ts = start_time.replace(":", "-").replace("T", "_")[:19]
+    filename = f"race_{ts}.json"
+    filepath = os.path.join(RACES_DIR, filename)
+    race_data = {
+        "car_name": car_name,
+        "car_id": car_id,
+        "start_time": start_time,
+        "end_time": end_time,
+        "duration_seconds": round(duration, 1),
+        "samples": buffer,
+    }
+    with open(filepath, "w", encoding="utf-8") as handle:
+        _json.dump(race_data, handle)
+    print(f"\n [🏁] Race saved: {filename} ({len(buffer)} samples, {duration:.1f}s)")
+
+
+def start_race(parsed, now_mono, timestamp_str):
+    """Begin recording a new race."""
+    global race_in_progress, race_buffer, race_start_time_mono, race_start_timestamp
+    global race_car_name, race_car_id, race_packet_count
+    race_in_progress = True
+    race_buffer = []
+    race_start_time_mono = now_mono
+    race_start_timestamp = timestamp_str
+    race_car_id = parsed["car_ordinal"]
+    car_id_str = str(race_car_id)
+    race_car_name = id_reference.get(car_id_str, "Unknown Vehicle")
+    race_car_name = car_lookup.resolve_canonical_name(race_car_name, canonical_index)
+    race_packet_count = 0
+    print(f"\n [🏁] Race started! Recording telemetry for {race_car_name}...")
+
+
+def end_race(now_mono, timestamp_str):
+    """Finish the current race and save the telemetry data."""
+    global race_in_progress, race_buffer, race_car_name, race_car_id
+    race_in_progress = False
+    duration = now_mono - race_start_time_mono
+    if duration < RACE_MIN_DURATION or len(race_buffer) < 10:
+        print(f"\n [🏁] Race ended ({duration:.1f}s) — too short, discarding.")
+        race_buffer = []
+        return
+    save_race(race_buffer, race_car_name, race_car_id, race_start_timestamp, timestamp_str, duration)
+    race_buffer = []
 
 
 # ==========================================
@@ -188,6 +255,7 @@ else:
             speed_mph = parsed["speed_mph"]
             car_ordinal = parsed["car_ordinal"]
             car_id_str = str(car_ordinal)
+            is_race_on = parsed["is_race_on"]
 
             if not car_lookup.is_real_ordinal(car_ordinal):
                 print(" Waiting for gameplay to start (In Menus/Loading)...       ", end="\r")
@@ -214,10 +282,38 @@ else:
                     current_mapped_car_name = "Unknown Vehicle"
 
             now = time.monotonic()
+            now_str = datetime.now(timezone.utc).isoformat()
+
+            # --- Race detection ---
+            if is_race_on and not race_in_progress:
+                start_race(parsed, now, now_str)
+            elif not is_race_on and race_in_progress:
+                end_race(now, now_str)
+
+            # --- Race telemetry capture ---
+            if race_in_progress:
+                race_packet_count += 1
+                if race_packet_count % RACE_SAMPLE_EVERY == 0:
+                    t = round(now - race_start_time_mono, 3)
+                    race_buffer.append({
+                        "t": t,
+                        "spd": round(speed_mph, 1),
+                        "rpm": int(current_rpm),
+                        "thr": round(parsed["throttle"], 3),
+                        "brk": round(parsed["brake"], 3),
+                        "str": round(parsed["steering"], 3),
+                        "gear": parsed["gear"],
+                        "pwr": int(parsed["power"]),
+                        "trq": int(parsed["torque"]),
+                        "hbrk": round(parsed["handbrake"], 3),
+                    })
+
+            # --- Regular telemetry logging ---
             if car_changed or (now - last_log_time) >= LOG_INTERVAL_SECONDS:
                 last_log_time = now
                 append_telemetry_row(int(current_rpm), int(speed_mph), car_id_str, current_mapped_car_name)
-            print(f" [LIVE] RPM: {int(current_rpm):<5} | Speed: {int(speed_mph):<3} MPH | Raw ID: {car_id_str:<10} | Name: {current_mapped_car_name:<30}", end="\r")
+            race_flag = " [RACE]" if race_in_progress else ""
+            print(f" [LIVE] RPM: {int(current_rpm):<5} | Speed: {int(speed_mph):<3} MPH | Raw ID: {car_id_str:<10} | Name: {current_mapped_car_name:<30}{race_flag}", end="\r")
 
     except KeyboardInterrupt:
         print("\n\nLogger stopped safely.")

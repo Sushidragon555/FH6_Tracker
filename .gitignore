@@ -21,6 +21,9 @@ dist/
 ocr_debug/
 ocr_debug_capture.png
 
+# Race telemetry data (generated per user)
+races/
+
 # User-specific data (generated on first run, not shared)
 gui_settings.json
 session_state.json

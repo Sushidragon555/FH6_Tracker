@@ -34,12 +34,28 @@ DEFAULT_PERFORMANCE_MODE = "Balanced"
 # version moves it, run scan_offsets.py in-game to find the new value.
 CAR_ORDINAL_OFFSET = 212
 
-# Byte offsets of the other telemetry fields we read. RPM lives in the fixed "sled"
-# section; Speed lives in the dashboard section, which on Forza Horizon is shifted +12
-# bytes versus Forza Motorsport (244 -> 256).
+# Byte offsets of the telemetry fields we read. RPM and IsRaceOn live in the fixed
+# "sled" section; Speed, Throttle, Brake, etc. live in the dashboard section, which on
+# Forza Horizon is shifted +12 bytes versus Forza Motorsport (244 -> 256).
 RPM_OFFSET = 16
 SPEED_OFFSET = 256
 MPS_TO_MPH = 2.23694
+
+# Sled section (no Horizon shift)
+IS_RACE_ON_OFFSET = 0
+TIMESTAMP_MS_OFFSET = 4
+ENGINE_MAX_RPM_OFFSET = 8
+ENGINE_IDLE_RPM_OFFSET = 12
+
+# Dashboard section (+12 for Horizon)
+POWER_OFFSET = 260
+TORQUE_OFFSET = 264
+BOOST_OFFSET = 268
+CURRENT_GEAR_OFFSET = 280
+BRAKE_OFFSET = 284
+THROTTLE_OFFSET = 288
+HANDBRAKE_OFFSET = 296
+STEERING_OFFSET = 300
 
 # A full Forza Horizon "Data Out" packet is 324 bytes; shorter packets are incomplete.
 MIN_PACKET_SIZE = 324
@@ -50,17 +66,48 @@ MIN_ORDINAL = 1
 MAX_ORDINAL = 100000
 
 
-def parse_packet(data):
-    """Extract ``(rpm, speed_mph, car_ordinal)`` from a Forza telemetry packet.
+def _unpack_f(data, offset):
+    try:
+        return struct.unpack("f", data[offset:offset + 4])[0]
+    except (struct.error, IndexError):
+        return 0.0
 
-    Returns ``None`` for packets that are too short to be a complete Horizon packet.
+
+def _unpack_i(data, offset):
+    try:
+        return struct.unpack("i", data[offset:offset + 4])[0]
+    except (struct.error, IndexError):
+        return 0
+
+
+def parse_packet(data):
+    """Extract telemetry fields from a Forza Horizon telemetry packet.
+
+    Returns a dict with basic fields (rpm, speed_mph, car_ordinal) plus race-analysis
+    fields (throttle, brake, steering, gear, is_race_on, power, torque, etc.).
+    Returns ``None`` for packets that are too short.
     """
     if data is None or len(data) < MIN_PACKET_SIZE:
         return None
-    rpm = struct.unpack("f", data[RPM_OFFSET:RPM_OFFSET + 4])[0]
-    speed_mps = struct.unpack("f", data[SPEED_OFFSET:SPEED_OFFSET + 4])[0]
-    car_ordinal = struct.unpack("i", data[CAR_ORDINAL_OFFSET:CAR_ORDINAL_OFFSET + 4])[0]
-    return {"rpm": rpm, "speed_mph": speed_mps * MPS_TO_MPH, "car_ordinal": car_ordinal}
+    rpm = _unpack_f(data, RPM_OFFSET)
+    speed_mps = _unpack_f(data, SPEED_OFFSET)
+    car_ordinal = _unpack_i(data, CAR_ORDINAL_OFFSET)
+    return {
+        "rpm": rpm,
+        "speed_mph": speed_mps * MPS_TO_MPH,
+        "car_ordinal": car_ordinal,
+        "is_race_on": _unpack_i(data, IS_RACE_ON_OFFSET),
+        "timestamp_ms": struct.unpack("I", data[TIMESTAMP_MS_OFFSET:TIMESTAMP_MS_OFFSET + 4])[0],
+        "engine_max_rpm": _unpack_f(data, ENGINE_MAX_RPM_OFFSET),
+        "throttle": _unpack_f(data, THROTTLE_OFFSET),
+        "brake": _unpack_f(data, BRAKE_OFFSET),
+        "steering": _unpack_f(data, STEERING_OFFSET),
+        "handbrake": _unpack_f(data, HANDBRAKE_OFFSET),
+        "gear": _unpack_i(data, CURRENT_GEAR_OFFSET),
+        "power": _unpack_f(data, POWER_OFFSET),
+        "torque": _unpack_f(data, TORQUE_OFFSET),
+        "boost": _unpack_f(data, BOOST_OFFSET),
+    }
 
 
 def get_performance_preset(mode=None):
