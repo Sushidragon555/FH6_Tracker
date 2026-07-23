@@ -1,8 +1,12 @@
 import csv
+import ctypes
+import ctypes.wintypes
 import io
 import os
 import socket
+import struct
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -10,13 +14,11 @@ import car_lookup
 
 # Voice logging and recording libraries
 try:
-    import keyboard
     import numpy as np
     import sounddevice as sd
     import soundfile as sf
     import speech_recognition as sr
 except Exception as exc:  # pragma: no cover - depends on local environment
-    keyboard = None
     np = None
     sd = None
     sf = None
@@ -26,18 +28,72 @@ else:
     OPTIONAL_IMPORT_ERROR = None
 
 # ==========================================
+# GLOBAL HOTKEYS via Win32 RegisterHotKey
+# Works without admin privileges, unlike the keyboard library.
+# ==========================================
+
+WM_HOTKEY = 0x0312
+HOTKEY_ID_VOICE = 1
+HOTKEY_ID_RECORD = 2
+
+# Virtual key codes
+VK_F4 = 0x73
+VK_F6 = 0x75
+
+_user32 = ctypes.windll.user32
+_kernel32 = ctypes.windll.kernel32
+
+WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.wintypes.HWND, ctypes.c_uint, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
+
+def _wndproc(hwnd, msg, wparam, lparam):
+    if msg == WM_HOTKEY:
+        if wparam == HOTKEY_ID_VOICE:
+            threading.Thread(target=log_car_voice, daemon=True).start()
+        elif wparam == HOTKEY_ID_RECORD:
+            threading.Thread(target=toggle_race_recording, daemon=True).start()
+    return 0
+
+_pwndproc = WNDPROC(_wndproc)
+
+def _start_hotkey_listener():
+    """Create a hidden message-only window and register F4/F6 hotkeys."""
+    className = "FH6TrackerHotkeys"
+    wc = ctypes.wintypes.WNDCLASS()
+    wc.lpfnWndProc = _pwndproc
+    wc.lpszClassName = className
+    wc.hInstance = _kernel32.GetModuleHandleW(None)
+    _user32.RegisterClassW(ctypes.byref(wc))
+
+    hwnd = _user32.CreateWindowExW(
+        0, className, "FH6Hotkeys", 0, 0, 0, 0, 0,
+        None, None, wc.hInstance, None
+    )
+    if not hwnd:
+        print(" [⚠️] Could not create hotkey window.")
+        return
+
+    # Register hotkeys: 0 = no modifier
+    _user32.RegisterHotKey(hwnd, HOTKEY_ID_VOICE, 0, VK_F4)
+    _user32.RegisterHotKey(hwnd, HOTKEY_ID_RECORD, 0, VK_F6)
+
+    # Message loop
+    msg = ctypes.wintypes.MSG()
+    while _user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+        _user32.TranslateMessage(ctypes.byref(msg))
+        _user32.DispatchMessageW(ctypes.byref(msg))
+
+# ==========================================
 # CONFIGURATION
 # ==========================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UDP_IP = "0.0.0.0"
 UDP_PORT = 9999
 OWNED_FILE = car_lookup.OWNED_FILE
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 RACES_DIR = os.path.join(BASE_DIR, "races")
-
-# Hotkey set to F4 for voice, F6 for race recording toggle
-HOTKEY = "f4"
-RECORD_HOTKEY = "f6"
 TEST_MODE = os.environ.get("FH6_TEST_MODE", "0") == "1"
 
 # Race telemetry capture settings. Forza sends ~60 packets/sec. We sample every
@@ -262,17 +318,15 @@ def _check_signal_files():
             end_race(now, now_str)
 
 
-# Register the shortcut hooks safely before running the loop
-if keyboard is not None:
-    keyboard.add_hotkey(HOTKEY, log_car_voice)
-    keyboard.add_hotkey(RECORD_HOTKEY, lambda: toggle_race_recording())
-else:
-    print(" [⚠️] Hotkey support disabled because the keyboard package is unavailable.")
+# Start global hotkey listener (F4 for voice, F6 for recording) in a background thread
+_hotkey_thread = threading.Thread(target=_start_hotkey_listener, daemon=True)
+_hotkey_thread.start()
 
 print("==========================================================")
 print(" VISUAL TELEMETRY LOGGER & VOICE GARAGE TRACKER RUNNING")
 print(" Open Forza and drive around to verify connection!")
-print(f" Press '{HOTKEY}' in-game to manually name an unknown car.")
+print(" Press F4 in-game to manually name an unknown car.")
+print(" Press F6 in-game to start/stop race recording.")
 print("==========================================================\n")
 
 if OPTIONAL_IMPORT_ERROR:

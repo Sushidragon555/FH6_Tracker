@@ -23,7 +23,7 @@ import car_lookup
 # LOGGING SETUP
 # =============================================================================
 
-APP_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fh6_tracker.log")
+APP_LOG_FILE = None  # Set after BASE_DIR is defined
 logger = logging.getLogger("fh6_tracker")
 try:
     logging.basicConfig(
@@ -63,17 +63,23 @@ except Exception:  # pragma: no cover - optional OCR dependencies
 # PATHS & CONSTANTS
 # =============================================================================
 
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_settings.json")
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = sys._MEIPASS
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BUNDLE_DIR = None
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SETTINGS_FILE = os.path.join(BASE_DIR, "gui_settings.json")
 DEBUG_DIR = os.path.join(BASE_DIR, "ocr_debug")
-AUTO_LOG_PATH = os.path.join(BASE_DIR, "auto_log.py")
+AUTO_LOG_PATH = os.path.join(BUNDLE_DIR or BASE_DIR, "auto_log.py")
 OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
-MASTER_FILE = os.path.join(BASE_DIR, "fh6_master_list.json")
+MASTER_FILE = os.path.join(BUNDLE_DIR or BASE_DIR, "fh6_master_list.json")
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.json")
 METHODS_FILE = os.path.join(BASE_DIR, "methods_history.json")
 CREDIT_TRANSACTIONS_FILE = os.path.join(BASE_DIR, "credit_transactions.json")
 RACES_DIR = os.path.join(BASE_DIR, "races")
+APP_LOG_FILE = os.path.join(BASE_DIR, "fh6_tracker.log")
 METHOD_NAMES = [
     "Wheelspins",
     "Super Wheelspins",
@@ -3744,15 +3750,19 @@ class FH6TrackerGUI(tk.Tk):
             self._update_status_var.set("Update timed out (network issue?).")
 
     def _restart_app(self):
-        pythonw = sys.executable.replace("python.exe", "pythonw.exe")
-        if not os.path.exists(pythonw):
-            pythonw = sys.executable
-        try:
-            subprocess.Popen([pythonw, os.path.join(BASE_DIR, "fh6_gui.py")],
-                             cwd=BASE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-        except Exception as exc:
-            messagebox.showerror("Restart failed", f"Could not restart: {exc}")
-            return
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable], cwd=BASE_DIR,
+                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        else:
+            pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+            if not os.path.exists(pythonw):
+                pythonw = sys.executable
+            try:
+                subprocess.Popen([pythonw, os.path.join(BASE_DIR, "fh6_gui.py")],
+                                 cwd=BASE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            except Exception as exc:
+                messagebox.showerror("Restart failed", f"Could not restart: {exc}")
+                return
         self._on_close()
 
     def _open_feedback(self):
@@ -4080,7 +4090,10 @@ class FH6TrackerGUI(tk.Tk):
             kwargs = {"cwd": BASE_DIR, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
             if os.name == "nt":
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-            self.tracker_process = subprocess.Popen([sys.executable, AUTO_LOG_PATH], **kwargs)
+            if getattr(sys, "frozen", False):
+                self.tracker_process = subprocess.Popen([sys.executable, "--tracker"], **kwargs)
+            else:
+                self.tracker_process = subprocess.Popen([sys.executable, AUTO_LOG_PATH], **kwargs)
             self.tracker_running = True
             self.last_status = "Running"
             self.status_var.set("Status: Running")

@@ -9,10 +9,17 @@ import json
 import os
 import re
 import struct
+import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-REF_FILE = os.path.join(BASE_DIR, "fh6_id_reference.json")
-MASTER_FILE = os.path.join(BASE_DIR, "fh6_master_list.json")
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = sys._MEIPASS
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BUNDLE_DIR = None
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+REF_FILE = os.path.join(BUNDLE_DIR or BASE_DIR, "fh6_id_reference.json")
+MASTER_FILE = os.path.join(BUNDLE_DIR or BASE_DIR, "fh6_master_list.json")
 OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
 SETTINGS_FILE = os.path.join(BASE_DIR, "gui_settings.json")
 
