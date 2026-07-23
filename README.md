@@ -111,6 +111,8 @@ Smart suggestions for your next car purchase based on:
 
 - **Theme** -- Light or Dark mode
 - **Performance Mode** -- Quality (1s refresh), Balanced (2s), or Performance (4s). Higher performance = less CPU usage.
+- **Disable Fullscreen Popup Scan** -- Skip the screenshot-compare-then-OCR path. Use only balance region OCR. Saves CPU.
+- **Forza Check Interval** -- How often to check if Forza is running (5-60 seconds). Higher = less CPU, slower auto-detect.
 - **OCR Configuration** -- Enable/disable, capture screen regions (drag overlay), set Tesseract path, lock regions.
 - **Auto-open with Forza** -- Start tracking automatically when the game launches.
 - **Export & Backup** -- Export owned cars or full collection to CSV. Backup all data to a ZIP file. Restore from backup.
@@ -125,10 +127,10 @@ Smart suggestions for your next car purchase based on:
 | `Ctrl+F` | Focus search bar (Collection tab) |
 | `Ctrl+N` | Focus "Add Car" entry |
 | `Ctrl+R` | Refresh all data |
-| `F5` | Force-scan for credit popups |
 | `F4` | Voice car tagging (in-game, via telemetry subprocess) |
-| `F6` | Toggle race recording (in-game) |
-| `Esc` | Cancel region capture overlay |
+| `F5` | Force-scan for credit popups |
+| `F6` | Toggle race recording |
+| `F7` | Toggle method tracking (CR/hr timer) |
 
 ### Mouse Controls
 
@@ -180,6 +182,10 @@ The app captures a small region of your screen where the credit balance is displ
 ### Performance
 
 The app is designed to be lightweight. In Performance mode, it only reads the screen every 12 seconds and refreshes the UI every 4 seconds, minimizing impact on your game.
+
+### System Tray
+
+Click the **X** button to minimize to the system tray (notification area). The app keeps running in the background. Click the tray icon to restore. Use the **Quit** button in the header to fully close the app — it will show a session summary with credits earned, duration, and earning rate before exiting.
 
 ---
 
