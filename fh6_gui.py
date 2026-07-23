@@ -1,5 +1,6 @@
 import csv
 import ctypes
+import ctypes.wintypes
 import importlib
 import json
 import logging
@@ -420,31 +421,7 @@ def is_forza_process_name(name):
 
 def get_running_process_names():
     if os.name == "nt":
-        try:
-            # CREATE_NO_WINDOW keeps this from flashing a console window every refresh.
-            completed = subprocess.run(
-                ["tasklist", "/fo", "csv", "/nh"],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=10,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return []
-        if completed.returncode != 0:
-            return []
-        names = []
-        for line in completed.stdout.splitlines():
-            if not line.strip():
-                continue
-            try:
-                parts = next(csv.reader([line]))
-            except csv.Error:
-                continue
-            if parts:
-                names.append(parts[0].strip().strip('"'))
-        return names
+        return _get_process_names_win32()
     else:
         try:
             completed = subprocess.run(["ps", "-eo", "comm="], capture_output=True, text=True, check=False, timeout=10)
@@ -453,6 +430,45 @@ def get_running_process_names():
         if completed.returncode != 0:
             return []
         return [name.strip() for name in completed.stdout.splitlines() if name.strip()]
+
+
+def _get_process_names_win32():
+    """Enumerate running process names using the Win32 API (no subprocess)."""
+    names = []
+    try:
+        kernel32 = ctypes.windll.kernel32
+        TH32CS_SNAPPROCESS = 0x00000002
+
+        class PROCESSENTRY32(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", ctypes.c_uint32),
+                ("cntUsage", ctypes.c_uint32),
+                ("th32ProcessID", ctypes.c_uint32),
+                ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+                ("th32ModuleID", ctypes.c_uint32),
+                ("cntThreads", ctypes.c_uint32),
+                ("th32ParentProcessID", ctypes.c_uint32),
+                ("pcPriClassBase", ctypes.c_long),
+                ("dwFlags", ctypes.c_uint32),
+                ("szExeFile", ctypes.c_char * 260),
+            ]
+
+        snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            return names
+        try:
+            entry = PROCESSENTRY32()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
+            if kernel32.Process32First(snapshot, ctypes.byref(entry)):
+                while True:
+                    names.append(entry.szExeFile.decode("utf-8", errors="replace"))
+                    if not kernel32.Process32Next(snapshot, ctypes.byref(entry)):
+                        break
+        finally:
+            kernel32.CloseHandle(snapshot)
+    except Exception:
+        pass
+    return names
 
 
 def has_running_forza_process():
@@ -553,6 +569,8 @@ class FH6TrackerGUI(tk.Tk):
         self.forza_running_prev = None
         self._forza_running_cache = False
         self._forza_process_check_time = 0.0
+        self._forza_window_rect_cache = None
+        self._forza_window_rect_time = 0.0
         self.detected_car_id = None
         self._notice_after_id = None
         self._method_active = False
@@ -594,7 +612,9 @@ class FH6TrackerGUI(tk.Tk):
         self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
         self.bind("<Control-r>", lambda e: self.refresh_all())
         self.bind_all("<F5>", lambda e: self._force_popup_scan())
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.bind_all("<F6>", lambda e: self._toggle_race_recording())
+        self.bind_all("<F7>", lambda e: self._toggle_method_hotkey())
+        self.protocol("WM_DELETE_WINDOW", self._minimize_to_tray)
 
     # =========================================================================
     # UI BUILDING — create_widgets (header, controls, tab notebook)
@@ -610,8 +630,11 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Label(header, text="Forza Horizon 6 Tracker", font=("Segoe UI", 16, "bold")).grid(row=0, column=0, sticky="w")
 
+        status_frame = ttk.Frame(header)
+        status_frame.grid(row=0, column=1, sticky="e")
         self.status_var = tk.StringVar(value="Status: Stopped")
-        ttk.Label(header, textvariable=self.status_var, foreground="#1f6feb").grid(row=0, column=1, sticky="e")
+        ttk.Label(status_frame, textvariable=self.status_var, foreground="#1f6feb").pack(side="left", padx=(0, 8))
+        ttk.Button(status_frame, text="Quit", command=self._on_close, width=6).pack(side="right")
 
         self.notice_var = tk.StringVar(value="")
         self.notice_label = ttk.Label(header, textvariable=self.notice_var, foreground="#137333", font=("Segoe UI", 11, "bold"))
@@ -633,6 +656,8 @@ class FH6TrackerGUI(tk.Tk):
         self.launch_tracker_var = tk.BooleanVar(value=self.settings.get("launch_tracker_on_start", False))
         self.theme_var = tk.StringVar(value=self.settings.get("theme", "light"))
         self.credit_ocr_var = tk.BooleanVar(value=self.settings.get("credit_ocr_enabled", False))
+        self.disable_popup_scan_var = tk.BooleanVar(value=self.settings.get("disable_popup_scan", False))
+        self.forza_check_interval_var = tk.StringVar(value=str(self.settings.get("forza_check_interval", 10)))
         region = self.settings.get("credit_region") or [0, 0, 0, 0]
         self.credit_x_var = tk.StringVar(value=str(region[0]))
         self.credit_y_var = tk.StringVar(value=str(region[1]))
@@ -814,7 +839,7 @@ class FH6TrackerGUI(tk.Tk):
         self._recording = False
         self._record_btn = ttk.Button(race_frame, text="Start Recording", command=self._toggle_race_recording)
         self._record_btn.grid(row=0, column=0, padx=(0, 8))
-        self._record_status_var = tk.StringVar(value="  (or press F6 in-game)")
+        self._record_status_var = tk.StringVar(value="  (or press F6)")
         ttk.Label(race_frame, textvariable=self._record_status_var, foreground="#555555").grid(row=0, column=1, sticky="w")
 
         ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=3, column=0, sticky="w", padx=10, pady=(6, 0))
@@ -1094,6 +1119,15 @@ class FH6TrackerGUI(tk.Tk):
         self._race_canvas_steer = tk.Canvas(chart_frame, height=80, highlightthickness=0)
         self._race_canvas_steer.grid(row=2, column=0, sticky="nsew")
 
+        # Re-render charts when the frame is resized (e.g. window resize)
+        self._chart_resize_after_id = None
+        def _on_chart_frame_configure(_event):
+            if self._selected_race_data:
+                if self._chart_resize_after_id:
+                    self.after_cancel(self._chart_resize_after_id)
+                self._chart_resize_after_id = self.after(150, lambda: self._render_race_analysis(self._selected_race_data))
+        chart_frame.bind("<Configure>", _on_chart_frame_configure)
+
         stats_frame = ttk.LabelFrame(right, text="Race Summary")
         stats_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         stats_frame.columnconfigure(1, weight=1)
@@ -1106,6 +1140,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(tips_frame, textvariable=self._race_tips_var, justify="left", wraplength=600, foreground="#1f6feb").grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
         self._selected_race_data = None
+        self._race_needs_rerender = False
 
     def refresh_races_panel(self):
         for item in self.race_list_tree.get_children():
@@ -1144,7 +1179,12 @@ class FH6TrackerGUI(tk.Tk):
         except Exception:
             return
         self._selected_race_data = data
-        self._render_race_analysis(data)
+        w = self._race_canvas_speed.winfo_width()
+        if w < 50:
+            # Tab not yet mapped — flag for re-render when it becomes visible
+            self._race_needs_rerender = True
+        else:
+            self._render_race_analysis(data)
 
     def _render_race_analysis(self, data):
         car = data.get("car_name", "Unknown")
@@ -1273,7 +1313,7 @@ class FH6TrackerGUI(tk.Tk):
             tips.append("Very little braking detected — you might be coasting through corners instead of braking firmly and turning in.")
         brake_transitions = sum(1 for i in range(1, len(brakes)) if brakes[i] > 0.3 and brakes[i - 1] < 0.1)
         if brake_transitions > 20 and duration > 10:
-            tips.append(f"频繁 braking ({brake_transitions} times) — try to brake once per corner instead of pumping the pedal.")
+            tips.append(f"Frequent braking ({brake_transitions} times) — try to brake once per corner instead of pumping the pedal.")
         pct_throttle = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
         if pct_throttle < 30 and max(speeds) > 50:
             tips.append("Low throttle usage — you may be over-slowing for corners. Trust the car's grip and get on the power earlier.")
@@ -1338,7 +1378,14 @@ class FH6TrackerGUI(tk.Tk):
         self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
         self.rate_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         self.rate_stats_var = tk.StringVar(value="No rate data yet")
-        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 2))
+
+        spark_frame = ttk.LabelFrame(self.stats_tab, text="CR/min Sparkline (last 10 min)")
+        spark_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
+        spark_frame.columnconfigure(0, weight=1)
+        self.spark_canvas = tk.Canvas(spark_frame, bg="white", height=60)
+        self.spark_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        self._cr_min_points = []
 
     def build_settings_tab(self):
         self.settings_tab.columnconfigure(0, weight=1)
@@ -1397,7 +1444,28 @@ class FH6TrackerGUI(tk.Tk):
             justify="left",
             foreground="#555555",
         ).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
-        ttk.Button(settings_frame, text="Apply Settings", command=self.save_all_settings).grid(row=5, column=0, sticky="w", padx=8, pady=(6, 8))
+
+        ttk.Checkbutton(
+            settings_frame,
+            text="Disable fullscreen popup scan (use only balance region OCR — saves CPU)",
+            variable=self.disable_popup_scan_var,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=8, pady=2)
+
+        ttk.Label(settings_frame, text="Forza check interval (sec):").grid(row=6, column=0, sticky="w", padx=8, pady=4)
+        ttk.Combobox(
+            settings_frame,
+            textvariable=self.forza_check_interval_var,
+            values=["5", "10", "15", "30", "60"],
+            state="readonly",
+            width=6,
+        ).grid(row=6, column=1, sticky="w", padx=(4, 8), pady=4)
+        ttk.Label(
+            settings_frame,
+            text="How often to check if Forza is running. Higher = less CPU, slower auto-detect.",
+            foreground="#555555",
+        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
+
+        ttk.Button(settings_frame, text="Apply Settings", command=self.save_all_settings).grid(row=8, column=0, sticky="w", padx=8, pady=(6, 8))
 
         ocr_frame = ttk.LabelFrame(settings_inner, text="Automatic Credit Tracking (OCR)")
         ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -1550,6 +1618,22 @@ class FH6TrackerGUI(tk.Tk):
     def _ocr_interval_seconds(self):
         return self._performance_preset()["ocr_seconds"]
 
+    def _forza_process_check_interval(self):
+        return float(self.settings.get("forza_check_interval", 10.0))
+
+    def _get_forza_window_rect_cached(self):
+        """Return the cached Forza window rect from the current refresh cycle.
+
+        The rect is queried once at the top of refresh_loop and reused by all
+        downstream consumers (get_credit_region, get_payout_region, etc.) to
+        avoid redundant EnumWindows calls per cycle.
+        """
+        now = time.monotonic()
+        if now - self._forza_window_rect_time >= 5.0:
+            self._forza_window_rect_cache = get_forza_window_rect()
+            self._forza_window_rect_time = now
+        return self._forza_window_rect_cache
+
 
     # =====================================================================
     # PERFORMANCE & OCR INTERVAL HELPERS
@@ -1579,8 +1663,18 @@ class FH6TrackerGUI(tk.Tk):
         self._credit_transactions["transactions"].append(entry)
         self._credit_transactions["transactions"] = self._credit_transactions["transactions"][-500:]
         self._save_credit_transactions()
-        self._credit_rate_points.append((time.monotonic(), balance_after))
+        now = time.monotonic()
+        self._credit_rate_points.append((now, balance_after))
         self._credit_rate_points = self._credit_rate_points[-200:]
+        # Record CR/min for the sparkline: credits gained in the last interval
+        last_cr_time = getattr(self, "_last_cr_min_time", 0)
+        if last_cr_time > 0:
+            elapsed_min = (now - last_cr_time) / 60.0
+            if elapsed_min > 0.05:
+                cr_per_min = abs(amount) / elapsed_min
+                self._cr_min_points.append((now, cr_per_min))
+                self._cr_min_points = self._cr_min_points[-60:]
+        self._last_cr_min_time = now
 
 
     # =====================================================================
@@ -1669,12 +1763,16 @@ class FH6TrackerGUI(tk.Tk):
 
     def refresh_loop(self):
         now = time.monotonic()
-        # Only spawn tasklist every 10 seconds; window check is nearly free and runs every cycle.
-        if now - self._forza_process_check_time >= 10.0:
+        # Only spawn tasklist periodically; window check is nearly free and runs every cycle.
+        check_interval = self._forza_process_check_interval()
+        if now - self._forza_process_check_time >= check_interval:
             self._forza_running_cache = has_running_forza_process() or has_running_forza_window()
             self._forza_process_check_time = now
         else:
             self._forza_running_cache = has_running_forza_window()
+        # Pre-cache the Forza window rect once per cycle so all downstream OCR
+        # region adjustments reuse the same EnumWindows result.
+        self._get_forza_window_rect_cached()
         self.update_forza_session_state(running_now=self._forza_running_cache)
         self.detect_credit_popup_change()
         self._update_ocr_confidence_indicator()
@@ -1684,12 +1782,17 @@ class FH6TrackerGUI(tk.Tk):
             self.vars["session_credits_var"].set(format_credits(self.get_session_credits()))
         if self.credit_ocr_var.get():
             region = self.get_credit_region()
+            popup_off = self.disable_popup_scan_var.get()
             if not self._forza_running_cache:
                 self._live_ocr_status_var.set("OCR enabled — waiting for Forza to open")
-            elif region:
+            elif region and not popup_off:
                 self._live_ocr_status_var.set("OCR active — balance region + fullscreen popup scanning")
-            else:
+            elif region:
+                self._live_ocr_status_var.set("OCR active — balance region only (popup scan disabled)")
+            elif not popup_off:
                 self._live_ocr_status_var.set("OCR active — fullscreen popup scanning only")
+            else:
+                self._live_ocr_status_var.set("OCR active — balance region only (popup scan disabled)")
             bal = self.last_credit_balance or self.get_session_credits()
             self._live_ocr_balance_var.set(format_credits(bal))
             raw = self._last_ocr_raw_text
@@ -1718,6 +1821,10 @@ class FH6TrackerGUI(tk.Tk):
         }
         try:
             selected = self.notebook.select()
+            # Re-render race charts if they were deferred (tab wasn't mapped yet)
+            if str(self.races_tab) == selected and self._race_needs_rerender and self._selected_race_data:
+                self._race_needs_rerender = False
+                self.after(50, lambda: self._render_race_analysis(self._selected_race_data))
             for widget, refresh_fn in tab_map.items():
                 if str(widget) == selected:
                     refresh_fn()
@@ -1927,6 +2034,7 @@ class FH6TrackerGUI(tk.Tk):
 
         self._draw_credit_history()
         self._draw_credit_rate_chart()
+        self._draw_cr_min_sparkline()
 
     def _draw_credit_rate_chart(self):
         self.rate_canvas.delete("all")
@@ -2003,6 +2111,45 @@ class FH6TrackerGUI(tk.Tk):
             f"Points: {len(recent)} | "
             f"Change: {'+' if total_earned >= 0 else ''}{format_credits(total_earned)} over {elapsed_hrs * 60:.0f} min"
         )
+
+    def _draw_cr_min_sparkline(self):
+        canvas = getattr(self, "spark_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        points = self._cr_min_points
+        if len(points) < 2:
+            canvas.create_text(
+                canvas.winfo_width() // 2 or 200, 30,
+                text="CR/min will appear here as credits are earned.",
+                fill="#888888", font=("Segoe UI", 9),
+            )
+            return
+        now_mono = time.monotonic()
+        window = 600
+        recent = [(t, r) for t, r in points if now_mono - t <= window]
+        if len(recent) < 2:
+            recent = points[-30:]
+        canvas_w = canvas.winfo_width() or 500
+        canvas_h = canvas.winfo_height() or 60
+        pad = 30
+        cw = canvas_w - 2 * pad
+        ch = canvas_h - 2 * pad
+        if cw < 10 or ch < 10:
+            return
+        r_vals = [r for _, r in recent]
+        r_max = max(r_vals) if r_vals else 1
+        r_max = max(r_max, 1)
+        t_min = recent[0][0]
+        t_range = max(recent[-1][0] - t_min, 1)
+        bar_w = max(2, cw // len(recent) - 1)
+        for i, (t, r) in enumerate(recent):
+            x = pad + ((t - t_min) / t_range) * cw
+            bar_h = (r / r_max) * ch
+            color = "#137333" if r > r_max * 0.5 else "#888888"
+            canvas.create_rectangle(x, canvas_h - pad - bar_h, x + bar_w, canvas_h - pad, fill=color, outline="")
+        canvas.create_text(pad, pad - 10, text=f"{format_credits(r_max)}/min", anchor="w", fill="#555555", font=("Segoe UI", 8))
+        canvas.create_text(canvas_w - pad, canvas_h - pad + 10, text="now", anchor="e", fill="#555555", font=("Segoe UI", 8))
 
     def _load_credit_history(self):
         history_file = os.path.join(BASE_DIR, "credit_history.json")
@@ -2272,7 +2419,7 @@ class FH6TrackerGUI(tk.Tk):
                 return
             self._recording = False
             self._record_btn.configure(text="Start Recording")
-            self._record_status_var.set("  (or press F6 in-game)")
+            self._record_status_var.set("  (or press F6)")
             self.show_notice("Race recording stopped — check Race Analysis tab")
             # Refresh twice: once quickly to catch fast saves, once after a
             # longer delay in case the subprocess was still processing the stop.
@@ -2290,6 +2437,15 @@ class FH6TrackerGUI(tk.Tk):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
         self.show_notice("F5: scanning for popup...")
         self._scan_fullscreen_popups(time.monotonic(), force=True)
+
+    def _toggle_method_hotkey(self):
+        """Triggered by F7 — toggles method tracking on/off."""
+        if self._method_active:
+            self._stop_method_tracking()
+            self.show_notice("F7: method tracking stopped")
+        else:
+            self._start_method_tracking()
+            self.show_notice(f"F7: tracking {self._method_name}")
 
     def _scan_fullscreen_popups(self, now, force=False):
         """Detect screen changes and scan for credit popups.
@@ -2334,10 +2490,15 @@ class FH6TrackerGUI(tk.Tk):
                         tiny = tiny.resize((80, 45), Image.LANCZOS)
                     # Convert to grayscale bytes for fast comparison
                     gray = tiny.convert("L") if Image is not None else tiny
-                    thumb = list(gray.getdata()) if hasattr(gray, "getdata") else []
+                    thumb = gray.tobytes() if hasattr(gray, "tobytes") else bytes(gray.getdata())
                     prev = getattr(self, "_prev_thumb", None)
                     if prev and len(thumb) == len(prev):
-                        diff = sum(abs(a - b) for a, b in zip(thumb, prev)) / max(len(thumb), 1)
+                        # Fast byte-level diff: iterate over bytes directly instead
+                        # of a list of ints — avoids per-element Python object overhead.
+                        total = 0
+                        for i in range(len(thumb)):
+                            total += abs(thumb[i] - prev[i])
+                        diff = total / max(len(thumb), 1)
                         detected_change = diff > 8.0
                     self._prev_thumb = thumb
                 except Exception:
@@ -2481,9 +2642,10 @@ class FH6TrackerGUI(tk.Tk):
         # detected (or every 12s as a safety net), it grabs a full screenshot and runs
         # OCR looking for reward/spend keywords ("earned", "won", "spent", etc.).
         # Popups are transient, so detected changes are applied immediately.
-        popup_handled = self._scan_fullscreen_popups(now)
-        if popup_handled:
-            return
+        if not self.disable_popup_scan_var.get():
+            popup_handled = self._scan_fullscreen_popups(now)
+            if popup_handled:
+                return
 
         # --- PATH B: Balance-region scanner ---
         # Requires a configured credit_region (set via Capture Area in Settings).
@@ -2718,7 +2880,7 @@ class FH6TrackerGUI(tk.Tk):
         saved_rect = self.settings.get(saved_forza_rect_key)
         if not saved_rect or len(saved_rect) != 4:
             return region
-        current_rect = get_forza_window_rect()
+        current_rect = self._get_forza_window_rect_cached()
         if not current_rect:
             return region
         # Skip adjustment if either position has negative coords (off-screen)
@@ -3934,6 +4096,11 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["tesseract_path"] = self.tesseract_path_var.get().strip()
         self.settings["ocr_debug_logging"] = bool(self.ocr_debug_var.get())
         self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
+        self.settings["disable_popup_scan"] = bool(self.disable_popup_scan_var.get())
+        try:
+            self.settings["forza_check_interval"] = max(5.0, min(60.0, float(self.forza_check_interval_var.get() or 10)))
+        except (ValueError, TypeError):
+            self.settings["forza_check_interval"] = 10.0
         save_settings(self.settings)
         self.apply_theme(self.settings["theme"])
         if pytesseract is not None:
@@ -4091,7 +4258,123 @@ class FH6TrackerGUI(tk.Tk):
     # =====================================================================
     # CLEANUP & CLOSE HANDLER
     # =====================================================================
+    # =====================================================================
+    # SYSTEM TRAY
+    # =====================================================================
+    _tray_icon_id = 1
+    _WM_TASKBAR_CREATED = None
+
+    def _setup_tray_icon(self):
+        """Create a system tray icon using Win32 Shell_NotifyIcon."""
+        if os.name != "nt" or getattr(self, "_tray_created", False):
+            return
+        try:
+            NIM_ADD = 0x00000000
+            NIF_MESSAGE = 0x00000001
+            NIF_ICON = 0x00000002
+            NIF_TIP = 0x00000004
+
+            class NOTIFYICONDATA(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", ctypes.c_uint32),
+                    ("hWnd", ctypes.wintypes.HWND),
+                    ("uID", ctypes.c_uint32),
+                    ("uFlags", ctypes.c_uint32),
+                    ("uCallbackMessage", ctypes.c_uint32),
+                    ("hIcon", ctypes.wintypes.HICON),
+                    ("szTip", ctypes.c_wchar * 128),
+                    ("dwState", ctypes.c_uint32),
+                    ("dwStateMask", ctypes.c_uint32),
+                    ("szInfo", ctypes.c_wchar * 256),
+                    ("uTimeoutOrVersion", ctypes.c_uint32),
+                    ("szInfoTitle", ctypes.c_wchar * 64),
+                    ("dwInfoFlags", ctypes.c_uint32),
+                    ("guidItem", ctypes.c_wchar * 39),
+                    ("hIconBalloon", ctypes.wintypes.HICON),
+                ]
+
+            self._tray_callback_msg = 0x0400
+            self._tray_nid = NOTIFYICONDATA()
+            self._tray_nid.cbSize = ctypes.sizeof(NOTIFYICONDATA)
+            self._tray_nid.hWnd = ctypes.wintypes.HWND(self.winfo_id())
+            self._tray_nid.uID = self._tray_icon_id
+            self._tray_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+            self._tray_nid.uCallbackMessage = self._tray_callback_msg
+            self._tray_nid.hIcon = ctypes.windll.user32.LoadIconW(None, 1)
+            self._tray_nid.szTip = "FH6 Tracker — click to restore"
+            ctypes.windll.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self._tray_nid))
+            self._tray_created = True
+            # Hook the Windows message loop to intercept tray callback
+            self._orig_wndproc = ctypes.windll.user32.SetWindowLongW(
+                self.winfo_id(), -4, ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.c_uint, ctypes.c_uint)(self._wndproc))
+        except Exception:
+            self._tray_created = False
+
+    def _wndproc(self, hwnd, msg, wparam, lparam):
+        try:
+            if msg == self._tray_callback_msg and lparam == 0x0202:
+                self.after(0, self._restore_from_tray)
+        except Exception:
+            pass
+        try:
+            return ctypes.windll.user32.CallWindowProcW(self._orig_wndproc, hwnd, msg, wparam, lparam)
+        except Exception:
+            return 0
+
+    def _remove_tray_icon(self):
+        if os.name != "nt" or not getattr(self, "_tray_created", False):
+            return
+        try:
+            NIM_DELETE = 0x00000002
+            ctypes.windll.shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._tray_nid))
+            if getattr(self, "_orig_wndproc", None):
+                ctypes.windll.user32.SetWindowLongW(self.winfo_id(), -4, self._orig_wndproc)
+                self._orig_wndproc = None
+            self._tray_created = False
+        except Exception:
+            pass
+
+    def _minimize_to_tray(self):
+        """Hide the window and show only the tray icon."""
+        self._setup_tray_icon()
+        self.withdraw()
+
+    def _restore_from_tray(self):
+        """Restore the window from the tray."""
+        self._remove_tray_icon()
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
     def _on_close(self):
+        if getattr(self, "_tray_created", False):
+            self._remove_tray_icon()
+        # Show session summary before closing
+        total = self.session_state.get("session_credits", 0)
+        txn_count = len(self._credit_transactions.get("transactions", []))
+        start_time = self.session_state.get("session_start_time", "")
+        if start_time and total:
+            try:
+                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                elapsed = datetime.now(timezone.utc) - start_dt
+                hrs = elapsed.total_seconds() / 3600
+                elapsed_str = f"{int(hrs)}h {int((elapsed.total_seconds() % 3600) / 60)}m"
+                rate_str = f"\nEarning rate: {format_credits(total / max(hrs, 0.001))}/hr"
+            except Exception:
+                elapsed_str = ""
+                rate_str = ""
+        else:
+            elapsed_str = ""
+            rate_str = ""
+        if total or txn_count:
+            msg = f"Session Summary\n\nCredits earned: {format_credits(total)}{rate_str}"
+            if elapsed_str:
+                msg += f"\nDuration: {elapsed_str}"
+            if txn_count:
+                msg += f"\nTransactions: {txn_count}"
+            msg += "\n\nSave session data before closing?"
+            if messagebox.askyesno("FH6 Tracker", msg):
+                self._record_session_to_history()
         for after_id in (self._refresh_after_id, self._session_timer_after_id,
                          self._method_timer_after_id, self._notice_after_id):
             if after_id is not None:
