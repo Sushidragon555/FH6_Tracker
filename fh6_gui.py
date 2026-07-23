@@ -1336,7 +1336,7 @@ class FH6TrackerGUI(tk.Tk):
         self.stats_tab.rowconfigure(2, weight=1)
 
         summary_frame = ttk.LabelFrame(self.stats_tab, text="Collection Progress")
-        summary_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        summary_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
         summary_frame.columnconfigure(0, weight=1)
 
         self.stats_summary_var = tk.StringVar(value="Loading...")
@@ -1347,7 +1347,7 @@ class FH6TrackerGUI(tk.Tk):
         self.stats_progress_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
 
         details_frame = ttk.LabelFrame(self.stats_tab, text="Live Summary")
-        details_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        details_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
         details_frame.columnconfigure(1, weight=1)
 
         self.stats_last_seen_var = tk.StringVar(value="No recent telemetry")
@@ -1378,14 +1378,7 @@ class FH6TrackerGUI(tk.Tk):
         self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
         self.rate_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         self.rate_stats_var = tk.StringVar(value="No rate data yet")
-        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 2))
-
-        spark_frame = ttk.LabelFrame(self.stats_tab, text="CR/min Sparkline (last 10 min)")
-        spark_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
-        spark_frame.columnconfigure(0, weight=1)
-        self.spark_canvas = tk.Canvas(spark_frame, bg="white", height=60)
-        self.spark_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-        self._cr_min_points = []
+        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
     def build_settings_tab(self):
         self.settings_tab.columnconfigure(0, weight=1)
@@ -1666,15 +1659,6 @@ class FH6TrackerGUI(tk.Tk):
         now = time.monotonic()
         self._credit_rate_points.append((now, balance_after))
         self._credit_rate_points = self._credit_rate_points[-200:]
-        # Record CR/min for the sparkline: credits gained in the last interval
-        last_cr_time = getattr(self, "_last_cr_min_time", 0)
-        if last_cr_time > 0:
-            elapsed_min = (now - last_cr_time) / 60.0
-            if elapsed_min > 0.05:
-                cr_per_min = abs(amount) / elapsed_min
-                self._cr_min_points.append((now, cr_per_min))
-                self._cr_min_points = self._cr_min_points[-60:]
-        self._last_cr_min_time = now
 
 
     # =====================================================================
@@ -2034,7 +2018,6 @@ class FH6TrackerGUI(tk.Tk):
 
         self._draw_credit_history()
         self._draw_credit_rate_chart()
-        self._draw_cr_min_sparkline()
 
     def _draw_credit_rate_chart(self):
         self.rate_canvas.delete("all")
@@ -2111,45 +2094,6 @@ class FH6TrackerGUI(tk.Tk):
             f"Points: {len(recent)} | "
             f"Change: {'+' if total_earned >= 0 else ''}{format_credits(total_earned)} over {elapsed_hrs * 60:.0f} min"
         )
-
-    def _draw_cr_min_sparkline(self):
-        canvas = getattr(self, "spark_canvas", None)
-        if canvas is None:
-            return
-        canvas.delete("all")
-        points = self._cr_min_points
-        if len(points) < 2:
-            canvas.create_text(
-                canvas.winfo_width() // 2 or 200, 30,
-                text="CR/min will appear here as credits are earned.",
-                fill="#888888", font=("Segoe UI", 9),
-            )
-            return
-        now_mono = time.monotonic()
-        window = 600
-        recent = [(t, r) for t, r in points if now_mono - t <= window]
-        if len(recent) < 2:
-            recent = points[-30:]
-        canvas_w = canvas.winfo_width() or 500
-        canvas_h = canvas.winfo_height() or 60
-        pad = 30
-        cw = canvas_w - 2 * pad
-        ch = canvas_h - 2 * pad
-        if cw < 10 or ch < 10:
-            return
-        r_vals = [r for _, r in recent]
-        r_max = max(r_vals) if r_vals else 1
-        r_max = max(r_max, 1)
-        t_min = recent[0][0]
-        t_range = max(recent[-1][0] - t_min, 1)
-        bar_w = max(2, cw // len(recent) - 1)
-        for i, (t, r) in enumerate(recent):
-            x = pad + ((t - t_min) / t_range) * cw
-            bar_h = (r / r_max) * ch
-            color = "#137333" if r > r_max * 0.5 else "#888888"
-            canvas.create_rectangle(x, canvas_h - pad - bar_h, x + bar_w, canvas_h - pad, fill=color, outline="")
-        canvas.create_text(pad, pad - 10, text=f"{format_credits(r_max)}/min", anchor="w", fill="#555555", font=("Segoe UI", 8))
-        canvas.create_text(canvas_w - pad, canvas_h - pad + 10, text="now", anchor="e", fill="#555555", font=("Segoe UI", 8))
 
     def _load_credit_history(self):
         history_file = os.path.join(BASE_DIR, "credit_history.json")
