@@ -10,12 +10,15 @@ venv/
 # Runtime data / generated files (grow at runtime; not part of the app)
 telemetry_log.csv
 fh6_tracker.log
+tracker.log
 *.tmp
 
 # PyInstaller build output
 build/
 dist/
 *.spec
+_internal/
+FH6_Tracker.exe
 
 # OCR debug captures (generated at runtime when debug logging is enabled)
 ocr_debug/

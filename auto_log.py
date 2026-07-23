@@ -51,30 +51,41 @@ def _wndproc(hwnd, msg, wparam, lparam):
             threading.Thread(target=log_car_voice, daemon=True).start()
         elif wparam == HOTKEY_ID_RECORD:
             threading.Thread(target=toggle_race_recording, daemon=True).start()
-    return 0
+        return 0
+    return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
+# Keep a reference to the callback so it doesn't get garbage collected
 _pwndproc = WNDPROC(_wndproc)
+_hotkey_hwnd = None
 
 def _start_hotkey_listener():
     """Create a hidden message-only window and register F4/F6 hotkeys."""
+    global _hotkey_hwnd
     className = "FH6TrackerHotkeys"
     wc = ctypes.wintypes.WNDCLASS()
     wc.lpfnWndProc = _pwndproc
     wc.lpszClassName = className
     wc.hInstance = _kernel32.GetModuleHandleW(None)
-    _user32.RegisterClassW(ctypes.byref(wc))
+    atom = _user32.RegisterClassW(ctypes.byref(wc))
+    if not atom:
+        print(" [⚠️] Could not register hotkey window class.")
+        return
 
-    hwnd = _user32.CreateWindowExW(
+    _hotkey_hwnd = _user32.CreateWindowExW(
         0, className, "FH6Hotkeys", 0, 0, 0, 0, 0,
         None, None, wc.hInstance, None
     )
-    if not hwnd:
+    if not _hotkey_hwnd:
         print(" [⚠️] Could not create hotkey window.")
         return
 
     # Register hotkeys: 0 = no modifier
-    _user32.RegisterHotKey(hwnd, HOTKEY_ID_VOICE, 0, VK_F4)
-    _user32.RegisterHotKey(hwnd, HOTKEY_ID_RECORD, 0, VK_F6)
+    if not _user32.RegisterHotKey(_hotkey_hwnd, HOTKEY_ID_VOICE, 0, VK_F4):
+        print(" [⚠️] Could not register F4 hotkey (may be in use).")
+    if not _user32.RegisterHotKey(_hotkey_hwnd, HOTKEY_ID_RECORD, 0, VK_F6):
+        print(" [⚠️] Could not register F6 hotkey (may be in use).")
+    else:
+        print(" [✓] F4 and F6 hotkeys registered — works in-game without admin.")
 
     # Message loop
     msg = ctypes.wintypes.MSG()

@@ -4087,7 +4087,8 @@ class FH6TrackerGUI(tk.Tk):
             return
 
         try:
-            kwargs = {"cwd": BASE_DIR, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+            tracker_log = os.path.join(BASE_DIR, "tracker.log")
+            kwargs = {"cwd": BASE_DIR, "stdout": open(tracker_log, "w"), "stderr": subprocess.STDOUT}
             if os.name == "nt":
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
             if getattr(sys, "frozen", False):
@@ -4306,32 +4307,7 @@ class FH6TrackerGUI(tk.Tk):
     def _on_close(self):
         if getattr(self, "_tray_created", False):
             self._remove_tray_icon()
-        # Show session summary before closing
-        total = self.session_state.get("session_credits", 0)
-        txn_count = len(self._credit_transactions.get("transactions", []))
-        start_time = self.session_state.get("session_start_time", "")
-        if start_time and total:
-            try:
-                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                elapsed = datetime.now(timezone.utc) - start_dt
-                hrs = elapsed.total_seconds() / 3600
-                elapsed_str = f"{int(hrs)}h {int((elapsed.total_seconds() % 3600) / 60)}m"
-                rate_str = f"\nEarning rate: {format_credits(total / max(hrs, 0.001))}/hr"
-            except Exception:
-                elapsed_str = ""
-                rate_str = ""
-        else:
-            elapsed_str = ""
-            rate_str = ""
-        if total or txn_count:
-            msg = f"Session Summary\n\nCredits earned: {format_credits(total)}{rate_str}"
-            if elapsed_str:
-                msg += f"\nDuration: {elapsed_str}"
-            if txn_count:
-                msg += f"\nTransactions: {txn_count}"
-            msg += "\n\nSave session data before closing?"
-            if messagebox.askyesno("FH6 Tracker", msg):
-                self._record_session_to_history()
+        self._record_session_to_history()
         for after_id in (self._refresh_after_id, self._session_timer_after_id,
                          self._method_timer_after_id, self._notice_after_id):
             if after_id is not None:
