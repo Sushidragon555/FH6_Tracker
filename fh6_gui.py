@@ -550,6 +550,10 @@ class FH6TrackerGUI(tk.Tk):
         self.last_status = "Stopped"
         self.settings = load_settings()
         self.tracker_running = False
+        self._tracker_restart_count = 0
+        self._tracker_restart_window_start = 0.0
+        self._tracker_max_restarts = 3
+        self._tracker_restart_window = 60
         self.session_state = self.load_session_state()
         self.last_credit_balance = None
         self._session_start_balance = None
@@ -4240,7 +4244,7 @@ class FH6TrackerGUI(tk.Tk):
             self.last_status = "Crashed"
             self.status_var.set("Status: Tracker unavailable")
             self._update_tracker_button()
-            self.show_notice("Telemetry tracker unavailable (port in use or process missing).")
+            self._auto_restart_tracker("Telemetry tracker unavailable (port in use or process missing).")
             return
         if self.tracker_process.poll() is not None:
             self.tracker_process = None
@@ -4248,7 +4252,20 @@ class FH6TrackerGUI(tk.Tk):
             self.last_status = "Crashed"
             self.status_var.set("Status: Tracker unavailable")
             self._update_tracker_button()
-            self.show_notice("Telemetry tracker stopped. Credit OCR still active.")
+            self._auto_restart_tracker("Telemetry tracker stopped.")
+
+    def _auto_restart_tracker(self, reason):
+        now = time.monotonic()
+        if now - self._tracker_restart_window_start > self._tracker_restart_window:
+            self._tracker_restart_count = 0
+            self._tracker_restart_window_start = now
+        if self._tracker_restart_count >= self._tracker_max_restarts:
+            self.show_notice(f"{reason} Auto-restart limit reached ({self._tracker_max_restarts} attempts). Please restart manually.")
+            return
+        self._tracker_restart_count += 1
+        remaining = self._tracker_max_restarts - self._tracker_restart_count
+        self.show_notice(f"{reason} Auto-restarting... ({remaining} attempts left)")
+        self.after(2000, self.start_tracker)
 
     def _check_forza_auto_start(self):
         if not self.settings.get("auto_start_forza", False):

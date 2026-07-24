@@ -383,8 +383,19 @@ if TEST_MODE:
     print(" [TEST] Done. Check owned_cars.json for the new entry.")
 else:
     if sock is None:
-        print(" [⚠️] Telemetry logging skipped — socket could not be opened.")
-        sys.exit(0)
+        for _bind_attempt in range(3):
+            print(f" [⚠️] Could not bind UDP port {UDP_PORT}, retrying in 2s... ({_bind_attempt + 1}/3)")
+            time.sleep(2)
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.bind((UDP_IP, UDP_PORT))
+                print(f" [✓] Bound to UDP port {UDP_PORT} on retry.")
+                break
+            except OSError:
+                sock = None
+        if sock is None:
+            print(" [⚠️] Telemetry logging skipped — socket could not be opened after retries.")
+            sys.exit(0)
     try:
         sock.settimeout(1.0)
         while True:
@@ -395,78 +406,82 @@ else:
                 print(" Waiting for Forza telemetry...                     ", end="\r")
                 continue
 
-            parsed = car_lookup.parse_packet(data)
-            if parsed is None:
-                continue
+            try:
+                parsed = car_lookup.parse_packet(data)
+                if parsed is None:
+                    continue
 
-            current_rpm = parsed["rpm"]
-            speed_mph = parsed["speed_mph"]
-            car_ordinal = parsed["car_ordinal"]
-            car_id_str = str(car_ordinal)
-            is_race_on = parsed["is_race_on"]
+                current_rpm = parsed["rpm"]
+                speed_mph = parsed["speed_mph"]
+                car_ordinal = parsed["car_ordinal"]
+                car_id_str = str(car_ordinal)
+                is_race_on = parsed["is_race_on"]
 
-            if not car_lookup.is_real_ordinal(car_ordinal):
-                print(" Waiting for gameplay to start (In Menus/Loading)...       ", end="\r")
-                continue
+                if not car_lookup.is_real_ordinal(car_ordinal):
+                    print(" Waiting for gameplay to start (In Menus/Loading)...       ", end="\r")
+                    continue
 
-            active_car_id = car_id_str
+                active_car_id = car_id_str
 
-            car_changed = last_id != car_id_str
-            if car_changed:
-                last_id = car_id_str
+                car_changed = last_id != car_id_str
+                if car_changed:
+                    last_id = car_id_str
+                    if not voice_override_active:
+                        current_mapped_car_name = "Unknown Vehicle"
+
                 if not voice_override_active:
-                    current_mapped_car_name = "Unknown Vehicle"
+                    mapped_name = id_reference.get(car_id_str)
+                    if mapped_name:
+                        current_mapped_car_name = car_lookup.resolve_canonical_name(mapped_name, canonical_index)
 
-            if not voice_override_active:
-                mapped_name = id_reference.get(car_id_str)
-                if mapped_name:
-                    current_mapped_car_name = car_lookup.resolve_canonical_name(mapped_name, canonical_index)
+                        # The owned list only changes when a new car appears, so touch it on
+                        # car changes instead of on every packet (avoids re-reading the JSON 60x/sec).
+                        if car_changed and save_owned_car(current_mapped_car_name):
+                            print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
+                    else:
+                        current_mapped_car_name = "Unknown Vehicle"
 
-                    # The owned list only changes when a new car appears, so touch it on
-                    # car changes instead of on every packet (avoids re-reading the JSON 60x/sec).
-                    if car_changed and save_owned_car(current_mapped_car_name):
-                        print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
-                else:
-                    current_mapped_car_name = "Unknown Vehicle"
+                now = time.monotonic()
+                now_str = datetime.now(timezone.utc).isoformat()
 
-            now = time.monotonic()
-            now_str = datetime.now(timezone.utc).isoformat()
+                # --- Check for GUI signal files (~6x/sec during race, every packet when idle) ---
+                if race_packet_count % 10 == 0:
+                    _check_signal_files()
 
-            # --- Check for GUI signal files (~6x/sec during race, every packet when idle) ---
-            if race_packet_count % 10 == 0:
-                _check_signal_files()
+                # --- Auto race detection (only if not manually controlled) ---
+                if not race_manual_override:
+                    if is_race_on and not race_in_progress:
+                        start_race(parsed, now, now_str)
+                    elif not is_race_on and race_in_progress:
+                        end_race(now, now_str)
 
-            # --- Auto race detection (only if not manually controlled) ---
-            if not race_manual_override:
-                if is_race_on and not race_in_progress:
-                    start_race(parsed, now, now_str)
-                elif not is_race_on and race_in_progress:
-                    end_race(now, now_str)
+                # --- Race telemetry capture ---
+                if race_in_progress:
+                    race_packet_count += 1
+                    if race_packet_count % RACE_SAMPLE_EVERY == 0:
+                        t = round(now - race_start_time_mono, 3)
+                        race_buffer.append({
+                            "t": t,
+                            "spd": round(speed_mph, 1),
+                            "rpm": int(current_rpm),
+                            "thr": round(parsed["throttle"], 3),
+                            "brk": round(parsed["brake"], 3),
+                            "str": round(parsed["steering"], 3),
+                            "gear": parsed["gear"],
+                            "pwr": int(parsed["power"]),
+                            "trq": int(parsed["torque"]),
+                            "hbrk": round(parsed["handbrake"], 3),
+                        })
 
-            # --- Race telemetry capture ---
-            if race_in_progress:
-                race_packet_count += 1
-                if race_packet_count % RACE_SAMPLE_EVERY == 0:
-                    t = round(now - race_start_time_mono, 3)
-                    race_buffer.append({
-                        "t": t,
-                        "spd": round(speed_mph, 1),
-                        "rpm": int(current_rpm),
-                        "thr": round(parsed["throttle"], 3),
-                        "brk": round(parsed["brake"], 3),
-                        "str": round(parsed["steering"], 3),
-                        "gear": parsed["gear"],
-                        "pwr": int(parsed["power"]),
-                        "trq": int(parsed["torque"]),
-                        "hbrk": round(parsed["handbrake"], 3),
-                    })
+                # --- Regular telemetry logging ---
+                if car_changed or (now - last_log_time) >= LOG_INTERVAL_SECONDS:
+                    last_log_time = now
+                    append_telemetry_row(int(current_rpm), int(speed_mph), car_id_str, current_mapped_car_name)
+                race_flag = " [RACE]" if race_in_progress else ""
+                print(f" [LIVE] RPM: {int(current_rpm):<5} | Speed: {int(speed_mph):<3} MPH | Raw ID: {car_id_str:<10} | Name: {current_mapped_car_name:<30}{race_flag}", end="\r")
 
-            # --- Regular telemetry logging ---
-            if car_changed or (now - last_log_time) >= LOG_INTERVAL_SECONDS:
-                last_log_time = now
-                append_telemetry_row(int(current_rpm), int(speed_mph), car_id_str, current_mapped_car_name)
-            race_flag = " [RACE]" if race_in_progress else ""
-            print(f" [LIVE] RPM: {int(current_rpm):<5} | Speed: {int(speed_mph):<3} MPH | Raw ID: {car_id_str:<10} | Name: {current_mapped_car_name:<30}{race_flag}", end="\r")
+            except Exception as exc:
+                print(f" [⚠️] Telemetry loop error: {exc}")
 
     except KeyboardInterrupt:
         print("\n\nLogger stopped safely.")
