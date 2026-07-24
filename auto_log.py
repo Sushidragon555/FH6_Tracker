@@ -400,13 +400,13 @@ else:
         sock.settimeout(1.0)
         while True:
             try:
-                data, _ = sock.recvfrom(1024)
-            except socket.timeout:
-                _check_signal_files()
-                print(" Waiting for Forza telemetry...                     ", end="\r")
-                continue
+                try:
+                    data, _ = sock.recvfrom(1024)
+                except socket.timeout:
+                    _check_signal_files()
+                    print(" Waiting for Forza telemetry...                     ", end="\r")
+                    continue
 
-            try:
                 parsed = car_lookup.parse_packet(data)
                 if parsed is None:
                     continue
