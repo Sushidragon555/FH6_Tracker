@@ -217,19 +217,44 @@ def start_race(parsed, now_mono, timestamp_str):
     race_car_name = id_reference.get(car_id_str, "Unknown Vehicle")
     race_car_name = car_lookup.resolve_canonical_name(race_car_name, canonical_index)
     race_packet_count = 0
+    _write_tracker_status(True)
     print(f"\n [🏁] Race started! Recording telemetry for {race_car_name}...")
+
+
+def _write_tracker_status(recording):
+    """Write tracker recording status so the GUI can sync."""
+    try:
+        status_path = os.path.join(RACES_DIR, ".tracker_status")
+        with open(status_path, "w", encoding="utf-8") as fh:
+            fh.write("1" if recording else "0")
+    except OSError:
+        pass
+
+
+def _write_race_event(event_type):
+    """Write a race event file so the GUI knows a race was saved/discarded."""
+    try:
+        event_path = os.path.join(RACES_DIR, ".race_event")
+        with open(event_path, "w", encoding="utf-8") as fh:
+            fh.write(event_type)
+    except OSError:
+        pass
 
 
 def end_race(now_mono, timestamp_str):
     """Finish the current race and save the telemetry data."""
-    global race_in_progress, race_buffer, race_car_name, race_car_id
+    global race_in_progress, race_buffer, race_car_name, race_car_id, race_packet_count
     race_in_progress = False
+    race_packet_count = 0
+    _write_tracker_status(False)
     duration = now_mono - race_start_time_mono
     if duration < RACE_MIN_DURATION or len(race_buffer) < 10:
         print(f"\n [🏁] Race ended ({duration:.1f}s, {len(race_buffer)} samples) — too short to analyze (need {RACE_MIN_DURATION}s min).")
         race_buffer = []
+        _write_race_event("discarded")
         return
     save_race(race_buffer, race_car_name, race_car_id, race_start_timestamp, timestamp_str, duration)
+    _write_race_event("saved")
     race_buffer = []
 
 
@@ -445,7 +470,7 @@ else:
                 now_str = datetime.now(timezone.utc).isoformat()
 
                 # --- Check for GUI signal files (~6x/sec during race, every packet when idle) ---
-                if race_packet_count % 10 == 0:
+                if not race_in_progress or race_packet_count % 10 == 0:
                     _check_signal_files()
 
                 # --- Auto race detection (only if not manually controlled) ---

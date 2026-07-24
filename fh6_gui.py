@@ -599,6 +599,8 @@ class FH6TrackerGUI(tk.Tk):
         self._last_races_refresh_time = 0.0
         self._last_methods_refresh_time = 0.0
         self._last_recs_refresh_time = 0.0
+        self._last_race_event_mtime = 0.0
+        self._last_tracker_status = None
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
@@ -1763,6 +1765,7 @@ class FH6TrackerGUI(tk.Tk):
         self.detect_credit_popup_change()
         self._update_ocr_confidence_indicator()
         self._check_tracker_health()
+        self._check_race_events()
         self._refresh_active_tab()
         if "session_credits_var" in self.vars:
             self.vars["session_credits_var"].set(format_credits(self.get_session_credits()))
@@ -4237,6 +4240,46 @@ class FH6TrackerGUI(tk.Tk):
         self.last_status = "Stopped"
         self.status_var.set("Status: Stopped")
         self._update_tracker_button()
+
+    def _check_race_events(self):
+        """Detect race start/save events from the tracker subprocess."""
+        # --- Check tracker recording status ---
+        status_path = os.path.join(RACES_DIR, ".tracker_status")
+        try:
+            if os.path.exists(status_path):
+                with open(status_path, "r", encoding="utf-8") as fh:
+                    status = fh.read().strip()
+                os.remove(status_path)
+                is_recording = status == "1"
+                if is_recording != self._recording:
+                    self._recording = is_recording
+                    if is_recording:
+                        self._record_btn.configure(text="Stop Recording")
+                        self._record_status_var.set("Recording... press Stop or F6 in-game to finish")
+                    else:
+                        self._record_btn.configure(text="Start Recording")
+                        self._record_status_var.set("  (or press F6)")
+        except (OSError, PermissionError):
+            pass
+
+        # --- Check for saved/discarded race events ---
+        event_path = os.path.join(RACES_DIR, ".race_event")
+        try:
+            if os.path.exists(event_path):
+                mtime = os.path.getmtime(event_path)
+                if mtime != self._last_race_event_mtime:
+                    self._last_race_event_mtime = mtime
+                    with open(event_path, "r", encoding="utf-8") as fh:
+                        content = fh.read().strip()
+                    os.remove(event_path)
+                    event_type = content if content else ""
+                    if event_type == "saved":
+                        self.refresh_races_panel()
+                        self.after(100, self._auto_select_latest_race)
+                    elif event_type == "discarded":
+                        self.show_notice("Race too short to analyze.")
+        except (OSError, PermissionError):
+            pass
 
     def _check_tracker_health(self):
         if not self.tracker_running:
