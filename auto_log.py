@@ -442,6 +442,21 @@ else:
                 car_id_str = str(car_ordinal)
                 is_race_on = parsed["is_race_on"]
 
+                now = time.monotonic()
+                now_str = datetime.now(timezone.utc).isoformat()
+
+                # --- Check for GUI signal files BEFORE the ordinal guard so
+                # the GUI can always start/stop recording, even in menus. ---
+                if not race_in_progress or race_packet_count % 10 == 0:
+                    _check_signal_files()
+
+                # --- Auto race detection (only if not manually controlled) ---
+                if not race_manual_override:
+                    if is_race_on and not race_in_progress:
+                        start_race(parsed, now, now_str)
+                    elif not is_race_on and race_in_progress:
+                        end_race(now, now_str)
+
                 if not car_lookup.is_real_ordinal(car_ordinal):
                     print(" Waiting for gameplay to start (In Menus/Loading)...       ", end="\r")
                     continue
@@ -465,20 +480,6 @@ else:
                             print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
                     else:
                         current_mapped_car_name = "Unknown Vehicle"
-
-                now = time.monotonic()
-                now_str = datetime.now(timezone.utc).isoformat()
-
-                # --- Check for GUI signal files (~6x/sec during race, every packet when idle) ---
-                if not race_in_progress or race_packet_count % 10 == 0:
-                    _check_signal_files()
-
-                # --- Auto race detection (only if not manually controlled) ---
-                if not race_manual_override:
-                    if is_race_on and not race_in_progress:
-                        start_race(parsed, now, now_str)
-                    elif not is_race_on and race_in_progress:
-                        end_race(now, now_str)
 
                 # --- Race telemetry capture ---
                 if race_in_progress:
