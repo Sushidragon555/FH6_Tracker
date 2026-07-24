@@ -481,7 +481,10 @@ else:
                 print(f" [LIVE] RPM: {int(current_rpm):<5} | Speed: {int(speed_mph):<3} MPH | Raw ID: {car_id_str:<10} | Name: {current_mapped_car_name:<30}{race_flag}", end="\r")
 
             except Exception as exc:
-                print(f" [⚠️] Telemetry loop error: {exc}")
+                try:
+                    print(f" [!] Telemetry loop error: {exc}")
+                except Exception:
+                    pass
 
     except KeyboardInterrupt:
         print("\n\nLogger stopped safely.")
