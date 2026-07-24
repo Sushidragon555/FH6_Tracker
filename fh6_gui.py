@@ -23,25 +23,7 @@ import car_lookup
 # LOGGING SETUP
 # =============================================================================
 
-APP_LOG_FILE = None  # Set after BASE_DIR is defined
 logger = logging.getLogger("fh6_tracker")
-try:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(APP_LOG_FILE, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-        force=True,
-    )
-except Exception:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-        force=True,
-    )
 from import_owned_cars import load_owned_cars_from_file, parse_owned_cars_text
 
 try:
@@ -95,6 +77,16 @@ METHOD_NAMES = [
 ]
 
 EXPORT_DIR = os.path.join(BASE_DIR, "exports")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(APP_LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+    force=True,
+)
 
 
 # =============================================================================
@@ -3766,7 +3758,130 @@ class FH6TrackerGUI(tk.Tk):
         self._on_close()
 
     def _open_feedback(self):
-        webbrowser.open("https://github.com/Sushidragon555/FH6_Tracker/issues/new")
+        dlg = tk.Toplevel(self)
+        dlg.title("Send Feedback")
+        dlg.geometry("620x520")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.grab_set()
+
+        inner = ttk.Frame(dlg, padding=14)
+        inner.pack(fill="both", expand=True)
+        inner.columnconfigure(1, weight=1)
+
+        ttk.Label(inner, text="Send Feedback or Report a Bug",
+                  font=("Segoe UI", 13, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        ttk.Label(inner, text="Type:").grid(row=1, column=0, sticky="w", pady=4)
+        fb_type = tk.StringVar(value="Bug Report")
+        ttk.Combobox(inner, textvariable=fb_type,
+                     values=["Bug Report", "Feedback / Suggestion",
+                             "Feature Request", "Other"],
+                     state="readonly", width=22).grid(
+            row=1, column=1, sticky="w", pady=4)
+
+        ttk.Label(inner, text="Your message:").grid(
+            row=2, column=0, sticky="nw", pady=4)
+        msg_frame = ttk.Frame(inner)
+        msg_frame.grid(row=2, column=1, sticky="nsew", pady=4)
+        msg_frame.columnconfigure(0, weight=1)
+        msg_frame.rowconfigure(0, weight=1)
+        inner.rowconfigure(2, weight=1)
+
+        msg_text = tk.Text(msg_frame, wrap="word", height=14, width=52)
+        msg_scroll = ttk.Scrollbar(msg_frame, orient="vertical",
+                                   command=msg_text.yview)
+        msg_text.configure(yscrollcommand=msg_scroll.set)
+        msg_text.grid(row=0, column=0, sticky="nsew")
+        msg_scroll.grid(row=0, column=1, sticky="ns")
+
+        ttk.Label(inner, text="Email (optional):").grid(
+            row=3, column=0, sticky="w", pady=4)
+        email_var = tk.StringVar()
+        ttk.Entry(inner, textvariable=email_var, width=38).grid(
+            row=3, column=1, sticky="w", pady=4)
+
+        status_var = tk.StringVar(value="")
+        status_label = ttk.Label(inner, textvariable=status_var,
+                                 foreground="#137333")
+        status_label.grid(row=5, column=0, columnspan=2, sticky="w",
+                          pady=(4, 0))
+
+        btn_frame = ttk.Frame(inner)
+        btn_frame.grid(row=6, column=0, columnspan=2, sticky="ew",
+                       pady=(10, 0))
+
+        def _collect_context():
+            parts = []
+            parts.append(f"Type: {fb_type.get()}")
+            parts.append(f"Email: {email_var.get() or '(not provided)'}")
+            parts.append(f"Python: {sys.version}")
+            parts.append(f"Platform: {sys.platform}")
+            parts.append(f"App dir: {BASE_DIR}")
+            for log_path, label in [
+                (APP_LOG_FILE, "app log"),
+                (os.path.join(BASE_DIR, "tracker.log"), "tracker log"),
+            ]:
+                try:
+                    if os.path.exists(log_path):
+                        with open(log_path, "r", encoding="utf-8",
+                                  errors="replace") as fh:
+                            tail = fh.readlines()[-40:]
+                        parts.append(f"\n--- {label} (last {len(tail)} lines) ---")
+                        parts.extend(tail)
+                except Exception:
+                    pass
+            return "\n".join(parts)
+
+        def _save_feedback():
+            body = msg_text.get("1.0", "end").strip()
+            if not body:
+                messagebox.showwarning("Empty message",
+                                       "Please type a message before sending.",
+                                       parent=dlg)
+                return
+
+            feedback_dir = os.path.join(BASE_DIR, "feedback")
+            os.makedirs(feedback_dir, exist_ok=True)
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            tag = fb_type.get().lower().replace(" ", "_").replace("/", "_")
+            filename = f"{ts}_{tag}.json"
+            filepath = os.path.join(feedback_dir, filename)
+
+            report = {
+                "type": fb_type.get(),
+                "message": body,
+                "email": email_var.get() or None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "context": _collect_context(),
+            }
+            _safe_write_json(filepath, report)
+            status_var.set(f"Saved: {filename}")
+
+            msg_text.delete("1.0", "end")
+            email_var.set("")
+
+        def _open_github():
+            body = msg_text.get("1.0", "end").strip() or "(no message)"
+            title = f"[{fb_type.get()}] "
+            import urllib.parse
+            params = urllib.parse.urlencode({
+                "title": title,
+                "body": body,
+                "labels": fb_type.get().split()[0].lower(),
+            })
+            url = (f"https://github.com/Sushidragon555/FH6_Tracker"
+                   f"/issues/new?{params}")
+            webbrowser.open(url)
+
+        ttk.Button(btn_frame, text="Submit on GitHub",
+                   command=_open_github).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_frame, text="Save Locally",
+                   command=_save_feedback).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_frame, text="Close",
+                   command=dlg.destroy).pack(side="right")
 
 
     # =====================================================================

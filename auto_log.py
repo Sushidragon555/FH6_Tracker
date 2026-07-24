@@ -45,6 +45,24 @@ _kernel32 = ctypes.windll.kernel32
 
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.wintypes.HWND, ctypes.c_uint, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
 
+
+class _WNDCLASS(ctypes.Structure):
+    """Win32 WNDCLASS structure (removed from ctypes.wintypes in Python 3.14)."""
+    _fields_ = [
+        ("style", ctypes.c_uint),
+        ("lpfnWndProc", WNDPROC),
+        ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int),
+        ("hInstance", ctypes.wintypes.HINSTANCE),
+        ("hIcon", ctypes.wintypes.HANDLE),
+        ("hCursor", ctypes.wintypes.HANDLE),
+        ("hbrBackground", ctypes.wintypes.HANDLE),
+        ("lpszMenuName", ctypes.wintypes.LPCWSTR),
+        ("lpszClassName", ctypes.wintypes.LPCWSTR),
+        ("hIconSm", ctypes.wintypes.HANDLE),
+    ]
+
+
 def _wndproc(hwnd, msg, wparam, lparam):
     if msg == WM_HOTKEY:
         if wparam == HOTKEY_ID_VOICE:
@@ -62,7 +80,7 @@ def _start_hotkey_listener():
     """Create a hidden message-only window and register F4/F6 hotkeys."""
     global _hotkey_hwnd
     className = "FH6TrackerHotkeys"
-    wc = ctypes.wintypes.WNDCLASS()
+    wc = _WNDCLASS()
     wc.lpfnWndProc = _pwndproc
     wc.lpszClassName = className
     wc.hInstance = _kernel32.GetModuleHandleW(None)
