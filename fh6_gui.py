@@ -4207,7 +4207,9 @@ class FH6TrackerGUI(tk.Tk):
 
         try:
             tracker_log = os.path.join(BASE_DIR, "tracker.log")
-            kwargs = {"cwd": BASE_DIR, "stdout": open(tracker_log, "w"), "stderr": subprocess.STDOUT}
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            kwargs = {"cwd": BASE_DIR, "stdout": open(tracker_log, "w", encoding="utf-8", errors="replace"), "stderr": subprocess.STDOUT, "env": env}
             if os.name == "nt":
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
             if getattr(sys, "frozen", False):
