@@ -154,14 +154,6 @@ Output will be in `dist/FH6_Tracker/`. Zip that folder and share it.
 
 ---
 
-## Running Tests
-
-```
-pytest
-```
-
----
-
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

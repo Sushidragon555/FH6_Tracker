@@ -28,7 +28,7 @@ DATA_FILES = [
     "Start Here.bat",
 ]
 
-EXTRA_DIRS = ["races", "tests"]
+EXTRA_DIRS = ["races"]
 
 
 def build():
