@@ -386,6 +386,7 @@ def _find_tesseract():
 def load_settings():
     settings = load_json_file(SETTINGS_FILE, {})
     return {
+        "setup_complete": settings.get("setup_complete", False),
         "auto_start_forza": settings.get("auto_start_forza", False),
         "launch_tracker_on_start": settings.get("launch_tracker_on_start", False),
         "theme": settings.get("theme", "light"),
@@ -604,9 +605,12 @@ class FH6TrackerGUI(tk.Tk):
         self.style = ttk.Style(self)
         self.create_widgets()
         self.apply_theme(self.settings.get("theme", "light"))
+        self._cleanup_old_races()
         self._run_startup_ocr_diagnostic()
         self.refresh_all()
         self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
+        if not self.settings.get("setup_complete", False):
+            self.after(500, self._show_setup_wizard)
         if self.settings.get("launch_tracker_on_start", False):
             self.start_tracker()
         self.after(2000, self._check_forza_auto_start)
@@ -686,7 +690,6 @@ class FH6TrackerGUI(tk.Tk):
 
         self.garage_tab = ttk.Frame(self.notebook)
         self.live_tab = ttk.Frame(self.notebook)
-        self.stats_tab = ttk.Frame(self.notebook)
         self.settings_tab = ttk.Frame(self.notebook)
         self.logs_tab = ttk.Frame(self.notebook)
         self.methods_tab = ttk.Frame(self.notebook)
@@ -696,7 +699,6 @@ class FH6TrackerGUI(tk.Tk):
         self.notebook.add(self.live_tab, text="Live Data")
         self.notebook.add(self.methods_tab, text="Methods")
         self.notebook.add(self.races_tab, text="Race Analysis")
-        self.notebook.add(self.stats_tab, text="Stats")
         self.notebook.add(self.recommendations_tab, text="Recommendations")
         self.notebook.add(self.settings_tab, text="Settings")
         self.notebook.add(self.logs_tab, text="Logs")
@@ -705,7 +707,6 @@ class FH6TrackerGUI(tk.Tk):
         self.build_live_tab()
         self.build_methods_tab()
         self.build_races_tab()
-        self.build_stats_tab()
         self.build_recommendations_tab()
         self.build_settings_tab()
         self.build_logs_tab()
@@ -722,7 +723,13 @@ class FH6TrackerGUI(tk.Tk):
         summary_frame.columnconfigure(0, weight=1)
 
         self.collection_summary_var = tk.StringVar(value="Loading...")
-        ttk.Label(summary_frame, textvariable=self.collection_summary_var).grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        ttk.Label(summary_frame, textvariable=self.collection_summary_var).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 2))
+
+        self.collection_progress_var = tk.DoubleVar(value=0.0)
+        ttk.Progressbar(summary_frame, variable=self.collection_progress_var, maximum=100).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 2))
+
+        self.collection_total_value_var = tk.StringVar(value="")
+        ttk.Label(summary_frame, textvariable=self.collection_total_value_var, foreground="#555555").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
 
         filter_frame = ttk.LabelFrame(self.garage_tab, text="Filters")
         filter_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -816,9 +823,6 @@ class FH6TrackerGUI(tk.Tk):
         info_frame.columnconfigure(1, weight=1)
 
         labels = [
-            ("RPM", "rpm_var"),
-            ("Speed", "speed_var"),
-            ("Car ID", "car_id_var"),
             ("Car Name", "car_name_var"),
             ("Credits Earned", "session_credits_var"),
             ("Session Time", "session_time_var"),
@@ -838,49 +842,35 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(controls_frame, text="Add Credits", command=self.add_session_credits).grid(row=0, column=2, padx=(0, 8))
         ttk.Button(controls_frame, text="Reset Session", command=self.reset_session).grid(row=0, column=3)
 
-        race_frame = ttk.Frame(self.live_tab)
-        race_frame.grid(row=2, column=0, sticky="w", padx=10, pady=(2, 4))
-        self._recording = False
-        self._record_btn = ttk.Button(race_frame, text="Start Recording", command=self._toggle_race_recording)
-        self._record_btn.grid(row=0, column=0, padx=(0, 8))
-        self._record_status_var = tk.StringVar(value="  (or press F6)")
-        ttk.Label(race_frame, textvariable=self._record_status_var, foreground="#555555").grid(row=0, column=1, sticky="w")
-
-        ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=3, column=0, sticky="w", padx=10, pady=(6, 0))
+        ttk.Label(self.live_tab, text="Use this when the game shows a credit reward such as a wheelspin or super wheelspin.").grid(row=2, column=0, sticky="w", padx=10, pady=(6, 0))
 
         self.detection_status_var = tk.StringVar(value="Start the tracker and drive a car in Forza to auto-detect it.")
         if pyautogui is None or pytesseract is None or ImageGrab is None:
-            ttk.Label(self.live_tab, text="Automatic credit tracking needs OCR packages — see Settings → Automatic Credit Tracking.").grid(row=4, column=0, sticky="w", padx=10, pady=(2, 0))
+            ttk.Label(self.live_tab, text="Automatic credit tracking needs OCR packages — see Settings → Automatic Credit Tracking.").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
         else:
-            ttk.Label(self.live_tab, text="Automatic credit tracking runs when enabled in Settings and Forza is open (a new session starts each time the game opens).").grid(row=4, column=0, sticky="w", padx=10, pady=(2, 0))
-            ttk.Label(self.live_tab, text="Press F4 and say the car name to save it to your owned list.").grid(row=5, column=0, sticky="w", padx=10, pady=(4, 0))
+            ttk.Label(self.live_tab, text="Automatic credit tracking runs when enabled in Settings and Forza is open (a new session starts each time the game opens).").grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
 
             detect_frame = ttk.LabelFrame(self.live_tab, text="Auto Garage Detection")
-            detect_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=(10, 0))
+            detect_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=(10, 0))
             detect_frame.columnconfigure(0, weight=1)
             ttk.Label(detect_frame, textvariable=self.detection_status_var, justify="left").grid(row=0, column=0, sticky="w", padx=8, pady=(6, 4))
             self.tag_detected_button = ttk.Button(detect_frame, text="Tag Detected Car", command=self.tag_detected_car)
             self.tag_detected_button.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 8))
 
             ocr_status_frame = ttk.LabelFrame(self.live_tab, text="Auto Credit Tracking Status")
-            ocr_status_frame.grid(row=7, column=0, sticky="ew", padx=10, pady=(10, 0))
+            ocr_status_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
             ocr_status_frame.columnconfigure(1, weight=1)
             self._live_ocr_status_var = tk.StringVar(value="OCR disabled — enable in Settings tab")
             ttk.Label(ocr_status_frame, textvariable=self._live_ocr_status_var, foreground="#555555").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 4))
             self._live_ocr_balance_var = tk.StringVar(value="")
             ttk.Label(ocr_status_frame, text="Last balance:").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
             ttk.Label(ocr_status_frame, textvariable=self._live_ocr_balance_var, font=("Consolas", 11, "bold")).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=(0, 4))
-            self._live_ocr_raw_var = tk.StringVar(value="")
-            ttk.Label(ocr_status_frame, text="Raw text:").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
-            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_raw_var, foreground="#888888").grid(row=2, column=1, sticky="w", padx=(4, 8), pady=(0, 6))
             self._live_popup_var = tk.StringVar(value="")
-            ttk.Label(ocr_status_frame, text="Last popup:").grid(row=3, column=0, sticky="w", padx=8, pady=(0, 6))
-            ttk.Label(ocr_status_frame, textvariable=self._live_popup_var, foreground="#888888").grid(row=3, column=1, sticky="w", padx=(4, 8), pady=(0, 6))
             self._live_ocr_diag_var = tk.StringVar(value="")
-            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_diag_var, foreground="#b06000").grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
+            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_diag_var, foreground="#b06000").grid(row=2, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
             diag_frame = ttk.Frame(ocr_status_frame)
-            diag_frame.grid(row=5, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
-            ttk.Button(diag_frame, text="Test OCR Now", command=self._run_ocr_diagnose).grid(row=0, column=0, padx=(0, 8))
+            diag_frame.grid(row=3, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
+            ttk.Button(diag_frame, text="Test OCR", command=self._run_ocr_diagnose).grid(row=0, column=0, padx=(0, 8))
             ttk.Button(diag_frame, text="Test Popup Scan", command=self._force_popup_scan).grid(row=0, column=1)
 
     # =========================================================================
@@ -959,6 +949,22 @@ class FH6TrackerGUI(tk.Tk):
         self.txn_summary_var = tk.StringVar(value="No transactions yet")
         ttk.Label(txn_frame, textvariable=self.txn_summary_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
+        history_frame = ttk.LabelFrame(self.methods_tab, text="Session Earnings History")
+        history_frame.grid(row=5, column=0, sticky="ew", padx=8, pady=(0, 8))
+        history_frame.columnconfigure(0, weight=1)
+        history_frame.rowconfigure(0, weight=1)
+        self.history_canvas = tk.Canvas(history_frame, bg="white", height=150)
+        self.history_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+
+        rate_frame = ttk.LabelFrame(self.methods_tab, text="Credit Rate (Live)")
+        rate_frame.grid(row=6, column=0, sticky="ew", padx=8, pady=(0, 8))
+        rate_frame.columnconfigure(0, weight=1)
+        rate_frame.rowconfigure(0, weight=1)
+        self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
+        self.rate_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        self.rate_stats_var = tk.StringVar(value="No rate data yet")
+        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+
     def toggle_method_tracking(self):
         if self._method_active:
             self._stop_method_tracking()
@@ -1028,13 +1034,27 @@ class FH6TrackerGUI(tk.Tk):
         return f"{h:02d}:{m:02d}:{s:02d}"
 
     def _load_methods_history(self):
-        return load_json_file(METHODS_FILE, {"sessions": []})
+        try:
+            mtime = os.path.getmtime(METHODS_FILE)
+        except OSError:
+            mtime = 0
+        if mtime == getattr(self, "_methods_history_mtime", 0) and hasattr(self, "_methods_history_cache"):
+            return self._methods_history_cache
+        data = load_json_file(METHODS_FILE, {"sessions": []})
+        self._methods_history_mtime = mtime
+        self._methods_history_cache = data
+        return data
 
     def _save_method_entry(self, entry):
         history = self._load_methods_history()
         history["sessions"].append(entry)
         history["sessions"] = history["sessions"][-200:]
         _safe_write_json(METHODS_FILE, history)
+        try:
+            self._methods_history_mtime = os.path.getmtime(METHODS_FILE)
+        except OSError:
+            self._methods_history_mtime = 0
+        self._methods_history_cache = history
 
     def refresh_methods_panel(self):
         history = self._load_methods_history()
@@ -1080,6 +1100,8 @@ class FH6TrackerGUI(tk.Tk):
         total_gains = sum(t["amount"] for t in txns if t.get("amount", 0) > 0)
         count = len(txns)
         self.txn_summary_var.set(f"{count} transactions total | Total gains: +{format_credits(total_gains)}")
+        self._draw_credit_history()
+        self._draw_credit_rate_chart()
 
     def build_races_tab(self):
         self.races_tab.columnconfigure(1, weight=1)
@@ -1101,16 +1123,37 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Button(left, text="Refresh List", command=self.refresh_races_panel).pack(fill="x", padx=4, pady=(4, 0))
 
+        record_frame = ttk.LabelFrame(left, text="Race Recording")
+        record_frame.pack(fill="x", padx=4, pady=(8, 0))
+        self._recording = False
+        self._record_btn = ttk.Button(record_frame, text="Start Recording", command=self._toggle_race_recording)
+        self._record_btn.pack(fill="x", padx=4, pady=(4, 2))
+        self._record_status_var = tk.StringVar(value="  (or press F6)")
+        ttk.Label(record_frame, textvariable=self._record_status_var, foreground="#555555").pack(padx=4, pady=(0, 4))
+
         right = ttk.Frame(self.races_tab)
         right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        right.rowconfigure(3, weight=1)
 
         self._race_info_var = tk.StringVar(value="Select a race from the list to analyze it.")
-        ttk.Label(right, textvariable=self._race_info_var, font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        ttk.Label(right, textvariable=self._race_info_var, font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", pady=(0, 4))
+
+        grade_frame = ttk.Frame(right)
+        grade_frame.grid(row=1, column=0, sticky="ew", pady=(0, 2))
+        self._race_grade_var = tk.StringVar(value="")
+        self._race_grade_label = ttk.Label(grade_frame, textvariable=self._race_grade_var, font=("Segoe UI", 18, "bold"))
+        self._race_grade_label.pack(side="left")
+        self._race_summary_var = tk.StringVar(value="")
+        ttk.Label(grade_frame, textvariable=self._race_summary_var, font=("Segoe UI", 9), wraplength=500, justify="left").pack(side="left", padx=(12, 0))
+
+        breakdown_frame = ttk.LabelFrame(right, text="Performance Breakdown")
+        breakdown_frame.grid(row=2, column=0, sticky="ew", pady=(0, 4))
+        self._race_breakdown_var = tk.StringVar(value="")
+        ttk.Label(breakdown_frame, textvariable=self._race_breakdown_var, justify="left", font=("Consolas", 9), wraplength=600).grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
         chart_frame = ttk.Frame(right)
-        chart_frame.grid(row=1, column=0, sticky="nsew")
+        chart_frame.grid(row=3, column=0, sticky="nsew")
         chart_frame.columnconfigure(0, weight=1)
         chart_frame.rowconfigure(0, weight=1)
         chart_frame.rowconfigure(1, weight=1)
@@ -1125,26 +1168,50 @@ class FH6TrackerGUI(tk.Tk):
 
         # Re-render charts when the frame is resized (e.g. window resize)
         self._chart_resize_after_id = None
+        self._last_chart_size = (0, 0)
         def _on_chart_frame_configure(_event):
             if self._selected_race_data:
+                new_size = (chart_frame.winfo_width(), chart_frame.winfo_height())
+                if new_size == self._last_chart_size:
+                    return
+                self._last_chart_size = new_size
                 if self._chart_resize_after_id:
                     self.after_cancel(self._chart_resize_after_id)
                 self._chart_resize_after_id = self.after(150, lambda: self._render_race_analysis(self._selected_race_data))
         chart_frame.bind("<Configure>", _on_chart_frame_configure)
 
-        stats_frame = ttk.LabelFrame(right, text="Race Summary")
-        stats_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        stats_frame = ttk.LabelFrame(right, text="Race Stats")
+        stats_frame.grid(row=4, column=0, sticky="ew", pady=(4, 0))
         stats_frame.columnconfigure(1, weight=1)
         self._race_stats_var = tk.StringVar(value="")
         ttk.Label(stats_frame, textvariable=self._race_stats_var, justify="left", wraplength=600).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=6)
 
-        tips_frame = ttk.LabelFrame(right, text="Driving Tips")
-        tips_frame.grid(row=3, column=0, sticky="ew", pady=(6, 0))
+        tips_frame = ttk.LabelFrame(right, text="Driving Tips (sorted by impact)")
+        tips_frame.grid(row=5, column=0, sticky="ew", pady=(4, 0))
+        tips_frame.columnconfigure(0, weight=1)
         self._race_tips_var = tk.StringVar(value="")
-        ttk.Label(tips_frame, textvariable=self._race_tips_var, justify="left", wraplength=600, foreground="#1f6feb").grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        ttk.Label(tips_frame, textvariable=self._race_tips_var, justify="left", wraplength=600, foreground="#1f6feb", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
         self._selected_race_data = None
         self._race_needs_rerender = False
+
+    def _cleanup_old_races(self):
+        """Delete race files older than 7 days to keep storage low."""
+        cutoff = time.time() - (7 * 24 * 3600)
+        os.makedirs(RACES_DIR, exist_ok=True)
+        deleted = 0
+        for fname in os.listdir(RACES_DIR):
+            if not fname.endswith(".json"):
+                continue
+            fpath = os.path.join(RACES_DIR, fname)
+            try:
+                if os.path.getmtime(fpath) < cutoff:
+                    os.remove(fpath)
+                    deleted += 1
+            except OSError:
+                pass
+        if deleted:
+            logger.info("Cleaned up %d old race file(s) (>7 days)", deleted)
 
     def refresh_races_panel(self):
         for item in self.race_list_tree.get_children():
@@ -1268,10 +1335,206 @@ class FH6TrackerGUI(tk.Tk):
             title="Steering",
         )
 
+    @staticmethod
+    def _race_rating(value, good_threshold, bad_threshold, invert=False):
+        """Return (label, color) for a metric. If invert=True, lower is better."""
+        if invert:
+            if value <= good_threshold:
+                return "great", "#137333"
+            if value >= bad_threshold:
+                return "poor", "#c5221f"
+            return "ok", "#b06000"
+        if value >= good_threshold:
+            return "great", "#137333"
+        if value <= bad_threshold:
+            return "poor", "#c5221f"
+        return "ok", "#b06000"
+
+    @staticmethod
+    def _compute_race_grade(samples):
+        """Score the race 0-100 and return a letter grade."""
+        if len(samples) < 10:
+            return 50, "C"
+        score = 0
+        speeds = [s.get("spd", 0) for s in samples]
+        throttles = [s.get("thr", 0) for s in samples]
+        brakes = [s.get("brk", 0) for s in samples]
+        steers = [s.get("str", 0) for s in samples]
+
+        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        brake_overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
+        max_speed = max(speeds)
+
+        if throttle_pct >= 65:
+            score += 25
+        elif throttle_pct >= 45:
+            score += 15
+        elif throttle_pct >= 30:
+            score += 8
+
+        if 8 <= braking_pct <= 20:
+            score += 20
+        elif braking_pct < 8:
+            score += 12
+        elif braking_pct <= 30:
+            score += 5
+
+        smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+        if smoothness < 0.04:
+            score += 20
+        elif smoothness < 0.08:
+            score += 12
+        elif smoothness < 0.12:
+            score += 5
+
+        if max_speed >= 180:
+            score += 15
+        elif max_speed >= 140:
+            score += 10
+        elif max_speed >= 100:
+            score += 5
+
+        if brake_overlap < 2:
+            score += 10
+        elif brake_overlap < 5:
+            score += 5
+        elif brake_overlap > 10:
+            score -= 10
+
+        if brake_overlap > 10:
+            score -= 5
+
+        if braking_pct > 35:
+            score -= 10
+        if throttle_pct < 20 and max_speed > 60:
+            score -= 5
+
+        score = max(0, min(100, score))
+        if score >= 90:
+            grade = "A+"
+        elif score >= 80:
+            grade = "A"
+        elif score >= 70:
+            grade = "B"
+        elif score >= 55:
+            grade = "C"
+        elif score >= 40:
+            grade = "D"
+        else:
+            grade = "F"
+        return score, grade
+
+    @staticmethod
+    def _compute_shift_analysis(samples):
+        """Analyze shift points from gear + RPM data."""
+        if len(samples) < 5:
+            return None
+        shifts = []
+        for i in range(1, len(samples)):
+            prev_g = samples[i - 1].get("gear", 0)
+            cur_g = samples[i].get("gear", 0)
+            if cur_g > prev_g and cur_g > 0:
+                shifts.append({"gear": cur_g, "rpm": samples[i].get("rpm", 0), "speed": samples[i].get("spd", 0)})
+        if not shifts:
+            return None
+        rpms = [s.get("rpm", 0) for s in samples]
+        max_rpm = max(rpms) if rpms else 8000
+        avg_shift_rpm = sum(s["rpm"] for s in shifts) / len(shifts)
+        under_shifts = sum(1 for s in shifts if s["rpm"] < 5500)
+        over_shifts = sum(1 for s in shifts if s["rpm"] > max_rpm * 0.95)
+        return {
+            "count": len(shifts),
+            "avg_rpm": avg_shift_rpm,
+            "avg_speed": sum(s["speed"] for s in shifts) / len(shifts),
+            "under_shifts": under_shifts,
+            "over_shifts": over_shifts,
+            "max_rpm_observed": max_rpm,
+        }
+
+    def _compute_race_summary(self, samples, duration, grade_score, grade_letter):
+        """Build a 1-2 sentence plain-English summary of the race."""
+        if len(samples) < 10:
+            return "Not enough data recorded for a meaningful analysis."
+        speeds = [s.get("spd", 0) for s in samples]
+        throttles = [s.get("thr", 0) for s in samples]
+        brakes = [s.get("brk", 0) for s in samples]
+        max_speed = max(speeds)
+        avg_speed = sum(speeds) / len(speeds)
+        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+
+        strengths = []
+        weaknesses = []
+        if throttle_pct >= 65:
+            strengths.append("great throttle commitment")
+        elif throttle_pct <= 30:
+            weaknesses.append("you're not on the power enough")
+        if 8 <= braking_pct <= 18:
+            strengths.append("efficient braking")
+        elif braking_pct > 30:
+            weaknesses.append("too much time spent braking")
+        smoothness = sum(abs(speeds[i] - speeds[i - 1]) for i in range(1, len(speeds))) / max(len(speeds), 1)
+        if smoothness < 3:
+            strengths.append("smooth speed control")
+        elif smoothness > 8:
+            weaknesses.append("jerky speed changes")
+
+        parts = []
+        if strengths:
+            parts.append(f"Your strengths: {', '.join(strengths)}.")
+        if weaknesses:
+            parts.append(f"Focus on improving: {', '.join(weaknesses)}.")
+        if not parts:
+            parts.append("Solid all-around driving. Focus on consistency to keep improving.")
+        if grade_score >= 80:
+            parts.insert(0, f"Excellent race! You scored {grade_score}/100.")
+        elif grade_score >= 60:
+            parts.insert(0, f"Decent race. Score: {grade_score}/100 — room to improve.")
+        else:
+            parts.insert(0, f"Tough race. Score: {grade_score}/100 — the tips below will help a lot.")
+        return " ".join(parts)
+
+    def _generate_performance_breakdown(self, samples, duration):
+        """Build a bullet-point performance breakdown with color ratings."""
+        if len(samples) < 10:
+            return [("Not enough data for a detailed breakdown.", "#888888")]
+        speeds = [s.get("spd", 0) for s in samples]
+        throttles = [s.get("thr", 0) for s in samples]
+        brakes = [s.get("brk", 0) for s in samples]
+        steers = [s.get("str", 0) for s in samples]
+        max_speed = max(speeds)
+        avg_speed = sum(speeds) / len(speeds)
+        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        brake_overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
+        smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+
+        lines = []
+        t_label, t_color = self._race_rating(throttle_pct, 65, 30)
+        lines.append((f"Throttle: {throttle_pct:.0f}% of the race on power  —  {t_label}", t_color))
+        b_label, b_color = self._race_rating(braking_pct, 18, 30, invert=True)
+        lines.append((f"Braking: {braking_pct:.0f}% of the race on brakes  —  {b_label}", b_color))
+        o_label, o_color = self._race_rating(brake_overlap, 2, 8, invert=True)
+        lines.append((f"Pedal overlap: {brake_overlap:.1f}% of the time on both pedals  —  {o_label}", o_color))
+        s_label, s_color = self._race_rating(smoothness, 0.04, 0.10, invert=True)
+        lines.append((f"Steering smoothness: {smoothness:.3f} avg change  —  {s_label}", s_color))
+
+        shift_data = self._compute_shift_analysis(samples)
+        if shift_data:
+            sh_label, sh_color = self._race_rating(shift_data["under_shifts"], 0, 3)
+            lines.append((f"Shifts: {shift_data['count']} upshifts, avg at {shift_data['avg_rpm']:.0f} RPM  —  {sh_label}", sh_color))
+
+        return lines
+
     def _compute_race_stats(self, samples, duration):
         if not samples:
             self._race_stats_var.set("No data")
+            self._race_grade_var.set("")
+            self._race_summary_var.set("")
+            self._race_breakdown_var.set("")
             return
+
         speeds = [s.get("spd", 0) for s in samples]
         throttles = [s.get("thr", 0) for s in samples]
         brakes = [s.get("brk", 0) for s in samples]
@@ -1279,110 +1542,168 @@ class FH6TrackerGUI(tk.Tk):
         hpms = [s.get("pwr", 0) / 746 for s in samples]
         avg_speed = sum(speeds) / len(speeds)
         max_speed = max(speeds)
-        avg_throttle = sum(throttles) / len(throttles) * 100
-        avg_brake = sum(brakes) / len(brakes) * 100
-        pct_braking = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
-        pct_throttle = sum(1 for t in throttles if t > 0.1) / len(throttles) * 100
         max_hp = max(hpms) if hpms else 0
+        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
         gear_usage = {}
         for g in gears:
             if g > 0:
                 gear_usage[g] = gear_usage.get(g, 0) + 1
         top_gear = max(gear_usage, key=gear_usage.get) if gear_usage else 0
+
+        grade_score, grade_letter = self._compute_race_grade(samples)
+
+        grade_colors = {"A+": "#137333", "A": "#137333", "B": "#b06000", "C": "#b06000", "D": "#c5221f", "F": "#c5221f"}
+        self._race_grade_var.set(f"Grade: {grade_letter}")
+        self._race_grade_label.configure(foreground=grade_colors.get(grade_letter, "#888888"))
+
+        summary = self._compute_race_summary(samples, duration, grade_score, grade_letter)
+        self._race_summary_var.set(summary)
+
+        breakdown_lines = self._generate_performance_breakdown(samples, duration)
+        breakdown_text = "\n".join(f"  {line}" for line, _ in breakdown_lines)
+        self._race_breakdown_var.set(breakdown_text)
+
+        mins = int(duration) // 60
+        secs = int(duration) % 60
         stats = (
-            f"Avg Speed: {avg_speed:.0f} MPH  |  Max Speed: {max_speed:.0f} MPH  |  "
-            f"Max Power: {max_hp:.0f} HP\n"
-            f"Throttle Active: {pct_throttle:.0f}%  |  Braking: {pct_braking:.0f}%  |  "
-            f"Avg Throttle: {avg_throttle:.0f}%  |  Avg Brake: {avg_brake:.0f}%\n"
-            f"Most Used Gear: {top_gear}  |  "
-            f"Gears Used: {', '.join(str(g) for g in sorted(gear_usage.keys()))}"
+            f"Top Speed: {max_speed:.0f} MPH   |   Avg Speed: {avg_speed:.0f} MPH   |   "
+            f"Peak Power: {max_hp:.0f} HP\n"
+            f"Throttle: {throttle_pct:.0f}%   |   Braking: {braking_pct:.0f}%   |   "
+            f"Top Gear: {top_gear}   |   Gears Used: {', '.join(str(g) for g in sorted(gear_usage.keys()))}"
         )
         self._race_stats_var.set(stats)
 
     def _generate_driving_tips(self, samples, duration):
         if not samples or len(samples) < 20:
-            self._race_tips_var.set("Not enough data for tips (need a longer race).")
+            self._race_tips_var.set("Not enough data for tips — need a longer race for meaningful analysis.")
             return
+
         tips = []
         brakes = [s.get("brk", 0) for s in samples]
         throttles = [s.get("thr", 0) for s in samples]
         steers = [s.get("str", 0) for s in samples]
         speeds = [s.get("spd", 0) for s in samples]
         gears = [s.get("gear", 0) for s in samples]
-        rpm_list = [s.get("rpm", 0) for s in samples]
-        pct_braking = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
-        if pct_braking > 25:
-            tips.append(f"You're braking {pct_braking:.0f}% of the time — try braking later and harder instead of early and gentle.")
-        elif pct_braking < 5 and max(speeds) > 80:
-            tips.append("Very little braking detected — you might be coasting through corners instead of braking firmly and turning in.")
-        brake_transitions = sum(1 for i in range(1, len(brakes)) if brakes[i] > 0.3 and brakes[i - 1] < 0.1)
-        if brake_transitions > 20 and duration > 10:
-            tips.append(f"Frequent braking ({brake_transitions} times) — try to brake once per corner instead of pumping the pedal.")
-        pct_throttle = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
-        if pct_throttle < 30 and max(speeds) > 50:
-            tips.append("Low throttle usage — you may be over-slowing for corners. Trust the car's grip and get on the power earlier.")
-        steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
-        if steer_smoothness > 0.08:
-            tips.append(f"Steering is very jerky (avg change: {steer_smoothness:.3f}) — smooth inputs are faster. Try smaller, more deliberate steering movements.")
-        max_rpm = max(rpm_list) if rpm_list else 0
-        high_rpm_pct = sum(1 for r in rpm_list if r > 6000) / max(len(rpm_list), 1) * 100
-        if high_rpm_pct > 50:
-            tips.append(f"Spending {high_rpm_pct:.0f}% of time above 6000 RPM — consider upshifting earlier for better acceleration.")
+        rpms = [s.get("rpm", 0) for s in samples]
+        max_speed = max(speeds)
         avg_speed = sum(speeds) / len(speeds)
-        if avg_speed < 40:
-            tips.append(f"Average speed is only {avg_speed:.0f} MPH — you might be over-braking or taking lines that are too tight.")
-        if not tips:
-            tips.append("Your driving looks solid! Focus on consistency lap-to-lap to keep improving.")
-        self._race_tips_var.set("\n".join(f"• {t}" for t in tips))
 
-    def build_stats_tab(self):
-        self.stats_tab.columnconfigure(0, weight=1)
-        self.stats_tab.rowconfigure(2, weight=1)
+        # --- Braking analysis (biggest time-loss for most players) ---
+        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        if braking_pct > 30:
+            tips.append((
+                1,
+                f"You're braking for {braking_pct:.0f}% of the race — that's a lot of lost time.",
+                "Focus on braking LATER and HARDER in a straight line, then release the brake as you turn in. "
+                "Most corners in FH6 can be taken with one firm brake input, not multiple taps."
+            ))
+        elif braking_pct > 20:
+            tips.append((
+                2,
+                f"Braking takes up {braking_pct:.0f}% of the race — slightly high.",
+                "Try braking a half-second later than you think you need to. "
+                "Trust the car's grip and brake firmly once, then get back on the power early."
+            ))
+        elif braking_pct < 5 and max_speed > 80:
+            tips.append((
+                2,
+                "Almost no braking detected — you might be coasting through corners.",
+                "Coasting is slower than braking late and getting on the power early. "
+                "Try braking firmly right before the corner, then accelerating through the exit."
+            ))
 
-        summary_frame = ttk.LabelFrame(self.stats_tab, text="Collection Progress")
-        summary_frame.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
-        summary_frame.columnconfigure(0, weight=1)
+        # --- Brake overlap (wasted energy) ---
+        overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
+        if overlap > 5:
+            tips.append((
+                1,
+                f"You're pressing brake and throttle at the same time {overlap:.0f}% of the race.",
+                "Brake overlap kills both speed and fuel. Lift off the throttle fully before braking, "
+                "then get back on the power only after you've released the brake."
+            ))
 
-        self.stats_summary_var = tk.StringVar(value="Loading...")
-        ttk.Label(summary_frame, textvariable=self.stats_summary_var).grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        # --- Brake pumping ---
+        brake_transitions = sum(1 for i in range(1, len(brakes)) if brakes[i] > 0.3 and brakes[i - 1] < 0.1)
+        if brake_transitions > 15 and duration > 10:
+            tips.append((
+                2,
+                f"You pumped the brakes {brake_transitions} times — that's frequent.",
+                "Pumping brakes unsettles the car and extends braking distance. "
+                "Brake once, firmly, then release. One smooth input per corner is faster."
+            ))
 
-        self.stats_progress_var = tk.DoubleVar(value=0.0)
-        self.stats_progress_bar = ttk.Progressbar(summary_frame, variable=self.stats_progress_var, maximum=100)
-        self.stats_progress_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        # --- Throttle commitment ---
+        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+        if throttle_pct < 30 and max_speed > 50:
+            tips.append((
+                1,
+                f"Throttle is only at full for {throttle_pct:.0f}% of the race — you're leaving speed on the table.",
+                "In FH6, most cars have enough grip to be at full throttle for 55-70% of a race. "
+                "After each corner, commit to the throttle decisively instead of feathering it."
+            ))
+        elif throttle_pct < 45 and max_speed > 50:
+            tips.append((
+                3,
+                f"Throttle commitment at {throttle_pct:.0f}% — there's room to be more aggressive.",
+                "Trust the car's traction. Once you've passed the apex, progressively but firmly "
+                "push the throttle to 100% rather than holding at 50-70%."
+            ))
 
-        details_frame = ttk.LabelFrame(self.stats_tab, text="Live Summary")
-        details_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
-        details_frame.columnconfigure(1, weight=1)
+        # --- Steering smoothness ---
+        steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+        if steer_smoothness > 0.10:
+            tips.append((
+                2,
+                f"Steering is very jerky (avg change: {steer_smoothness:.3f}).",
+                "Smooth steering is fast steering. Make one clean turn-in motion per corner "
+                "instead of sawing at the wheel. Small, deliberate inputs keep the car balanced."
+            ))
+        elif steer_smoothness > 0.06:
+            tips.append((
+                3,
+                f"Steering could be smoother (avg change: {steer_smoothness:.3f}).",
+                "Try to visualize a smooth arc through each corner. "
+                "Turn the wheel once to the angle you need, hold it, then unwind on exit."
+            ))
 
-        self.stats_last_seen_var = tk.StringVar(value="No recent telemetry")
-        self.stats_session_var = tk.StringVar(value="Session credits: 0")
-        self.stats_window_var = tk.StringVar(value="Waiting for Forza window...")
-        self.stats_total_value_var = tk.StringVar(value="Collection value: -")
-        labels = [
-            ("Last seen car", self.stats_last_seen_var),
-            ("Session credits", self.stats_session_var),
-            ("Forza window", self.stats_window_var),
-            ("Total collection value", self.stats_total_value_var),
-        ]
-        for idx, (text, var) in enumerate(labels):
-            ttk.Label(details_frame, text=f"{text}:").grid(row=idx, column=0, sticky="w", padx=8, pady=6)
-            ttk.Label(details_frame, textvariable=var).grid(row=idx, column=1, sticky="w", padx=8, pady=6)
+        # --- Shift analysis ---
+        shift_data = self._compute_shift_analysis(samples)
+        if shift_data:
+            if shift_data["under_shifts"] >= 3:
+                tips.append((
+                    2,
+                    f"You short-shifted {shift_data['under_shifts']} times (shifted below 5500 RPM).",
+                    f"Your shifts averaged {shift_data['avg_rpm']:.0f} RPM. "
+                    "Hold each gear longer — shift around 6500-7000 RPM for most cars to stay in the power band."
+                ))
+            if shift_data["over_shifts"] >= 2:
+                tips.append((
+                    3,
+                    f"You hit the rev limiter {shift_data['over_shifts']} times.",
+                    "Bouncing off the limiter loses power. Shift just before the redline "
+                    "for a small loss to keep the engine in its peak power range."
+                ))
 
-        history_frame = ttk.LabelFrame(self.stats_tab, text="Session Earnings History")
-        history_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        history_frame.columnconfigure(0, weight=1)
-        history_frame.rowconfigure(0, weight=1)
-        self.history_canvas = tk.Canvas(history_frame, bg="white", height=150)
-        self.history_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        # --- Speed analysis ---
+        if avg_speed < 50 and max_speed > 80:
+            tips.append((
+                2,
+                f"Average speed is only {avg_speed:.0f} MPH despite hitting {max_speed:.0f} MPH.",
+                "Big gap between avg and top speed suggests you're over-slowing for corners. "
+                "Focus on carrying more speed through turns rather than stopping and accelerating."
+            ))
 
-        rate_frame = ttk.LabelFrame(self.stats_tab, text="Credit Rate (Live)")
-        rate_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
-        rate_frame.columnconfigure(0, weight=1)
-        rate_frame.rowconfigure(0, weight=1)
-        self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
-        self.rate_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-        self.rate_stats_var = tk.StringVar(value="No rate data yet")
-        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        # --- Sort by priority (1=highest) and show top 5 ---
+        tips.sort(key=lambda x: x[0])
+        top_tips = tips[:5]
+        if not top_tips:
+            top_tips = [(0, "Your driving looks solid!", "Focus on consistency — lap after lap, try to repeat your best corners. Small refinements make the difference.")]
+
+        output = []
+        for _, headline, advice in top_tips:
+            output.append(f"{headline}\n     →  {advice}")
+        self._race_tips_var.set("\n\n".join(output))
 
     def build_settings_tab(self):
         self.settings_tab.columnconfigure(0, weight=1)
@@ -1462,8 +1783,6 @@ class FH6TrackerGUI(tk.Tk):
             foreground="#555555",
         ).grid(row=7, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
 
-        ttk.Button(settings_frame, text="Apply Settings", command=self.save_all_settings).grid(row=8, column=0, sticky="w", padx=8, pady=(6, 8))
-
         ocr_frame = ttk.LabelFrame(settings_inner, text="Automatic Credit Tracking (OCR)")
         ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
         ttk.Checkbutton(ocr_frame, text="Auto-track credits by reading the on-screen balance while Forza is open", variable=self.credit_ocr_var).grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=6)
@@ -1510,24 +1829,12 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(ocr_frame, text="Tesseract path:").grid(row=7, column=0, sticky="w", padx=8)
         ttk.Entry(ocr_frame, textvariable=self.tesseract_path_var).grid(row=7, column=1, columnspan=4, sticky="ew", padx=(2, 8))
         ocr_frame.columnconfigure(1, weight=1)
-        ttk.Button(ocr_frame, text="Apply Settings", command=self.save_all_settings).grid(row=7, column=5, sticky="w", padx=8)
 
         self.ocr_debug_var = tk.BooleanVar(value=self.settings.get("ocr_debug_logging", False))
         ttk.Checkbutton(ocr_frame, text="Debug logging (saves images & OCR text to ocr_debug/)", variable=self.ocr_debug_var, command=self._on_debug_toggle).grid(row=8, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 0))
 
-        self._ocr_confidence_color = tk.StringVar(value="gray")
-        self._ocr_confidence_text = tk.StringVar(value="No scans yet")
-        conf_frame = ttk.Frame(ocr_frame)
-        conf_frame.grid(row=9, column=0, columnspan=7, sticky="w", padx=8, pady=(0, 4))
-        self._conf_indicator_label = ttk.Label(conf_frame, text="\u25cf", font=("Segoe UI", 14))
-        self._conf_indicator_label.pack(side="left", padx=(0, 6))
-        ttk.Label(conf_frame, textvariable=self._ocr_confidence_text).pack(side="left")
-        ttk.Label(conf_frame, text="  |  Last raw:").pack(side="left", padx=(12, 4))
-        self._ocr_raw_text_var = tk.StringVar(value="")
-        ttk.Label(conf_frame, textvariable=self._ocr_raw_text_var, foreground="#888888").pack(side="left")
-
         test_popup_frame = ttk.Frame(ocr_frame)
-        test_popup_frame.grid(row=10, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 8))
+        test_popup_frame.grid(row=9, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 8))
         ttk.Button(test_popup_frame, text="Test Popup Detection", command=self._test_popup_scan).pack(side="left", padx=(0, 8))
         self._popup_test_var = tk.StringVar(value="")
         ttk.Label(test_popup_frame, textvariable=self._popup_test_var, foreground="#555555").pack(side="left")
@@ -1659,8 +1966,13 @@ class FH6TrackerGUI(tk.Tk):
         }
         self._credit_transactions["transactions"].append(entry)
         self._credit_transactions["transactions"] = self._credit_transactions["transactions"][-500:]
-        self._save_credit_transactions()
+        # Buffer writes: only flush to disk every 10 seconds to avoid I/O on every credit change.
         now = time.monotonic()
+        if now - getattr(self, "_last_tx_save_time", 0) >= 10.0:
+            self._save_credit_transactions()
+            self._last_tx_save_time = now
+        else:
+            self._pending_tx_flush = True
         self._credit_rate_points.append((now, balance_after))
         self._credit_rate_points = self._credit_rate_points[-200:]
 
@@ -1756,8 +2068,6 @@ class FH6TrackerGUI(tk.Tk):
         if now - self._forza_process_check_time >= check_interval:
             self._forza_running_cache = has_running_forza_process() or has_running_forza_window()
             self._forza_process_check_time = now
-        else:
-            self._forza_running_cache = has_running_forza_window()
         # Pre-cache the Forza window rect once per cycle so all downstream OCR
         # region adjustments reuse the same EnumWindows result.
         self._get_forza_window_rect_cached()
@@ -1766,10 +2076,20 @@ class FH6TrackerGUI(tk.Tk):
         self._update_ocr_confidence_indicator()
         self._check_tracker_health()
         self._check_race_events()
+        self._check_cache_reload()
+        # Flush any buffered credit transaction writes that were deferred.
+        if getattr(self, "_pending_tx_flush", False) and now - getattr(self, "_last_tx_save_time", 0) >= 10.0:
+            self._save_credit_transactions()
+            self._last_tx_save_time = now
+            self._pending_tx_flush = False
+        if getattr(self, "_pending_session_flush", False) and now - getattr(self, "_last_session_save_time", 0) >= 5.0:
+            self.save_session_state()
+            self._last_session_save_time = now
+            self._pending_session_flush = False
         self._refresh_active_tab()
         if "session_credits_var" in self.vars:
             self.vars["session_credits_var"].set(format_credits(self.get_session_credits()))
-        if self.credit_ocr_var.get():
+        if self.credit_ocr_var.get() and hasattr(self, "_live_ocr_status_var"):
             region = self.get_credit_region()
             popup_off = self.disable_popup_scan_var.get()
             if not self._forza_running_cache:
@@ -1784,14 +2104,11 @@ class FH6TrackerGUI(tk.Tk):
                 self._live_ocr_status_var.set("OCR active — balance region only (popup scan disabled)")
             bal = self.last_credit_balance or self.get_session_credits()
             self._live_ocr_balance_var.set(format_credits(bal))
-            raw = self._last_ocr_raw_text
-            self._live_ocr_raw_var.set((raw or "")[:80] or "(no scan yet)")
         self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
         self.update_forza_session_state(running_now=self._forza_running_cache)
         self._collection_dirty = True
-        self.refresh_collection()
         self._refresh_active_tab()
 
     def _refresh_active_tab(self):
@@ -1799,11 +2116,10 @@ class FH6TrackerGUI(tk.Tk):
         tab_map = {
             self.garage_tab: self.refresh_collection,
             self.live_tab: self.refresh_live_data,
-            self.stats_tab: self.refresh_stats_panel,
-            self.logs_tab: self.refresh_logs_panel,
         }
-        # Heavy tabs are throttled to refresh every 10 seconds max.
+        # Heavy tabs are throttled to avoid expensive redraws every cycle.
         throttled_tabs = {
+            self.logs_tab: (self.refresh_logs_panel, "_last_logs_refresh_time", 5.0),
             self.methods_tab: (self.refresh_methods_panel, "_last_methods_refresh_time", 10.0),
             self.races_tab: (self.refresh_races_panel, "_last_races_refresh_time", 10.0),
             self.recommendations_tab: (self.refresh_recommendations, "_last_recs_refresh_time", 10.0),
@@ -1831,23 +2147,16 @@ class FH6TrackerGUI(tk.Tk):
     def refresh_live_data(self):
         latest = self.read_latest_telemetry_row()
         if latest:
-            self.vars["rpm_var"].set(latest.get("rpm", "-"))
-            self.vars["speed_var"].set(f"{latest.get('speed_mph', '-')} MPH")
-            self.vars["car_id_var"].set(latest.get("car_id", "-"))
             self.vars["car_name_var"].set(latest.get("car_name", "-"))
             self.auto_register_from_telemetry(latest)
         else:
-            self.vars["rpm_var"].set("-")
-            self.vars["speed_var"].set("-")
-            self.vars["car_id_var"].set("-")
             self.vars["car_name_var"].set("-")
             self.detected_car_id = None
             self.detection_status_var.set("Start the tracker and drive a car in Forza to auto-detect it.")
 
-        if not self.credit_ocr_var.get():
+        if not self.credit_ocr_var.get() and hasattr(self, "_live_ocr_status_var"):
             self._live_ocr_status_var.set("OCR disabled — enable in Settings tab")
             self._live_ocr_balance_var.set("")
-            self._live_ocr_raw_var.set("")
             self._live_popup_var.set("")
 
 
@@ -1966,6 +2275,11 @@ class FH6TrackerGUI(tk.Tk):
                 except ValueError:
                     pass
 
+        def debounced_populate(*_):
+            if hasattr(dialog, "_populate_after_id") and dialog._populate_after_id:
+                dialog.after_cancel(dialog._populate_after_id)
+            dialog._populate_after_id = dialog.after(150, populate)
+
         def confirm(*_):
             selection = listbox.curselection()
             if not selection:
@@ -1974,7 +2288,7 @@ class FH6TrackerGUI(tk.Tk):
             result["car"] = listbox.get(selection[0])
             dialog.destroy()
 
-        search_var.trace_add("write", populate)
+        search_var.trace_add("write", debounced_populate)
         listbox.bind("<Double-1>", confirm)
 
         button_row = ttk.Frame(dialog)
@@ -1985,44 +2299,6 @@ class FH6TrackerGUI(tk.Tk):
         populate()
         dialog.wait_window()
         return result["car"]
-
-    def refresh_stats_panel(self):
-        self._check_cache_reload()
-        master_db = self._master_db_cache
-        owned_names = sorted(self._owned_cache)
-        total_cars = len(master_db)
-        owned_count = len(owned_names)
-        if total_cars:
-            completion_pct = round((owned_count / total_cars) * 100, 1)
-        else:
-            completion_pct = 0.0
-        self.stats_summary_var.set(f"{owned_count} owned • {total_cars - owned_count} still missing • {completion_pct}% complete")
-        self.stats_progress_var.set(completion_pct)
-
-        latest = self.read_latest_telemetry_row()
-        if latest:
-            self.stats_last_seen_var.set(f"{latest.get('car_name', '-')} ({latest.get('car_id', '-')})")
-        else:
-            self.stats_last_seen_var.set("No recent telemetry")
-
-        session_credits = self.get_session_credits()
-        self.stats_session_var.set(f"Session credits: {format_credits(session_credits)}")
-        if self._forza_running_cache:
-            self.stats_window_var.set("Forza window detected")
-        else:
-            self.stats_window_var.set("Waiting for Forza window...")
-
-        # Cache the collection value — only recompute when the owned list size
-        # changes, since the master DB is essentially static.
-        owned_key = owned_count
-        if getattr(self, "_cached_total_value_key", None) != owned_key:
-            owned_set = {normalize_car_name(n) for n in owned_names}
-            self._cached_total_value = sum(int(price) for car, price in master_db.items() if normalize_car_name(car) in owned_set)
-            self._cached_total_value_key = owned_key
-        self.stats_total_value_var.set(f"Collection value: {format_credits(self._cached_total_value)}")
-
-        self._draw_credit_history()
-        self._draw_credit_rate_chart()
 
     def _draw_credit_rate_chart(self):
         self.rate_canvas.delete("all")
@@ -2083,10 +2359,6 @@ class FH6TrackerGUI(tk.Tk):
                     flat_avg = [c for p in avg_coords for c in p]
                     self.rate_canvas.create_line(*flat_avg, fill="#ff9800", width=1, dash=(4, 4))
 
-            # Dots at each data point
-            for x, y in coords:
-                self.rate_canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill="#1f6feb", outline="")
-
         self.rate_canvas.create_text(padding, padding - 10, text=format_credits(b_max), anchor="w", fill="#555555", font=("Segoe UI", 8))
         self.rate_canvas.create_text(padding, canvas_h - padding + 10, text=format_credits(b_min), anchor="w", fill="#555555", font=("Segoe UI", 8))
 
@@ -2102,11 +2374,25 @@ class FH6TrackerGUI(tk.Tk):
 
     def _load_credit_history(self):
         history_file = os.path.join(BASE_DIR, "credit_history.json")
-        return load_json_file(history_file, {"sessions": []})
+        try:
+            mtime = os.path.getmtime(history_file)
+        except OSError:
+            mtime = 0
+        if mtime == getattr(self, "_credit_history_mtime", 0) and hasattr(self, "_credit_history_cache"):
+            return self._credit_history_cache
+        data = load_json_file(history_file, {"sessions": []})
+        self._credit_history_mtime = mtime
+        self._credit_history_cache = data
+        return data
 
     def _save_credit_history(self, history):
         history_file = os.path.join(BASE_DIR, "credit_history.json")
         _safe_write_json(history_file, history)
+        try:
+            self._credit_history_mtime = os.path.getmtime(history_file)
+        except OSError:
+            self._credit_history_mtime = 0
+        self._credit_history_cache = history
 
     def _record_session_to_history(self):
         credits = self.get_session_credits()
@@ -2205,7 +2491,6 @@ class FH6TrackerGUI(tk.Tk):
 
     def refresh_collection(self):
         self._collection_refresh_after_id = None
-        self._check_cache_reload()
         if not self._collection_dirty:
             return
         self._collection_dirty = False
@@ -2239,11 +2524,22 @@ class FH6TrackerGUI(tk.Tk):
 
         previous_selection = self.owned_listbox.curselection()
         self.owned_listbox.delete(0, tk.END)
-        for car, price in owned_cars:
-            if price > 0:
-                self.owned_listbox.insert(tk.END, f"{car} | {format_credits(price)}")
-            else:
-                self.owned_listbox.insert(tk.END, car)
+        if not owned_cars and not search and not manufacturer and not year and not min_value and not max_value:
+            self.owned_listbox.insert(tk.END, "  Your collection is empty!")
+            self.owned_listbox.insert(tk.END, "")
+            self.owned_listbox.insert(tk.END, "  Get started:")
+            self.owned_listbox.insert(tk.END, "    + Add Car   — type a name above and press Enter")
+            self.owned_listbox.insert(tk.END, "    Import List — paste multiple car names at once")
+            self.owned_listbox.insert(tk.END, "    Import File — load from a CSV or text file")
+            self.owned_listbox.insert(tk.END, "")
+            self.owned_listbox.insert(tk.END, "  Cars are detected automatically when you drive")
+            self.owned_listbox.insert(tk.END, "  them in Forza (start the tracker first).")
+        else:
+            for car, price in owned_cars:
+                if price > 0:
+                    self.owned_listbox.insert(tk.END, f"{car} | {format_credits(price)}")
+                else:
+                    self.owned_listbox.insert(tk.END, car)
         if previous_selection:
             try:
                 self.owned_listbox.selection_set(previous_selection[0])
@@ -2266,11 +2562,15 @@ class FH6TrackerGUI(tk.Tk):
 
         total_owned_value = sum(price for _, price in owned_cars)
         total_missing = len(missing)
+        total_cars = len(master_db)
+        completion_pct = round((len(owned_names) / total_cars) * 100, 1) if total_cars else 0.0
         self.collection_summary_var.set(
-            f"{len(owned_names)} owned ({format_credits(total_owned_value)} value) • "
+            f"{len(owned_names)} of {total_cars} cars owned ({completion_pct}%) • "
             f"{total_missing} still missing ({format_credits(total_cost)} to buy)"
             + (f" • Showing {len(filtered_missing)}" if missing_filter else "")
         )
+        self.collection_progress_var.set(completion_pct)
+        self.collection_total_value_var.set(f"Collection value: {format_credits(total_owned_value)}")
 
     def clear_collection_filters(self):
         self.progress_search_var.set("")
@@ -2442,12 +2742,9 @@ class FH6TrackerGUI(tk.Tk):
                     thumb = gray.tobytes() if hasattr(gray, "tobytes") else bytes(gray.getdata())
                     prev = getattr(self, "_prev_thumb", None)
                     if prev and len(thumb) == len(prev):
-                        # Fast byte-level diff: iterate over bytes directly instead
-                        # of a list of ints — avoids per-element Python object overhead.
-                        total = 0
-                        for i in range(len(thumb)):
-                            total += abs(thumb[i] - prev[i])
-                        diff = total / max(len(thumb), 1)
+                        # Sum of per-byte differences in a single generator
+                        # expression — avoids per-element indexing overhead.
+                        diff = sum((a - b) if a >= b else (b - a) for a, b in zip(thumb, prev)) / max(len(thumb), 1)
                         detected_change = diff > 8.0
                     self._prev_thumb = thumb
                 except Exception:
@@ -2553,7 +2850,8 @@ class FH6TrackerGUI(tk.Tk):
             self.last_credit_balance += change
             self._log_credit_transaction(change, old_balance, self.last_credit_balance)
             self._ocr_success_count += 1
-            self._live_popup_var.set(f"{format_credits(change)} at {datetime.now().strftime('%H:%M:%S')}")
+            if hasattr(self, "_live_popup_var"):
+                self._live_popup_var.set(f"{format_credits(change)} at {datetime.now().strftime('%H:%M:%S')}")
             self.show_notice(f"Popup detected: {format_credits(change)}")
             return True
 
@@ -2757,7 +3055,13 @@ class FH6TrackerGUI(tk.Tk):
         self.session_state["session_started"] = True
         self.session_state["session_start_time"] = self.session_state.get("session_start_time") or self.current_timestamp()
         self.session_state["session_credits"] = self.session_state.get("session_credits", 0) + gain
-        self.save_session_state()
+        # Debounce: only write to disk every 5 seconds to avoid I/O on every credit change.
+        now = time.monotonic()
+        if now - getattr(self, "_last_session_save_time", 0) >= 5.0:
+            self.save_session_state()
+            self._last_session_save_time = now
+        else:
+            self._pending_session_flush = True
 
     def reset_session(self):
         if not messagebox.askyesno("Reset session", "Reset the current session credit total?"):
@@ -3458,12 +3762,15 @@ class FH6TrackerGUI(tk.Tk):
         self._refresh_ocr_preview()
 
     def _update_ocr_confidence_indicator(self):
+        if not hasattr(self, "_conf_indicator_label") or not hasattr(self, "_ocr_confidence_text"):
+            return
         color, text = self._ocr_confidence_label()
         color_map = {"green": "#137333", "yellow": "#b06000", "red": "#c5221f", "gray": "#888888"}
         self._conf_indicator_label.configure(foreground=color_map.get(color, "#888888"))
         self._ocr_confidence_text.set(text)
-        raw = self._last_ocr_raw_text[:60] if self._last_ocr_raw_text else ""
-        self._ocr_raw_text_var.set(raw or "(empty)")
+        if hasattr(self, "_ocr_raw_text_var"):
+            raw = self._last_ocr_raw_text[:60] if self._last_ocr_raw_text else ""
+            self._ocr_raw_text_var.set(raw or "(empty)")
 
     def current_timestamp(self):
         return datetime.now(timezone.utc).isoformat()
@@ -3472,12 +3779,20 @@ class FH6TrackerGUI(tk.Tk):
         # Read only the header and the tail of the file rather than loading the whole
         # CSV every second; telemetry_log.csv can grow large, and parsing it in full on
         # each 1s refresh would get slower over time and add avoidable overhead.
+        # Cache result for 1 second to avoid redundant disk reads within a single cycle.
+        now = time.monotonic()
+        if hasattr(self, "_last_telemetry_row_time") and now - self._last_telemetry_row_time < 1.0:
+            return self._last_telemetry_row_cache
         if not os.path.exists(LOG_FILE):
+            self._last_telemetry_row_time = now
+            self._last_telemetry_row_cache = None
             return None
         try:
             with open(LOG_FILE, "rb") as handle:
                 header_bytes = handle.readline()
                 if not header_bytes:
+                    self._last_telemetry_row_time = now
+                    self._last_telemetry_row_cache = None
                     return None
                 handle.seek(0, os.SEEK_END)
                 size = handle.tell()
@@ -3489,13 +3804,22 @@ class FH6TrackerGUI(tk.Tk):
                 fieldnames = next(csv.reader([header]))
                 lines = [line for line in tail.splitlines() if line.strip()]
                 if not lines:
+                    self._last_telemetry_row_time = now
+                    self._last_telemetry_row_cache = None
                     return None
                 last = lines[-1]
                 if last.strip() == header.strip():
+                    self._last_telemetry_row_time = now
+                    self._last_telemetry_row_cache = None
                     return None
                 values = next(csv.reader([last]))
-                return dict(zip(fieldnames, values))
+                result = dict(zip(fieldnames, values))
+                self._last_telemetry_row_time = now
+                self._last_telemetry_row_cache = result
+                return result
         except (OSError, csv.Error, StopIteration):
+            self._last_telemetry_row_time = now
+            self._last_telemetry_row_cache = None
             return None
 
 
@@ -3692,6 +4016,104 @@ class FH6TrackerGUI(tk.Tk):
             self.show_notice("Data restored from backup.")
         except Exception as exc:
             messagebox.showerror("Restore failed", f"Could not restore backup: {exc}")
+
+    def _show_setup_wizard(self):
+        """Walk new users through a quick 3-step setup."""
+        dialog = tk.Toplevel(self)
+        dialog.title("Welcome to FH6 Tracker")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.geometry("520x420")
+        dialog.resizable(False, False)
+        dialog.columnconfigure(0, weight=1)
+
+        steps = [
+            {
+                "title": "Welcome to FH6 Tracker!",
+                "body": (
+                    "This app helps you track your Forza Horizon 6 car collection, "
+                    "analyze your racing performance, and optimize your credit farming.\n\n"
+                    "You can:\n"
+                    "  • Track which cars you own and which you're missing\n"
+                    "  • Record races and get driving tips to improve\n"
+                    "  • Auto-track your credit earnings with OCR\n"
+                    "  • Get smart recommendations on what to buy next"
+                ),
+            },
+            {
+                "title": "Import Your Cars",
+                "body": (
+                    "To get started, add the cars you already own.\n\n"
+                    "You can:\n"
+                    "  • Paste a list of car names (comma or line separated)\n"
+                    "  • Import from a CSV/text file\n"
+                    "  • Add cars one at a time using the + button\n\n"
+                    "Don't worry — you can always add more later from the Collection tab."
+                ),
+            },
+            {
+                "title": "Automatic Credit Tracking",
+                "body": (
+                    "FH6 Tracker can automatically read your credit balance from the screen "
+                    "using OCR (optical character recognition).\n\n"
+                    "To enable this:\n"
+                    "  1. Install Tesseract OCR (link in Settings)\n"
+                    "  2. Enable OCR in Settings → Automatic Credit Tracking\n"
+                    "  3. Capture the screen region where your credits appear\n\n"
+                    "This is optional — you can also add credits manually."
+                ),
+            },
+        ]
+
+        step_var = tk.IntVar(value=0)
+        content_frame = ttk.Frame(dialog)
+        content_frame.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+        content_frame.columnconfigure(0, weight=1)
+
+        title_label = ttk.Label(content_frame, text="", font=("Segoe UI", 14, "bold"))
+        title_label.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        body_label = ttk.Label(content_frame, text="", justify="left", wraplength=470)
+        body_label.grid(row=1, column=0, sticky="w")
+
+        def show_step(idx):
+            step = steps[idx]
+            title_label.configure(text=step["title"])
+            body_label.configure(text=step["body"])
+            back_btn.configure(state="normal" if idx > 0 else "disabled")
+            next_btn.configure(text="Finish" if idx == len(steps) - 1 else "Next")
+
+        def go_next():
+            idx = step_var.get()
+            if idx < len(steps) - 1:
+                step_var.set(idx + 1)
+                show_step(idx + 1)
+            else:
+                self.settings["setup_complete"] = True
+                save_settings(self.settings)
+                dialog.destroy()
+
+        def go_back():
+            idx = step_var.get()
+            if idx > 0:
+                step_var.set(idx - 1)
+                show_step(idx - 1)
+
+        def skip_wizard():
+            self.settings["setup_complete"] = True
+            save_settings(self.settings)
+            dialog.destroy()
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 16))
+        btn_frame.columnconfigure(1, weight=1)
+
+        back_btn = ttk.Button(btn_frame, text="Back", command=go_back, state="disabled")
+        back_btn.grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(btn_frame, text="Skip", command=skip_wizard).grid(row=0, column=1, sticky="w")
+        next_btn = ttk.Button(btn_frame, text="Next", command=go_next)
+        next_btn.grid(row=0, column=2, padx=(8, 0))
+
+        show_step(0)
 
     def show_shortcuts_help(self):
         shortcuts = [
@@ -4016,7 +4438,7 @@ class FH6TrackerGUI(tk.Tk):
                 price_buckets["Exotic (1M+)"] += 1
 
         if not missing:
-            return []
+            return [], len(missing)
 
         recommendations = []
         for car, price, mfr, year in missing:
@@ -4069,10 +4491,9 @@ class FH6TrackerGUI(tk.Tk):
         else:
             recommendations.sort(key=lambda x: x["score"] / max(x["price"], 1), reverse=True)
 
-        return recommendations[:100]
+        return recommendations[:100], len(missing)
 
     def refresh_recommendations(self):
-        self._check_cache_reload()
         master_db = self._master_db_cache
         owned_names = sorted(self._owned_cache)
 
@@ -4088,7 +4509,7 @@ class FH6TrackerGUI(tk.Tk):
         else:
             method = "all"
 
-        recs = self.compute_recommendations(master_db, owned_names, method)
+        recs, total_missing = self.compute_recommendations(master_db, owned_names, method)
 
         self.recommendations_tree.delete(*self.recommendations_tree.get_children())
         for r in recs:
@@ -4100,7 +4521,6 @@ class FH6TrackerGUI(tk.Tk):
                 r["category"],
             ), tags=(r["car"],))
 
-        total_missing = len([c for c in master_db if normalize_car_name(c) not in {normalize_car_name(n) for n in owned_names}])
         self.rec_summary_var.set(
             f"Showing {len(recs)} of {total_missing} missing cars. "
             f"Top pick: {recs[0]['car']} ({format_credits(recs[0]['price'])}, score {recs[0]['score']})" if recs else "Collection complete!"
@@ -4380,7 +4800,6 @@ class FH6TrackerGUI(tk.Tk):
         self.style.configure("Text", background=field_bg, foreground=fg, insertbackground=fg)
         if theme_name == "dark":
             self.style.configure("Canvas", background=field_bg)
-        self.update_idletasks()
         for canvas in (getattr(self, "history_canvas", None), getattr(self, "rate_canvas", None),
                        getattr(self, "_preview_canvas", None)):
             if canvas:
