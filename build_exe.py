@@ -15,6 +15,7 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(PROJECT_DIR, "dist")
 BUILD_DIR = os.path.join(PROJECT_DIR, "build")
 APP_NAME = "FH6_Tracker"
+APP_VERSION = "1.0.0"
 
 DATA_FILES = [
     "auto_log.py",
@@ -24,6 +25,7 @@ DATA_FILES = [
     "fh6_master_list.json",
     "owned_cars.json",
     "requirements.txt",
+    "Start Here.bat",
 ]
 
 EXTRA_DIRS = ["races", "tests"]
@@ -70,7 +72,7 @@ def build():
         sys.exit(1)
 
     print(f"\nBuild complete! Output in: {os.path.join(DIST_DIR, APP_NAME)}")
-    print(f"  -> {APP_NAME}.exe")
+    print(f"  -> {APP_NAME}.exe (v{APP_VERSION})")
 
     # Create races/ directory next to the exe for user race recordings
     races_dst = os.path.join(DIST_DIR, APP_NAME, "races")

@@ -41,6 +41,9 @@ except Exception:  # pragma: no cover - optional OCR dependencies
     ImageOps = None
     ImageTk = None
 
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "Sushidragon555/FH6_Tracker"
+
 # =============================================================================
 # PATHS & CONSTANTS
 # =============================================================================
@@ -542,7 +545,7 @@ def get_forza_window_rect():
 class FH6TrackerGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Forza Horizon 6 Tracker")
+        self.title(f"Forza Horizon 6 Tracker v{APP_VERSION}")
         self.geometry("1100x760")
         self.minsize(1000, 680)
         self.configure(padx=14, pady=14)
@@ -615,6 +618,8 @@ class FH6TrackerGUI(tk.Tk):
             self.start_tracker()
         self.after(2000, self._check_forza_auto_start)
         self._session_timer_after_id = self.after(1000, self._update_session_timer)
+        if getattr(sys, "frozen", False):
+            self.after(5000, self._auto_check_update)
 
         self.bind("<Control-f>", lambda e: self.search_entry.focus_set())
         self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
@@ -4145,9 +4150,51 @@ class FH6TrackerGUI(tk.Tk):
 
         ttk.Button(dialog, text="Close", command=dialog.destroy).grid(row=1, column=0, pady=(0, 10))
 
+    def _auto_check_update(self):
+        if getattr(sys, "frozen", False):
+            self._check_github_release()
+
     def _check_for_updates(self):
         self._update_status_var.set("Checking for updates...")
         self.update_idletasks()
+
+        if getattr(sys, "frozen", False):
+            self._check_github_release()
+        else:
+            self._check_git_update()
+
+    def _check_github_release(self):
+        import urllib.request
+        import urllib.error
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": f"FH6-Tracker/{APP_VERSION}"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+            tag = data.get("tag_name", "").lstrip("v")
+            if not tag:
+                self._update_status_var.set("Could not check for updates.")
+                return
+            if tag != APP_VERSION:
+                download_url = None
+                for asset in data.get("assets", []):
+                    if asset.get("name", "").endswith(".zip"):
+                        download_url = asset.get("browser_download_url")
+                        break
+                msg = f"Update available: v{tag} (current: v{APP_VERSION})"
+                if download_url:
+                    msg += " — Download from Releases page"
+                    self._update_pending = True
+                    self._pending_download_url = download_url
+                self._update_status_var.set(msg)
+            else:
+                self._update_status_var.set(f"You're up to date (v{APP_VERSION}).")
+        except urllib.error.URLError:
+            self._update_status_var.set("Could not reach GitHub (no internet?).")
+        except Exception as exc:
+            self._update_status_var.set(f"Update check failed: {str(exc)[:80]}")
+
+    def _check_git_update(self):
         try:
             result = subprocess.run(
                 ["git", "pull", "--ff-only"],
@@ -4245,6 +4292,7 @@ class FH6TrackerGUI(tk.Tk):
             parts = []
             parts.append(f"Type: {fb_type.get()}")
             parts.append(f"Email: {email_var.get() or '(not provided)'}")
+            parts.append(f"App Version: {APP_VERSION}")
             parts.append(f"Python: {sys.version}")
             parts.append(f"Platform: {sys.platform}")
             parts.append(f"App dir: {BASE_DIR}")

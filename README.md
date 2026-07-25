@@ -15,21 +15,35 @@ This is a personal project built out of genuine love for the Forza Horizon serie
 
 ## Quick Start
 
-### Download the .exe (No Python required)
+### Option 1 — Download the .exe (Recommended, no Python needed)
 
-1. Go to [Releases](https://github.com/Sushidragon555/FH6_Tracker/releases)
-2. Download the latest `Source code(zip)`
-3. Extract and double-click `FH6_Tracker.exe`
+> **This is the easiest way to get started. Takes about 30 seconds.**
 
-### Run from Source
+**Step 1:** Go to the [Releases page](https://github.com/Sushidragon555/FH6_Tracker/releases)
 
-1. Clone the repo:
-   ```
-   git clone https://github.com/Sushidragon555/FH6_Tracker.git
-   ```
-2. Double-click **`Launch FH6 Tracker.bat`** — installs dependencies and runs the app.
+**Step 2:** Click on the **latest version** at the top, then click **`FH6_Tracker.zip`** to download it
 
-Or manually:
+**Step 3:** Open the downloaded `.zip` file. **Extract the entire folder** somewhere on your PC (Desktop, Documents, wherever you want)
+
+> **Tip:** Right-click the `.zip` file → **"Extract All..."** → choose a location → click **Extract**
+
+**Step 4:** Open the extracted folder and **double-click `FH6_Tracker.exe`**
+
+That's it — the app will open. No installation, no Python, no setup.
+
+**Step 5 (Important):** In the app, go to the **Settings** tab and enable **"Auto-open with Forza"** so it starts tracking automatically when you launch the game.
+
+---
+
+### Option 2 — Run from Source (Requires Python)
+
+> **Only needed if you want to modify the code or contribute.**
+
+1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/) — **check "Add Python to PATH"** during install
+2. **Download or clone** this repository
+3. **Double-click `Start Here.bat`** — it installs everything and launches the app
+
+Or if you prefer the command line:
 ```
 pip install -r requirements.txt
 python fh6_gui.py
@@ -40,12 +54,11 @@ python fh6_gui.py
 ## Requirements
 
 - **Windows** (required for telemetry and OCR features)
-- **Python 3.10+** (only needed if running from source)
 - **Forza Horizon 6** installed and running
 
 ### Optional (for automatic credit tracking)
 
-- **[Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki)** — the OCR engine. Auto-detected from common install paths, or set the path manually in Settings.
+- **[Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki)** — the OCR engine. Auto-detected from common install paths, or set the path manually in Settings. Only needed if you want automatic credit tracking from screen reading.
 
 ---
 
