@@ -15,45 +15,37 @@ This is a personal project built out of genuine love for the Forza Horizon serie
 
 ## Quick Start
 
-### Option 1 — Download the .exe (Recommended, no Python needed)
+### Download & Run (Takes about 2 minutes)
 
-> **This is the easiest way to get started. Takes about 30 seconds.**
+> **You need Python installed. That's the only requirement.**
 
-**Step 1:** Go to the [Releases page](https://github.com/Sushidragon555/FH6_Tracker/releases)
+**Step 1:** Go to the [Releases page](https://github.com/Sushidragon555/FH6_Tracker/releases) and download the latest source code `.zip`
 
-**Step 2:** Click on the **latest version** at the top, then click **`FH6_Tracker.zip`** to download it
+**Step 2:** **Extract the zip** — right-click the file → **"Extract All..."** → pick a location → click **Extract**
 
-**Step 3:** Open the downloaded `.zip` file. **Extract the entire folder** somewhere on your PC (Desktop, Documents, wherever you want)
+**Step 3:** Open the extracted folder and **double-click `Start Here.bat`**
 
-> **Tip:** Right-click the `.zip` file → **"Extract All..."** → choose a location → click **Extract**
+That's it — it installs Python packages automatically and launches the app.
 
-**Step 4:** Open the extracted folder and **double-click `FH6_Tracker.exe`**
+> **Don't have Python?** Install it from [python.org](https://www.python.org/downloads/) first. **Important:** check the box that says **"Add Python to PATH"** during install, then run `Start Here.bat` again.
 
-That's it — the app will open. No installation, no Python, no setup.
-
-**Step 5 (Important):** In the app, go to the **Settings** tab and enable **"Auto-open with Forza"** so it starts tracking automatically when you launch the game.
+**Step 4:** In the app, go to the **Settings** tab and enable **"Auto-open with Forza"** so it starts tracking when you launch the game.
 
 ---
 
-### Option 2 — Run from Source (Requires Python)
+### Forza Telemetry Setup (Required)
 
-> **Only needed if you want to modify the code or contribute.**
-
-1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/) — **check "Add Python to PATH"** during install
-2. **Download or clone** this repository
-3. **Double-click `Start Here.bat`** — it installs everything and launches the app
-
-Or if you prefer the command line:
-```
-pip install -r requirements.txt
-python fh6_gui.py
-```
+In Forza Horizon 6, go to **Settings → Advanced** and enable **Data Out**:
+- IP: `127.0.0.1`
+- Port: `9999`
+- Rate: **Fast** (60 Hz)
 
 ---
 
 ## Requirements
 
 - **Windows** (required for telemetry and OCR features)
+- **Python 3.10+** (free from [python.org](https://www.python.org/downloads/))
 - **Forza Horizon 6** installed and running
 
 ### Optional (for automatic credit tracking)
@@ -140,25 +132,16 @@ Smart suggestions for your next car purchase based on manufacturer popularity, p
 
 ---
 
-## Forza Telemetry Setup
+## Building a Standalone .exe (Optional)
 
-1. Go to **Settings > Advanced** in Forza Horizon 6
-2. Enable **Data Out**
-3. Set IP to `127.0.0.1` and port to `9999`
-4. Set rate to **Fast** (60 Hz)
-
----
-
-## Building from Source
-
-To build the `.exe` yourself:
+To build the `.exe` yourself so others don't need Python:
 
 ```
 pip install pyinstaller
 python build_exe.py
 ```
 
-Output will be in `dist/FH6_Tracker/`.
+Output will be in `dist/FH6_Tracker/`. Zip that folder and share it.
 
 ---
 
