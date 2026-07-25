@@ -1161,7 +1161,7 @@ class FH6TrackerGUI(tk.Tk):
                 # potentially huge samples arrays into memory.
                 with open(fpath, "r", encoding="utf-8") as fh:
                     head = fh.read(1024)
-                data = json.loads(head.split('"samples"')[0].rstrip(",")) if '"samples"' in head else json.loads(head)
+                data = json.loads(head.split('"samples"')[0].rstrip(" ,") + "}") if '"samples"' in head else json.loads(head)
                 car = data.get("car_name", "?")[:28]
                 dur = data.get("duration_seconds", 0)
                 start = data.get("start_time", "")[:16].replace("T", " ")
