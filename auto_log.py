@@ -1,7 +1,6 @@
 import csv
 import ctypes
 import ctypes.wintypes
-import io
 import os
 import socket
 import struct
@@ -12,32 +11,15 @@ from datetime import datetime, timezone
 
 import car_lookup
 
-# Voice logging and recording libraries
-try:
-    import numpy as np
-    import sounddevice as sd
-    import soundfile as sf
-    import speech_recognition as sr
-except Exception as exc:  # pragma: no cover - depends on local environment
-    np = None
-    sd = None
-    sf = None
-    sr = None
-    OPTIONAL_IMPORT_ERROR = str(exc)
-else:
-    OPTIONAL_IMPORT_ERROR = None
-
 # ==========================================
 # GLOBAL HOTKEYS via Win32 RegisterHotKey
 # Works without admin privileges, unlike the keyboard library.
 # ==========================================
 
 WM_HOTKEY = 0x0312
-HOTKEY_ID_VOICE = 1
 HOTKEY_ID_RECORD = 2
 
 # Virtual key codes
-VK_F4 = 0x73
 VK_F6 = 0x75
 
 _user32 = ctypes.windll.user32
@@ -65,9 +47,7 @@ class _WNDCLASS(ctypes.Structure):
 
 def _wndproc(hwnd, msg, wparam, lparam):
     if msg == WM_HOTKEY:
-        if wparam == HOTKEY_ID_VOICE:
-            threading.Thread(target=log_car_voice, daemon=True).start()
-        elif wparam == HOTKEY_ID_RECORD:
+        if wparam == HOTKEY_ID_RECORD:
             threading.Thread(target=toggle_race_recording, daemon=True).start()
         return 0
     return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -97,13 +77,11 @@ def _start_hotkey_listener():
         print(" [⚠️] Could not create hotkey window.")
         return
 
-    # Register hotkeys: 0 = no modifier
-    if not _user32.RegisterHotKey(_hotkey_hwnd, HOTKEY_ID_VOICE, 0, VK_F4):
-        print(" [⚠️] Could not register F4 hotkey (may be in use).")
+    # Register hotkey: 0 = no modifier
     if not _user32.RegisterHotKey(_hotkey_hwnd, HOTKEY_ID_RECORD, 0, VK_F6):
         print(" [⚠️] Could not register F6 hotkey (may be in use).")
     else:
-        print(" [✓] F4 and F6 hotkeys registered — works in-game without admin.")
+        print(" [✓] F6 hotkey registered — works in-game without admin.")
 
     # Message loop
     msg = ctypes.wintypes.MSG()
@@ -134,7 +112,6 @@ RACE_MIN_DURATION = 5.0
 # Global state trackers
 current_mapped_car_name = "Unknown Vehicle"
 active_car_id = "0"
-voice_override_active = False
 
 # ==========================================
 # FILE INITIALIZATION
@@ -258,68 +235,6 @@ def end_race(now_mono, timestamp_str):
     race_buffer = []
 
 
-# ==========================================
-# HARDWARE-LEVEL RAW VOICE LOGGING FUNCTION
-# ==========================================
-def log_car_voice():
-    """Records voice and links the currently detected car ID to a human-readable name."""
-    global current_mapped_car_name, active_car_id, voice_override_active
-
-    if sr is None or sd is None or sf is None or np is None:
-        print(" [⚠️] Voice logging is unavailable because the audio dependencies are not installed.")
-        return
-
-    # Block the telemetry loop from overwriting our text screen state
-    voice_override_active = True
-
-    print(f"\n[🎙️] Logging current Raw ID ({active_car_id})... Speak car name now!")
-
-    sample_rate = 16000
-    duration = 4.0  # 4 second recording window
-
-    try:
-        audio_chunks = []
-
-        def callback(indata, frames, time, status):
-            audio_chunks.append(bytes(indata))
-
-        with sd.RawInputStream(samplerate=sample_rate, channels=1, dtype="int16", callback=callback):
-            time.sleep(duration)
-
-        raw_bytes = b"".join(audio_chunks)
-        recording = np.frombuffer(raw_bytes, dtype=np.int16)
-
-        byte_io = io.BytesIO()
-        sf.write(byte_io, recording, sample_rate, format="WAV", subtype="PCM_16")
-        byte_io.seek(0)
-
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(byte_io) as source:
-            audio = recognizer.record(source)
-
-        car_name = recognizer.recognize_google(audio).strip()
-
-        if car_name:
-            canonical = car_lookup.save_mapping(active_car_id, car_name)
-            current_mapped_car_name = canonical
-            id_reference[active_car_id] = canonical
-            print(f" [✅] Heard: {car_name}")
-            print(f" [💾] Linked Raw ID {active_car_id} -> '{canonical}' in reference database.")
-
-            if save_owned_car(canonical):
-                print(f" [💾] Added '{canonical}' to owned garage list!")
-            else:
-                print(f" [ℹ️] '{canonical}' is already marked as owned.")
-
-    except sr.UnknownValueError:
-        print(" [❌] Voice capture failure: speech wasn't clearly understood.")
-    except Exception as exc:
-        print(f" [⚠️] Voice service warning: {exc}")
-
-    voice_override_active = False
-    print("\n Resuming live telemetry display tracking...\n")
-
-
 def toggle_race_recording():
     """Toggle manual race recording on/off via F6 hotkey."""
     global race_in_progress, race_manual_override
@@ -334,7 +249,7 @@ def toggle_race_recording():
                      "throttle": 0, "brake": 0, "steering": 0,
                      "handbrake": 0, "gear": 0, "power": 0, "torque": 0, "boost": 0,
                      "is_race_on": 1}, now, now_str)
-        print(f"\n [REC] Manual recording STARTED — press F6 to stop.")
+        print(f"\n [REC] Manual recording STARTED — press F6 or Stop Recording to finish.")
     else:
         race_manual_override = False
         end_race(now, now_str)
@@ -372,19 +287,16 @@ def _check_signal_files():
             end_race(now, now_str)
 
 
-# Start global hotkey listener (F4 for voice, F6 for recording) in a background thread
+# Start global hotkey listener (F6 for recording) in a background thread
 _hotkey_thread = threading.Thread(target=_start_hotkey_listener, daemon=True)
 _hotkey_thread.start()
 
 print("==========================================================")
-print(" VISUAL TELEMETRY LOGGER & VOICE GARAGE TRACKER RUNNING")
+print(" VISUAL TELEMETRY LOGGER & RACE RECORDER RUNNING")
 print(" Open Forza and drive around to verify connection!")
-print(" Press F4 in-game to manually name an unknown car.")
-print(" Press F6 in-game to start/stop race recording.")
+print(" Press F6 in-game or click Start Recording in the GUI")
+print(" to record a race (auto-detection removed for FH6).")
 print("==========================================================\n")
-
-if OPTIONAL_IMPORT_ERROR:
-    print(f" Optional dependency warning: {OPTIONAL_IMPORT_ERROR}")
 
 last_id = None
 last_log_time = 0.0
@@ -445,17 +357,16 @@ else:
                 now = time.monotonic()
                 now_str = datetime.now(timezone.utc).isoformat()
 
-                # --- Check for GUI signal files BEFORE the ordinal guard so
-                # the GUI can always start/stop recording, even in menus. ---
+                # --- Check for GUI signal files (start/stop recording) ---
                 if not race_in_progress or race_packet_count % 10 == 0:
                     _check_signal_files()
 
-                # --- Auto race detection (only if not manually controlled) ---
-                if not race_manual_override:
-                    if is_race_on and not race_in_progress:
-                        start_race(parsed, now, now_str)
-                    elif not is_race_on and race_in_progress:
-                        end_race(now, now_str)
+                # --- Auto race detection DISABLED ---
+                # In FH6, is_race_on is 1 whenever the player is actively
+                # driving (including free roam), so it cannot distinguish
+                # actual race events from normal gameplay.  Recording is now
+                # manual-only: press F6 in-game or click Start Recording in
+                # the GUI.
 
                 if not car_lookup.is_real_ordinal(car_ordinal):
                     print(" Waiting for gameplay to start (In Menus/Loading)...       ", end="\r")
@@ -466,20 +377,18 @@ else:
                 car_changed = last_id != car_id_str
                 if car_changed:
                     last_id = car_id_str
-                    if not voice_override_active:
-                        current_mapped_car_name = "Unknown Vehicle"
+                    current_mapped_car_name = "Unknown Vehicle"
 
-                if not voice_override_active:
-                    mapped_name = id_reference.get(car_id_str)
-                    if mapped_name:
-                        current_mapped_car_name = car_lookup.resolve_canonical_name(mapped_name, canonical_index)
+                mapped_name = id_reference.get(car_id_str)
+                if mapped_name:
+                    current_mapped_car_name = car_lookup.resolve_canonical_name(mapped_name, canonical_index)
 
-                        # The owned list only changes when a new car appears, so touch it on
-                        # car changes instead of on every packet (avoids re-reading the JSON 60x/sec).
-                        if car_changed and save_owned_car(current_mapped_car_name):
-                            print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
-                    else:
-                        current_mapped_car_name = "Unknown Vehicle"
+                    # The owned list only changes when a new car appears, so touch it on
+                    # car changes instead of on every packet (avoids re-reading the JSON 60x/sec).
+                    if car_changed and save_owned_car(current_mapped_car_name):
+                        print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
+                else:
+                    current_mapped_car_name = "Unknown Vehicle"
 
                 # --- Race telemetry capture ---
                 if race_in_progress:

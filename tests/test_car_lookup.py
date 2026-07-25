@@ -14,6 +14,11 @@ def make_packet(ordinal, rpm=5000.0, speed_mps=30.0):
     struct.pack_into("f", buffer, car_lookup.RPM_OFFSET, rpm)
     struct.pack_into("f", buffer, car_lookup.SPEED_OFFSET, speed_mps)
     struct.pack_into("i", buffer, car_lookup.CAR_ORDINAL_OFFSET, ordinal)
+    # Set a known throttle value (U8 at ACCEL_OFFSET) for input tests
+    buffer[car_lookup.ACCEL_OFFSET] = 200  # ~78.4%
+    buffer[car_lookup.BRAKE_OFFSET] = 0
+    buffer[car_lookup.GEAR_OFFSET] = 3
+    buffer[car_lookup.STEERING_OFFSET] = 0  # centre
     return bytes(buffer)
 
 
@@ -40,6 +45,37 @@ def test_parse_packet_old_offset_192_would_be_wrong():
 def test_parse_packet_rejects_short_packets():
     assert car_lookup.parse_packet(b"\x00" * 100) is None
     assert car_lookup.parse_packet(None) is None
+
+
+def test_parse_packet_normalises_u8_inputs():
+    """FH6 player inputs are U8/S8; parse_packet must normalise to 0-1 / -1..1."""
+    buffer = bytearray(car_lookup.MIN_PACKET_SIZE)
+    struct.pack_into("f", buffer, car_lookup.RPM_OFFSET, 3000.0)
+    struct.pack_into("f", buffer, car_lookup.SPEED_OFFSET, 20.0)
+    struct.pack_into("i", buffer, car_lookup.CAR_ORDINAL_OFFSET, 100)
+    buffer[car_lookup.ACCEL_OFFSET] = 255   # full throttle
+    buffer[car_lookup.BRAKE_OFFSET] = 128   # ~50% brake
+    buffer[car_lookup.HANDBRAKE_OFFSET] = 0
+    buffer[car_lookup.GEAR_OFFSET] = 4
+    buffer[car_lookup.STEERING_OFFSET] = 64  # ~50% right
+    parsed = car_lookup.parse_packet(bytes(buffer))
+    assert parsed is not None
+    assert abs(parsed["throttle"] - 1.0) < 0.01
+    assert abs(parsed["brake"] - 128 / 255.0) < 0.01
+    assert abs(parsed["steering"] - 64 / 127.0) < 0.01
+    assert parsed["gear"] == 4
+
+
+def test_parse_packet_steering_clamps():
+    """Steering S8 value should clamp to -1..1 even if raw byte is -128."""
+    buffer = bytearray(car_lookup.MIN_PACKET_SIZE)
+    struct.pack_into("f", buffer, car_lookup.RPM_OFFSET, 3000.0)
+    struct.pack_into("f", buffer, car_lookup.SPEED_OFFSET, 20.0)
+    struct.pack_into("i", buffer, car_lookup.CAR_ORDINAL_OFFSET, 100)
+    buffer[car_lookup.STEERING_OFFSET] = 255  # -1 as unsigned, = -1 as signed (S8)
+    parsed = car_lookup.parse_packet(bytes(buffer))
+    assert parsed is not None
+    assert -1.0 <= parsed["steering"] <= 1.0
 
 
 def test_is_real_ordinal():

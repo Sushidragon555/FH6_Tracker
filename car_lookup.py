@@ -42,9 +42,11 @@ DEFAULT_PERFORMANCE_MODE = "Balanced"
 # version moves it, run scan_offsets.py in-game to find the new value.
 CAR_ORDINAL_OFFSET = 212
 
-# Byte offsets of the telemetry fields we read. RPM and IsRaceOn live in the fixed
-# "sled" section; Speed, Throttle, Brake, etc. live in the dashboard section, which on
-# Forza Horizon is shifted +12 bytes versus Forza Motorsport (244 -> 256).
+# Byte offsets of the telemetry fields we read. RPM, IsRaceOn, Speed, Power,
+# Torque live in fixed-width (F32/S32) fields. Throttle/Brake/Gear/Steering
+# are U8/S8 player-input bytes at the end of the dash tail (offsets 315-320).
+# Verified against the official FH6 "Data Out" documentation (2026-05-15) and
+# the validated ClickClickMedia/Forza-6-telemetry reference implementation.
 RPM_OFFSET = 16
 SPEED_OFFSET = 256
 MPS_TO_MPH = 2.23694
@@ -55,15 +57,23 @@ TIMESTAMP_MS_OFFSET = 4
 ENGINE_MAX_RPM_OFFSET = 8
 ENGINE_IDLE_RPM_OFFSET = 12
 
-# Dashboard section (+12 for Horizon)
-POWER_OFFSET = 260
-TORQUE_OFFSET = 264
-BOOST_OFFSET = 268
-CURRENT_GEAR_OFFSET = 280
-BRAKE_OFFSET = 284
-THROTTLE_OFFSET = 288
-HANDBRAKE_OFFSET = 296
-STEERING_OFFSET = 300
+# Dashboard section — float32 fields
+POWER_OFFSET = 260          # F32 watts
+TORQUE_OFFSET = 264         # F32 N·m
+TIRE_TEMP_FL_OFFSET = 268   # F32 °F (not used, but marks the region)
+BOOST_OFFSET = 284          # F32 PSI above atmospheric
+
+# Dash tail — player-input bytes (FH6 uses U8/S8, NOT F32/S32)
+ACCEL_OFFSET = 315          # U8  (0-255) → normalise to 0.0-1.0
+BRAKE_OFFSET = 316          # U8  (0-255) → normalise to 0.0-1.0
+CLUTCH_OFFSET = 317         # U8  (0-255) → normalise to 0.0-1.0
+HANDBRAKE_OFFSET = 318      # U8  (0-255) → normalise to 0.0-1.0
+GEAR_OFFSET = 319           # U8  (0=reverse, 1-10 forward)
+STEERING_OFFSET = 320       # S8  (-127..127) → normalise to -1.0..1.0
+
+# Legacy aliases kept for any code that still references the old names
+THROTTLE_OFFSET = ACCEL_OFFSET
+CURRENT_GEAR_OFFSET = GEAR_OFFSET
 
 # A full Forza Horizon "Data Out" packet is 324 bytes; shorter packets are incomplete.
 MIN_PACKET_SIZE = 324
@@ -88,11 +98,25 @@ def _unpack_i(data, offset):
         return 0
 
 
-def parse_packet(data):
-    """Extract telemetry fields from a Forza Horizon telemetry packet.
+def _unpack_b(data, offset):
+    """Read a single signed byte (S8, -128..127)."""
+    try:
+        return struct.unpack("b", data[offset:offset + 1])[0]
+    except (struct.error, IndexError):
+        return 0
 
-    Returns a dict with basic fields (rpm, speed_mph, car_ordinal) plus race-analysis
-    fields (throttle, brake, steering, gear, is_race_on, power, torque, etc.).
+
+def parse_packet(data):
+    """Extract telemetry fields from a Forza Horizon 6 telemetry packet.
+
+    Returns a dict with basic fields (rpm, speed_mph, car_ordinal) plus
+    race-analysis fields (throttle, brake, steering, gear, is_race_on,
+    power, torque, etc.).
+
+    Player inputs (throttle, brake, handbrake, steering) are normalised to
+    the 0.0–1.0 / -1.0–1.0 range that the analysis and tips code expects,
+    regardless of the wire format (U8/S8 in FH6).
+
     Returns ``None`` for packets that are too short.
     """
     if data is None or len(data) < MIN_PACKET_SIZE:
@@ -107,11 +131,13 @@ def parse_packet(data):
         "is_race_on": _unpack_i(data, IS_RACE_ON_OFFSET),
         "timestamp_ms": struct.unpack("I", data[TIMESTAMP_MS_OFFSET:TIMESTAMP_MS_OFFSET + 4])[0],
         "engine_max_rpm": _unpack_f(data, ENGINE_MAX_RPM_OFFSET),
-        "throttle": _unpack_f(data, THROTTLE_OFFSET),
-        "brake": _unpack_f(data, BRAKE_OFFSET),
-        "steering": _unpack_f(data, STEERING_OFFSET),
-        "handbrake": _unpack_f(data, HANDBRAKE_OFFSET),
-        "gear": _unpack_i(data, CURRENT_GEAR_OFFSET),
+        # FH6 player inputs are U8 (0-255) / S8 (-127..127) bytes.
+        # Normalise to float ranges the rest of the code expects.
+        "throttle": data[ACCEL_OFFSET] / 255.0,
+        "brake": data[BRAKE_OFFSET] / 255.0,
+        "steering": max(-1.0, min(1.0, _unpack_b(data, STEERING_OFFSET) / 127.0)),
+        "handbrake": data[HANDBRAKE_OFFSET] / 255.0,
+        "gear": data[GEAR_OFFSET],
         "power": _unpack_f(data, POWER_OFFSET),
         "torque": _unpack_f(data, TORQUE_OFFSET),
         "boost": _unpack_f(data, BOOST_OFFSET),

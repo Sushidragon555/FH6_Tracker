@@ -4129,7 +4129,7 @@ class FH6TrackerGUI(tk.Tk):
             ("Double-click Missing", "Add car to owned"),
             ("Right-click Owned", "Context menu (remove, export, search)"),
             ("Right-click Missing", "Context menu (add, view details)"),
-            ("F4 (in-game)", "Voice car tagging (if enabled)"),
+            ("F6 (in-game)", "Start/stop race recording"),
         ]
         dialog = tk.Toplevel(self)
         dialog.title("Keyboard Shortcuts")
