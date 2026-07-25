@@ -12,7 +12,7 @@ A **Forza Horizon 6** companion desktop app that tracks your car collection, aut
 ### Download the .exe (No Python required)
 
 1. Go to [Releases](https://github.com/Sushidragon555/FH6_Tracker/releases)
-2. Download the latest `FH6_Tracker.zip`
+2. Download the latest `Source code(zip)`
 3. Extract and double-click `FH6_Tracker.exe`
 
 ### Run from Source
