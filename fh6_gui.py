@@ -4812,8 +4812,8 @@ class FH6TrackerGUI(tk.Tk):
         theme_name = theme_name or "light"
         self.settings["theme"] = theme_name
         if theme_name == "dark":
-            bg = "#1f1f1f"
-            fg = "#f5f5f5"
+            bg = "#010300"
+            fg = "#FFFEFE"
             field_bg = "#2b2b2b"
             accent = "#6ba8ff"
             button_bg = "#2f4f78"
