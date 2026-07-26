@@ -403,6 +403,7 @@ def load_settings():
         "payout_region_locked": settings.get("payout_region_locked", False),
         "performance_mode": settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE),
         "tesseract_path": settings.get("tesseract_path") or _find_tesseract() or "",
+        "shown_tutorials": settings.get("shown_tutorials", []),
     }
 
 
@@ -1788,6 +1789,13 @@ class FH6TrackerGUI(tk.Tk):
             foreground="#555555",
         ).grid(row=7, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
 
+        ttk.Button(settings_frame, text="Reset Tutorials", command=self._reset_tutorials).grid(row=8, column=0, sticky="w", padx=8, pady=6)
+        ttk.Label(
+            settings_frame,
+            text="Replay one-time tutorial messages that appear on first use.",
+            foreground="#555555",
+        ).grid(row=8, column=1, columnspan=2, sticky="w", padx=(4, 8), pady=6)
+
         ocr_frame = ttk.LabelFrame(settings_inner, text="Automatic Credit Tracking (OCR)")
         ocr_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
         ttk.Checkbutton(ocr_frame, text="Auto-track credits by reading the on-screen balance while Forza is open", variable=self.credit_ocr_var).grid(row=0, column=0, columnspan=6, sticky="w", padx=8, pady=6)
@@ -2207,10 +2215,37 @@ class FH6TrackerGUI(tk.Tk):
                 pass
         self._notice_after_id = self.after(10000, lambda: self.notice_var.set(""))
 
+    def _has_seen_tutorial(self, key):
+        return key in self.settings.get("shown_tutorials", [])
+
+    def _mark_tutorial_seen(self, key):
+        tutorials = self.settings.setdefault("shown_tutorials", [])
+        if key not in tutorials:
+            tutorials.append(key)
+            save_settings(self.settings)
+
+    def show_tutorial_notice(self, key, text):
+        if self._has_seen_tutorial(key):
+            return
+        self._mark_tutorial_seen(key)
+        self.show_notice(text)
+
+    def show_tutorial_messagebox(self, key, msg_type, title, message):
+        if self._has_seen_tutorial(key):
+            return
+        self._mark_tutorial_seen(key)
+        getattr(messagebox, msg_type)(title, message)
+
+    def _reset_tutorials(self):
+        self.settings["shown_tutorials"] = []
+        save_settings(self.settings)
+        self.show_notice("Tutorials reset — they will appear again on next use.")
+
     def tag_detected_car(self):
         car_id = self.detected_car_id
         if not car_lookup.is_real_ordinal(car_id):
-            messagebox.showinfo(
+            self.show_tutorial_messagebox(
+                "tutorial_no_car_detected", "showinfo",
                 "No car detected",
                 "No car is being detected yet. Start the tracker and drive a car in Forza, then try again.",
             )
@@ -2650,7 +2685,7 @@ class FH6TrackerGUI(tk.Tk):
         os.makedirs(RACES_DIR, exist_ok=True)
         if not self._recording:
             if not self.tracker_running:
-                self.show_notice("Start the tracker first (click Start Tracker).")
+                self.show_tutorial_notice("tutorial_start_tracker_first", "Start the tracker first (click Start Tracker).")
                 return
             signal_path = os.path.join(RACES_DIR, ".record_start")
             try:
@@ -3298,7 +3333,8 @@ class FH6TrackerGUI(tk.Tk):
     # =====================================================================
     def test_credit_ocr(self):
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
-            messagebox.showwarning(
+            self.show_tutorial_messagebox(
+                "tutorial_ocr_unavailable", "showwarning",
                 "OCR unavailable",
                 "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
             )
@@ -3545,7 +3581,8 @@ class FH6TrackerGUI(tk.Tk):
     def test_payout_ocr(self):
         """Test OCR on the configured payout region and show diagnostic info."""
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
-            messagebox.showwarning(
+            self.show_tutorial_messagebox(
+                "tutorial_ocr_unavailable", "showwarning",
                 "OCR unavailable",
                 "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
             )
@@ -3659,13 +3696,17 @@ class FH6TrackerGUI(tk.Tk):
             self.show_notice("Credit region is locked — unlock it in Settings to change.")
             return
         if pytesseract is None or (ImageGrab is None and pyautogui is None):
-            messagebox.showwarning(
+            self.show_tutorial_messagebox(
+                "tutorial_ocr_unavailable", "showwarning",
                 "OCR unavailable",
                 "Install OCR packages first: pip install pyautogui pytesseract Pillow, and install the Tesseract-OCR program.",
             )
             return
         if not (has_running_forza_process() or has_running_forza_window()):
-            messagebox.showinfo("Auto-detect", "Forza does not appear to be running. Start the game first, then try again.")
+            self.show_tutorial_messagebox(
+                "tutorial_forza_not_running", "showinfo",
+                "Auto-detect", "Forza does not appear to be running. Start the game first, then try again.",
+            )
             return
         self.show_notice("Auto-detecting credit region... wait a moment.")
         self.update_idletasks()
@@ -3723,7 +3764,10 @@ class FH6TrackerGUI(tk.Tk):
 
         if best_balance is None:
             self.show_notice("Auto-detect could not find the credit balance on screen.")
-            messagebox.showinfo("Auto-detect", "Could not find the credit balance.\n\nTips:\n- Make sure Forza is showing the credit display (e.g. main menu or pause screen)\n- Try manually capturing the area instead")
+            self.show_tutorial_messagebox(
+                "tutorial_auto_detect_tips", "showinfo",
+                "Auto-detect", "Could not find the credit balance.\n\nTips:\n- Make sure Forza is showing the credit display (e.g. main menu or pause screen)\n- Try manually capturing the area instead",
+            )
             return
 
         # Refine: scan horizontally within the strip to find the number's left/right edges
