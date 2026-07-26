@@ -641,17 +641,18 @@ class FH6TrackerGUI(tk.Tk):
         header = ttk.Frame(self)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         header.columnconfigure(1, weight=1)
+        self._header_frame = header
 
-        ttk.Label(header, text="Forza Horizon 6 Tracker", font=("Segoe UI", 16, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text="Forza Horizon 6 Tracker", font=("Segoe UI", 16, "bold"), style="Header.TLabel").grid(row=0, column=0, sticky="w")
 
         status_frame = ttk.Frame(header)
         status_frame.grid(row=0, column=1, sticky="e")
         self.status_var = tk.StringVar(value="Status: Stopped")
-        ttk.Label(status_frame, textvariable=self.status_var, foreground="#1f6feb").pack(side="left", padx=(0, 8))
+        ttk.Label(status_frame, textvariable=self.status_var, style="Accent.TLabel").pack(side="left", padx=(0, 8))
         ttk.Button(status_frame, text="Quit", command=self._on_close, width=6).pack(side="right")
 
         self.notice_var = tk.StringVar(value="")
-        self.notice_label = ttk.Label(header, textvariable=self.notice_var, foreground="#137333", font=("Segoe UI", 11, "bold"))
+        self.notice_label = ttk.Label(header, textvariable=self.notice_var, style="Success.TLabel", font=("Segoe UI", 11, "bold"))
         self.notice_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         controls = ttk.Frame(self)
@@ -735,7 +736,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Progressbar(summary_frame, variable=self.collection_progress_var, maximum=100).grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 2))
 
         self.collection_total_value_var = tk.StringVar(value="")
-        ttk.Label(summary_frame, textvariable=self.collection_total_value_var, foreground="#555555").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(summary_frame, textvariable=self.collection_total_value_var, style="Secondary.TLabel").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 6))
 
         filter_frame = ttk.LabelFrame(self.garage_tab, text="Filters")
         filter_frame.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -867,7 +868,7 @@ class FH6TrackerGUI(tk.Tk):
             ocr_status_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=(10, 0))
             ocr_status_frame.columnconfigure(1, weight=1)
             self._live_ocr_status_var = tk.StringVar(value="OCR disabled — enable in Settings tab")
-            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_status_var, foreground="#555555").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 4))
+            ttk.Label(ocr_status_frame, textvariable=self._live_ocr_status_var, style="Secondary.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 4))
             self._live_ocr_balance_var = tk.StringVar(value="")
             ttk.Label(ocr_status_frame, text="Last balance:").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
             ttk.Label(ocr_status_frame, textvariable=self._live_ocr_balance_var, font=("Consolas", 11, "bold")).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=(0, 4))
@@ -904,7 +905,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(control_frame, textvariable=self.method_timer_var, font=("Consolas", 12, "bold")).grid(row=1, column=1, sticky="w", padx=(4, 8), pady=4)
 
         self.method_status_var = tk.StringVar(value="Select a method and click Start Tracking")
-        ttk.Label(control_frame, textvariable=self.method_status_var, foreground="#555555").grid(row=2, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(control_frame, textvariable=self.method_status_var, style="Secondary.TLabel").grid(row=2, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 6))
 
         self.method_start_credits_var = tk.StringVar(value="Starting credits: -")
         self.method_current_credits_var = tk.StringVar(value="Current credits: -")
@@ -913,7 +914,7 @@ class FH6TrackerGUI(tk.Tk):
         info_row.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
         ttk.Label(info_row, textvariable=self.method_start_credits_var).grid(row=0, column=0, sticky="w", padx=(0, 20))
         ttk.Label(info_row, textvariable=self.method_current_credits_var).grid(row=0, column=1, sticky="w", padx=(0, 20))
-        ttk.Label(info_row, textvariable=self.method_crhr_var, font=("Segoe UI", 10, "bold"), foreground="#1f6feb").grid(row=0, column=2, sticky="w")
+        ttk.Label(info_row, textvariable=self.method_crhr_var, font=("Segoe UI", 10, "bold"), style="Accent.TLabel").grid(row=0, column=2, sticky="w")
 
         history_frame = ttk.LabelFrame(self.methods_tab, text="Method History")
         history_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
@@ -953,7 +954,7 @@ class FH6TrackerGUI(tk.Tk):
         txn_scroll.grid(row=0, column=1, sticky="ns", pady=8)
 
         self.txn_summary_var = tk.StringVar(value="No transactions yet")
-        ttk.Label(txn_frame, textvariable=self.txn_summary_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(txn_frame, textvariable=self.txn_summary_var, style="Secondary.TLabel").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
         history_frame = ttk.LabelFrame(self.methods_tab, text="Session Earnings History")
         history_frame.grid(row=5, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -969,7 +970,7 @@ class FH6TrackerGUI(tk.Tk):
         self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
         self.rate_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         self.rate_stats_var = tk.StringVar(value="No rate data yet")
-        ttk.Label(rate_frame, textvariable=self.rate_stats_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(rate_frame, textvariable=self.rate_stats_var, style="Secondary.TLabel").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
     def toggle_method_tracking(self):
         if self._method_active:
@@ -1135,7 +1136,7 @@ class FH6TrackerGUI(tk.Tk):
         self._record_btn = ttk.Button(record_frame, text="Start Recording", command=self._toggle_race_recording)
         self._record_btn.pack(fill="x", padx=4, pady=(4, 2))
         self._record_status_var = tk.StringVar(value="  (or press F6)")
-        ttk.Label(record_frame, textvariable=self._record_status_var, foreground="#555555").pack(padx=4, pady=(0, 4))
+        ttk.Label(record_frame, textvariable=self._record_status_var, style="Secondary.TLabel").pack(padx=4, pady=(0, 4))
 
         right = ttk.Frame(self.races_tab)
         right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
@@ -1196,7 +1197,7 @@ class FH6TrackerGUI(tk.Tk):
         tips_frame.grid(row=5, column=0, sticky="ew", pady=(4, 0))
         tips_frame.columnconfigure(0, weight=1)
         self._race_tips_var = tk.StringVar(value="")
-        ttk.Label(tips_frame, textvariable=self._race_tips_var, justify="left", wraplength=600, foreground="#1f6feb", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", padx=8, pady=6)
+        ttk.Label(tips_frame, textvariable=self._race_tips_var, justify="left", wraplength=600, style="Accent.TLabel", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
         self._selected_race_data = None
         self._race_needs_rerender = False
@@ -1766,7 +1767,7 @@ class FH6TrackerGUI(tk.Tk):
                 "Performance: best in-game FPS (dashboard updates every ~4s)."
             ),
             justify="left",
-            foreground="#555555",
+            style="Secondary.TLabel",
         ).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
 
         ttk.Checkbutton(
@@ -1786,14 +1787,14 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(
             settings_frame,
             text="How often to check if Forza is running. Higher = less CPU, slower auto-detect.",
-            foreground="#555555",
+            style="Secondary.TLabel",
         ).grid(row=7, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
 
         ttk.Button(settings_frame, text="Reset Tutorials", command=self._reset_tutorials).grid(row=8, column=0, sticky="w", padx=8, pady=6)
         ttk.Label(
             settings_frame,
             text="Replay one-time tutorial messages that appear on first use.",
-            foreground="#555555",
+            style="Secondary.TLabel",
         ).grid(row=8, column=1, columnspan=2, sticky="w", padx=(4, 8), pady=6)
 
         ocr_frame = ttk.LabelFrame(settings_inner, text="Automatic Credit Tracking (OCR)")
@@ -1850,7 +1851,7 @@ class FH6TrackerGUI(tk.Tk):
         test_popup_frame.grid(row=9, column=0, columnspan=7, sticky="w", padx=8, pady=(4, 8))
         ttk.Button(test_popup_frame, text="Test Popup Detection", command=self._test_popup_scan).pack(side="left", padx=(0, 8))
         self._popup_test_var = tk.StringVar(value="")
-        ttk.Label(test_popup_frame, textvariable=self._popup_test_var, foreground="#555555").pack(side="left")
+        ttk.Label(test_popup_frame, textvariable=self._popup_test_var, style="Secondary.TLabel").pack(side="left")
 
         preview_frame = ttk.LabelFrame(settings_inner, text="OCR Region Preview")
         preview_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
@@ -1868,7 +1869,7 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(preview_inner, text="Refresh\nPreview", command=self._refresh_ocr_preview).grid(row=0, column=1, sticky="ns")
 
         self._preview_info_var = tk.StringVar(value="")
-        ttk.Label(preview_frame, textvariable=self._preview_info_var, foreground="#555555").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        ttk.Label(preview_frame, textvariable=self._preview_info_var, style="Secondary.TLabel").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
 
         export_frame = ttk.LabelFrame(settings_inner, text="Export & Backup")
         export_frame.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -1885,7 +1886,7 @@ class FH6TrackerGUI(tk.Tk):
         update_frame.columnconfigure(1, weight=1)
 
         self._update_status_var = tk.StringVar(value="")
-        ttk.Label(update_frame, textvariable=self._update_status_var, foreground="#555555").grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 0))
+        ttk.Label(update_frame, textvariable=self._update_status_var, style="Secondary.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 0))
 
         ttk.Button(update_frame, text="Check for Updates", command=self._check_for_updates).grid(row=1, column=0, padx=8, pady=6, sticky="w")
         ttk.Button(update_frame, text="Restart App", command=self._restart_app).grid(row=1, column=1, padx=(4, 8), pady=6, sticky="w")
@@ -1924,7 +1925,7 @@ class FH6TrackerGUI(tk.Tk):
         self.recommendations_tree.configure(yscrollcommand=rec_scroll.set)
 
         self.rec_summary_var = tk.StringVar(value="Click Refresh to generate recommendations.")
-        ttk.Label(self.recommendations_tab, textvariable=self.rec_summary_var, foreground="#555555").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 8))
+        ttk.Label(self.recommendations_tab, textvariable=self.rec_summary_var, style="Secondary.TLabel").grid(row=2, column=0, sticky="w", padx=8, pady=(0, 8))
 
     def _performance_preset(self):
         return car_lookup.get_performance_preset(self.settings.get("performance_mode"))
@@ -4856,39 +4857,53 @@ class FH6TrackerGUI(tk.Tk):
         theme_name = theme_name or "light"
         self.settings["theme"] = theme_name
         if theme_name == "dark":
-            bg = "#010300"
-            fg = "#FFFEFE"
-            field_bg = "#2b2b2b"
-            accent = "#6ba8ff"
-            button_bg = "#2f4f78"
+            bg = "#0d1117"
+            fg = "#e6edf3"
+            field_bg = "#161b22"
+            accent = "#58a6ff"
+            button_bg = "#21262d"
+            border_color = "#30363d"
+            header_bg = "#010409"
+            secondary_fg = "#8b949e"
         else:
-            bg = "#f7f7f7"
-            fg = "#222222"
+            bg = "#f6f8fa"
+            fg = "#24292f"
             field_bg = "white"
-            accent = "#1f6feb"
-            button_bg = "#dce8ff"
+            accent = "#0969da"
+            button_bg = "#eaeef2"
+            border_color = "#d0d7de"
+            header_bg = "#ffffff"
+            secondary_fg = "#57606a"
 
         self.configure(bg=bg)
         self.style.theme_use("clam")
         self.style.configure(".", background=bg, foreground=fg, fieldbackground=field_bg, selectbackground=accent, selectforeground="white")
         self.style.configure("TFrame", background=bg)
-        self.style.configure("TLabelframe", background=bg)
-        self.style.configure("TLabelframe.Label", background=bg, foreground=fg)
-        self.style.configure("TNotebook", background=bg, borderwidth=0)
-        self.style.configure("TNotebook.Tab", background=button_bg, foreground=fg, padding=[10, 4])
-        self.style.map("TNotebook.Tab", background=[("selected", accent), ("active", button_bg)], foreground=[("selected", "white"), ("active", fg)])
-        self.style.configure("TButton", background=button_bg, foreground=fg, bordercolor=accent)
-        self.style.map("TButton", background=[("active", accent), ("pressed", accent)], foreground=[("active", "white")])
-        self.style.configure("TEntry", fieldbackground=field_bg, foreground=fg)
-        self.style.configure("TCombobox", fieldbackground=field_bg, foreground=fg, arrowcolor=fg)
+        self.style.configure("Header.TFrame", background=header_bg)
         self.style.configure("TLabel", background=bg, foreground=fg)
-        self.style.configure("TProgressbar", background=accent, troughcolor=field_bg, bordercolor=bg)
-        self.style.configure("Treeview", background=field_bg, foreground=fg, fieldbackground=field_bg)
-        self.style.configure("Treeview.Heading", background=button_bg, foreground=fg, fieldbackground=button_bg)
+        self.style.configure("Header.TLabel", background=header_bg, foreground=fg)
+        self.style.configure("Secondary.TLabel", background=bg, foreground=secondary_fg)
+        self.style.configure("Accent.TLabel", background=bg, foreground=accent)
+        self.style.configure("Success.TLabel", background=bg, foreground="#3fb950")
+        self.style.configure("Danger.TLabel", background=bg, foreground="#f85149")
+        self.style.configure("TLabelframe", background=bg, bordercolor=border_color, relief="groove")
+        self.style.configure("TLabelframe.Label", background=bg, foreground=secondary_fg, font=("Segoe UI", 9))
+        self.style.configure("TNotebook", background=bg, borderwidth=0)
+        self.style.configure("TNotebook.Tab", background=button_bg, foreground=fg, padding=[14, 6])
+        self.style.map("TNotebook.Tab", background=[("selected", accent), ("active", button_bg)], foreground=[("selected", "white"), ("active", fg)])
+        self.style.configure("TButton", background=button_bg, foreground=fg, bordercolor=border_color, padding=[10, 4])
+        self.style.map("TButton", background=[("active", accent), ("pressed", accent)], foreground=[("active", "white")])
+        self.style.configure("Accent.TButton", background=accent, foreground="white", bordercolor=accent)
+        self.style.map("Accent.TButton", background=[("active", "#79c0ff"), ("pressed", "#58a6ff")], foreground=[("active", "white")])
+        self.style.configure("TEntry", fieldbackground=field_bg, foreground=fg, bordercolor=border_color)
+        self.style.configure("TCombobox", fieldbackground=field_bg, foreground=fg, arrowcolor=fg, bordercolor=border_color)
+        self.style.configure("TProgressbar", background=accent, troughcolor=field_bg, bordercolor=border_color)
+        self.style.configure("Treeview", background=field_bg, foreground=fg, fieldbackground=field_bg, bordercolor=border_color)
+        self.style.configure("Treeview.Heading", background=button_bg, foreground=fg, fieldbackground=button_bg, bordercolor=border_color)
         self.style.map("Treeview.Heading", background=[("active", accent)])
-        self.style.configure("Vertical.TScrollbar", background=button_bg, troughcolor=field_bg, arrowcolor=fg)
-        self.style.configure("Horizontal.TScrollbar", background=button_bg, troughcolor=field_bg, arrowcolor=fg)
-        self.style.configure("Listbox", background=field_bg, foreground=fg, selectbackground=accent)
+        self.style.configure("Vertical.TScrollbar", background=button_bg, troughcolor=field_bg, arrowcolor=fg, bordercolor=border_color)
+        self.style.configure("Horizontal.TScrollbar", background=button_bg, troughcolor=field_bg, arrowcolor=fg, bordercolor=border_color)
+        self.style.configure("Listbox", background=field_bg, foreground=fg, selectbackground=accent, borderwidth=1, relief="solid")
         self.style.configure("Text", background=field_bg, foreground=fg, insertbackground=fg)
         if theme_name == "dark":
             self.style.configure("Canvas", background=field_bg)
@@ -4897,8 +4912,16 @@ class FH6TrackerGUI(tk.Tk):
             if canvas:
                 canvas.configure(bg=field_bg if theme_name == "dark" else "white")
         if hasattr(self, "watermark"):
-            wm_fg = "#555555" if theme_name == "light" else "#888888"
+            wm_fg = "#8b949e" if theme_name == "dark" else "#57606a"
             self.watermark.configure(bg=bg, fg=wm_fg)
+        if hasattr(self, "_header_frame"):
+            self._header_frame.configure(style="Header.TFrame")
+            for child in self._header_frame.winfo_children():
+                if isinstance(child, ttk.Label):
+                    try:
+                        child.configure(style="Header.TLabel")
+                    except Exception:
+                        pass
 
 
     # =====================================================================
