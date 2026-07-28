@@ -1169,7 +1169,7 @@ class FH6TrackerGUI(tk.Tk):
         right = ttk.Frame(self.races_tab)
         right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(3, weight=1)
+        right.rowconfigure(4, weight=1)
 
         self._race_info_var = tk.StringVar(value="Select a race from the list to analyze it.")
         ttk.Label(right, textvariable=self._race_info_var, font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", pady=(0, 4))
@@ -1187,8 +1187,24 @@ class FH6TrackerGUI(tk.Tk):
         self._race_breakdown_var = tk.StringVar(value="")
         ttk.Label(breakdown_frame, textvariable=self._race_breakdown_var, justify="left", font=("Consolas", 9), wraplength=600).grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
+        race_type_frame = ttk.Frame(right)
+        race_type_frame.grid(row=3, column=0, sticky="ew", pady=(0, 4))
+        ttk.Label(race_type_frame, text="Race type:").pack(side="left", padx=(0, 4))
+        self._race_type_var = tk.StringVar(value="Road Racing")
+        self._race_type_combo = ttk.Combobox(race_type_frame, textvariable=self._race_type_var, values=["Road Racing", "Street Racing", "Dirt Racing", "Drag Racing", "Drift", "Cross Country", "PR Stunts"], state="readonly", width=16)
+        self._race_type_combo.pack(side="left")
+        self._race_type_combo.bind("<<ComboboxSelected>>", lambda e: self._rerender_race_charts())
+        ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
+        self._chart_toggle_vars = {}
+        chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear")]
+        for key, label in chart_toggle_keys:
+            var = tk.BooleanVar(value=True)
+            self._chart_toggle_vars[key] = var
+            cb = ttk.Checkbutton(race_type_frame, text=label, variable=var, command=self._rerender_race_charts)
+            cb.pack(side="left", padx=(1, 0))
+
         chart_outer_frame = ttk.Frame(right)
-        chart_outer_frame.grid(row=3, column=0, sticky="nsew")
+        chart_outer_frame.grid(row=4, column=0, sticky="nsew")
         chart_outer_frame.columnconfigure(0, weight=1)
         chart_outer_frame.rowconfigure(0, weight=1)
 
@@ -1207,6 +1223,9 @@ class FH6TrackerGUI(tk.Tk):
         chart_frame.rowconfigure(0, minsize=chart_heights.get("race_speed", 120))
         chart_frame.rowconfigure(1, minsize=chart_heights.get("race_inputs", 120))
         chart_frame.rowconfigure(2, minsize=chart_heights.get("race_steering", 80))
+        chart_frame.rowconfigure(3, minsize=chart_heights.get("race_rpm", 100))
+        chart_frame.rowconfigure(4, minsize=chart_heights.get("race_power", 100))
+        chart_frame.rowconfigure(5, minsize=chart_heights.get("race_gear", 80))
         self._chart_frame = chart_frame
         self._chart_canvas = chart_canvas
 
@@ -1225,7 +1244,13 @@ class FH6TrackerGUI(tk.Tk):
         self._race_canvas_inputs = tk.Canvas(chart_frame, height=chart_heights.get("race_inputs", 120), highlightthickness=0)
         self._race_canvas_inputs.grid(row=1, column=0, sticky="ew", pady=(0, 4))
         self._race_canvas_steer = tk.Canvas(chart_frame, height=chart_heights.get("race_steering", 80), highlightthickness=0)
-        self._race_canvas_steer.grid(row=2, column=0, sticky="ew")
+        self._race_canvas_steer.grid(row=2, column=0, sticky="ew", pady=(0, 4))
+        self._race_canvas_rpm = tk.Canvas(chart_frame, height=chart_heights.get("race_rpm", 100), highlightthickness=0)
+        self._race_canvas_rpm.grid(row=3, column=0, sticky="ew", pady=(0, 4))
+        self._race_canvas_power = tk.Canvas(chart_frame, height=chart_heights.get("race_power", 100), highlightthickness=0)
+        self._race_canvas_power.grid(row=4, column=0, sticky="ew", pady=(0, 4))
+        self._race_canvas_gear = tk.Canvas(chart_frame, height=chart_heights.get("race_gear", 80), highlightthickness=0)
+        self._race_canvas_gear.grid(row=5, column=0, sticky="ew")
 
         # Re-render charts when the frame is resized (e.g. window resize)
         self._chart_resize_after_id = None
@@ -1242,13 +1267,13 @@ class FH6TrackerGUI(tk.Tk):
         chart_frame.bind("<Configure>", _on_chart_frame_configure)
 
         stats_frame = ttk.LabelFrame(right, text="Race Stats")
-        stats_frame.grid(row=4, column=0, sticky="ew", pady=(4, 0))
+        stats_frame.grid(row=5, column=0, sticky="ew", pady=(4, 0))
         stats_frame.columnconfigure(1, weight=1)
         self._race_stats_var = tk.StringVar(value="")
         ttk.Label(stats_frame, textvariable=self._race_stats_var, justify="left", wraplength=600).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=6)
 
         tips_frame = ttk.LabelFrame(right, text="Driving Tips (sorted by impact)")
-        tips_frame.grid(row=5, column=0, sticky="ew", pady=(4, 0))
+        tips_frame.grid(row=6, column=0, sticky="ew", pady=(4, 0))
         tips_frame.columnconfigure(0, weight=1)
         self._race_tips_var = tk.StringVar(value="")
         ttk.Label(tips_frame, textvariable=self._race_tips_var, justify="left", wraplength=600, style="Accent.TLabel", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", padx=8, pady=6)
@@ -1318,6 +1343,66 @@ class FH6TrackerGUI(tk.Tk):
         else:
             self._render_race_analysis(data)
 
+    @staticmethod
+    def _auto_detect_race_type(samples, duration):
+        if not samples or len(samples) < 20:
+            return None
+        speeds = [s.get("spd", 0) for s in samples]
+        throttles = [s.get("thr", 0) for s in samples]
+        brakes = [s.get("brk", 0) for s in samples]
+        steers = [s.get("str", 0) for s in samples]
+        hbrakes = [s.get("hbrk", 0) for s in samples]
+
+        max_speed = max(speeds)
+        avg_speed = sum(speeds) / len(speeds)
+        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        handbrake_pct = sum(1 for h in hbrakes if h > 0.1) / len(hbrakes) * 100
+        avg_steer = sum(abs(s) for s in steers) / len(steers)
+        steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+
+        # Drag: short, full throttle, straight, minimal braking
+        if (throttle_pct > 70 and braking_pct < 5 and avg_steer < 0.12 and duration < 40):
+            return "Drag Racing"
+        if (max_speed > 140 and duration < 30 and throttle_pct > 75 and braking_pct < 8):
+            return "Drag Racing"
+
+        # Drift: handbrake usage, high steering angle
+        if handbrake_pct > 3 and avg_steer > 0.25:
+            return "Drift"
+        if handbrake_pct > 5:
+            return "Drift"
+        if avg_steer > 0.35 and steer_smoothness > 0.06:
+            return "Drift"
+
+        # Dirt Racing: circuit-like but more steering correction, lower avg speed
+        steer_smoothness2 = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+        if (duration > 50 and avg_steer > 0.15 and avg_speed < 65 and throttle_pct > 45 and steer_smoothness2 > 0.04):
+            return "Dirt Racing"
+
+        # Cross Country: high speed variance, inconsistent traction
+        speed_std = (sum((s - avg_speed) ** 2 for s in speeds) / len(speeds)) ** 0.5 if speeds else 0
+        # Speed drops to near-zero (jumps)
+        air_time = sum(1 for i in range(1, len(speeds)) if speeds[i] < 3 and speeds[i - 1] > 30)
+        if (speed_std > 25 and avg_speed < 70 and throttle_pct > 40):
+            return "Cross Country"
+        if air_time > 3:
+            return "Cross Country"
+        if speed_std > 35 and throttle_pct > 50:
+            return "Cross Country"
+
+        # PR Stunts: very short, high speed
+        if duration < 25 and max_speed > 100:
+            return "PR Stunts"
+
+        # Circuit: longer, consistent patterns
+        if duration > 60:
+            return "Road Racing"
+        if avg_speed > 45 and duration > 30:
+            return "Street Racing"
+
+        return None
+
     def _render_race_analysis(self, data):
         car = data.get("car_name", "Unknown")
         dur = data.get("duration_seconds", 0)
@@ -1325,13 +1410,47 @@ class FH6TrackerGUI(tk.Tk):
         samples = data.get("samples", [])
         mins = int(dur) // 60
         secs = int(dur) % 60
-        self._race_info_var.set(f"{car}  |  {start}  |  {mins}:{secs:02d}  |  {len(samples)} samples")
+        auto_type = self._auto_detect_race_type(samples, dur)
+        if auto_type and hasattr(self, "_race_type_var"):
+            self._race_type_var.set(auto_type)
+            race_type = auto_type
+        else:
+            race_type = self._race_type_var.get() if hasattr(self, "_race_type_var") else "Road Racing"
+        self._race_info_var.set(f"{car}  |  {start}  |  {mins}:{secs:02d}  |  {len(samples)} samples  |  {race_type}")
 
-        self._draw_speed_chart(samples)
-        self._draw_inputs_chart(samples)
-        self._draw_steering_chart(samples)
-        self._compute_race_stats(samples, dur)
-        self._generate_driving_tips(samples, dur)
+        toggle = self._chart_toggle_vars if hasattr(self, "_chart_toggle_vars") else {}
+        if toggle.get("spd", True):
+            self._race_canvas_speed.grid()
+            self._draw_speed_chart(samples)
+        else:
+            self._race_canvas_speed.grid_remove()
+        if toggle.get("inputs", True):
+            self._race_canvas_inputs.grid()
+            self._draw_inputs_chart(samples)
+        else:
+            self._race_canvas_inputs.grid_remove()
+        if toggle.get("steer", True):
+            self._race_canvas_steer.grid()
+            self._draw_steering_chart(samples)
+        else:
+            self._race_canvas_steer.grid_remove()
+        if toggle.get("rpm", True):
+            self._race_canvas_rpm.grid()
+            self._draw_rpm_chart(samples)
+        else:
+            self._race_canvas_rpm.grid_remove()
+        if toggle.get("pwr", True):
+            self._race_canvas_power.grid()
+            self._draw_power_chart(samples)
+        else:
+            self._race_canvas_power.grid_remove()
+        if toggle.get("gear", True):
+            self._race_canvas_gear.grid()
+            self._draw_gear_chart(samples)
+        else:
+            self._race_canvas_gear.grid_remove()
+        self._compute_race_stats(samples, dur, race_type)
+        self._generate_driving_tips(samples, dur, race_type)
 
     def _draw_chart(self, canvas, data, fields, colors, labels, y_min=0.0, y_max=1.0, title=""):
         canvas.delete("all")
@@ -1396,6 +1515,37 @@ class FH6TrackerGUI(tk.Tk):
             title="Steering",
         )
 
+    def _draw_rpm_chart(self, samples):
+        max_rpm = max((s.get("rpm", 0) for s in samples), default=8000)
+        self._draw_chart(
+            self._race_canvas_rpm, samples,
+            fields=["rpm"], colors=["#0891b2"], labels=["RPM"],
+            y_min=0, y_max=max_rpm * 1.1,
+            title="RPM",
+        )
+
+    def _draw_power_chart(self, samples):
+        max_pwr = max((s.get("pwr", 0) / 746 for s in samples), default=100)
+        self._draw_chart(
+            self._race_canvas_power, samples,
+            fields=["pwr"], colors=["#7c3aed"], labels=["HP"],
+            y_min=0, y_max=max_pwr * 1.1,
+            title="Power (HP)",
+        )
+
+    def _draw_gear_chart(self, samples):
+        max_gear = max((s.get("gear", 0) for s in samples), default=6)
+        self._draw_chart(
+            self._race_canvas_gear, samples,
+            fields=["gear"], colors=["#be185d"], labels=["Gear"],
+            y_min=0, y_max=max_gear + 1,
+            title="Gear",
+        )
+
+    def _rerender_race_charts(self):
+        if self._selected_race_data:
+            self._render_race_analysis(self._selected_race_data)
+
     @staticmethod
     def _race_rating(value, good_threshold, bad_threshold, invert=False):
         """Return (label, color) for a metric. If invert=True, lower is better."""
@@ -1412,8 +1562,8 @@ class FH6TrackerGUI(tk.Tk):
         return "ok", "#b06000"
 
     @staticmethod
-    def _compute_race_grade(samples):
-        """Score the race 0-100 and return a letter grade."""
+    def _compute_race_grade(samples, race_type="Road Racing"):
+        """Score the race 0-100 and return a letter grade. Criteria vary by race type."""
         if len(samples) < 10:
             return 50, "C"
         score = 0
@@ -1421,55 +1571,161 @@ class FH6TrackerGUI(tk.Tk):
         throttles = [s.get("thr", 0) for s in samples]
         brakes = [s.get("brk", 0) for s in samples]
         steers = [s.get("str", 0) for s in samples]
+        hbrakes = [s.get("hbrk", 0) for s in samples]
+        rpms = [s.get("rpm", 0) for s in samples]
 
         throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
         braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        handbrake_pct = sum(1 for h in hbrakes if h > 0.1) / len(hbrakes) * 100
         brake_overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
         max_speed = max(speeds)
 
-        if throttle_pct >= 65:
-            score += 25
-        elif throttle_pct >= 45:
-            score += 15
-        elif throttle_pct >= 30:
-            score += 8
+        if race_type == "Drift":
+            # Drift: reward handbrake, steering angle, throttle modulation
+            drift_steer = sum(abs(s) for s in steers) / len(steers)
+            if handbrake_pct >= 5:
+                score += 25
+            elif handbrake_pct >= 2:
+                score += 15
+            else:
+                score += 5
+            if drift_steer >= 0.5:
+                score += 25
+            elif drift_steer >= 0.3:
+                score += 15
+            elif drift_steer >= 0.15:
+                score += 8
+            if 40 <= throttle_pct <= 75:
+                score += 20
+            elif throttle_pct >= 30:
+                score += 10
+            steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+            if steer_smoothness >= 0.08:
+                score += 15
+            elif steer_smoothness >= 0.04:
+                score += 8
+            if max_speed >= 100:
+                score += 15
+            elif max_speed >= 60:
+                score += 8
 
-        if 8 <= braking_pct <= 20:
-            score += 20
-        elif braking_pct < 8:
-            score += 12
-        elif braking_pct <= 30:
-            score += 5
+        elif race_type == "Drag Racing":
+            # Drag: reward shift timing, top speed, launch rpm
+            max_rpm = max(rpms) if rpms else 8000
+            shift_data = None
+            shifts = []
+            for i in range(1, len(samples)):
+                prev_g = samples[i - 1].get("gear", 0)
+                cur_g = samples[i].get("gear", 0)
+                if cur_g > prev_g and cur_g > 0:
+                    shifts.append({"rpm": samples[i].get("rpm", 0)})
+            if shifts:
+                shift_data = {"count": len(shifts), "avg_rpm": sum(s["rpm"] for s in shifts) / len(shifts)}
+            if shift_data:
+                if shift_data["avg_rpm"] >= max_rpm * 0.85:
+                    score += 30
+                elif shift_data["avg_rpm"] >= max_rpm * 0.7:
+                    score += 20
+                else:
+                    score += 5
+            if max_speed >= 200:
+                score += 30
+            elif max_speed >= 150:
+                score += 20
+            elif max_speed >= 100:
+                score += 10
+            if throttle_pct >= 80:
+                score += 25
+            elif throttle_pct >= 60:
+                score += 15
+            braking_pct_drag = sum(1 for b in brakes if b > 0.2) / len(brakes) * 100
+            if braking_pct_drag < 5:
+                score += 15
+            elif braking_pct_drag < 10:
+                score += 5
 
-        smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
-        if smoothness < 0.04:
-            score += 20
-        elif smoothness < 0.08:
-            score += 12
-        elif smoothness < 0.12:
-            score += 5
+        elif race_type == "Dirt Racing":
+            # Dirt: reward throttle modulation, smooth steering, lower braking
+            if throttle_pct >= 55:
+                score += 25
+            elif throttle_pct >= 40:
+                score += 15
+            elif throttle_pct >= 30:
+                score += 8
+            if 10 <= braking_pct <= 25:
+                score += 20
+            elif braking_pct < 10:
+                score += 12
+            elif braking_pct <= 35:
+                score += 5
+            smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+            if smoothness < 0.06:
+                score += 20
+            elif smoothness < 0.10:
+                score += 12
+            elif smoothness < 0.15:
+                score += 5
+            if max_speed >= 140:
+                score += 15
+            elif max_speed >= 100:
+                score += 10
+            elif max_speed >= 70:
+                score += 5
+            avg_steer = sum(abs(s) for s in steers) / len(steers)
+            if 0.15 <= avg_steer <= 0.35:
+                score += 10
+            if brake_overlap < 3:
+                score += 10
+            elif brake_overlap < 6:
+                score += 5
+            if braking_pct > 35:
+                score -= 10
 
-        if max_speed >= 180:
-            score += 15
-        elif max_speed >= 140:
-            score += 10
-        elif max_speed >= 100:
-            score += 5
+        else:
+            # Circuit / Street / Cross Country / PR Stunts: current logic
+            if throttle_pct >= 65:
+                score += 25
+            elif throttle_pct >= 45:
+                score += 15
+            elif throttle_pct >= 30:
+                score += 8
 
-        if brake_overlap < 2:
-            score += 10
-        elif brake_overlap < 5:
-            score += 5
-        elif brake_overlap > 10:
-            score -= 10
+            if 8 <= braking_pct <= 20:
+                score += 20
+            elif braking_pct < 8:
+                score += 12
+            elif braking_pct <= 30:
+                score += 5
 
-        if brake_overlap > 10:
-            score -= 5
+            smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+            if smoothness < 0.04:
+                score += 20
+            elif smoothness < 0.08:
+                score += 12
+            elif smoothness < 0.12:
+                score += 5
 
-        if braking_pct > 35:
-            score -= 10
-        if throttle_pct < 20 and max_speed > 60:
-            score -= 5
+            if max_speed >= 180:
+                score += 15
+            elif max_speed >= 140:
+                score += 10
+            elif max_speed >= 100:
+                score += 5
+
+            if brake_overlap < 2:
+                score += 10
+            elif brake_overlap < 5:
+                score += 5
+            elif brake_overlap > 10:
+                score -= 10
+
+            if brake_overlap > 10:
+                score -= 5
+
+            if braking_pct > 35:
+                score -= 10
+            if throttle_pct < 20 and max_speed > 60:
+                score -= 5
 
         score = max(0, min(100, score))
         if score >= 90:
@@ -1588,7 +1844,7 @@ class FH6TrackerGUI(tk.Tk):
 
         return lines
 
-    def _compute_race_stats(self, samples, duration):
+    def _compute_race_stats(self, samples, duration, race_type="Road Racing"):
         if not samples:
             self._race_stats_var.set("No data")
             self._race_grade_var.set("")
@@ -1601,18 +1857,23 @@ class FH6TrackerGUI(tk.Tk):
         brakes = [s.get("brk", 0) for s in samples]
         gears = [s.get("gear", 0) for s in samples]
         hpms = [s.get("pwr", 0) / 746 for s in samples]
+        rpms = [s.get("rpm", 0) for s in samples]
+        steers = [s.get("str", 0) for s in samples]
+        hbrakes = [s.get("hbrk", 0) for s in samples]
         avg_speed = sum(speeds) / len(speeds)
         max_speed = max(speeds)
         max_hp = max(hpms) if hpms else 0
+        max_rpm = max(rpms) if rpms else 0
         throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
         braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+        handbrake_pct = sum(1 for h in hbrakes if h > 0.1) / len(hbrakes) * 100
         gear_usage = {}
         for g in gears:
             if g > 0:
                 gear_usage[g] = gear_usage.get(g, 0) + 1
         top_gear = max(gear_usage, key=gear_usage.get) if gear_usage else 0
 
-        grade_score, grade_letter = self._compute_race_grade(samples)
+        grade_score, grade_letter = self._compute_race_grade(samples, race_type)
 
         grade_colors = {"A+": "#137333", "A": "#137333", "B": "#b06000", "C": "#b06000", "D": "#c5221f", "F": "#c5221f"}
         self._race_grade_var.set(f"Grade: {grade_letter}")
@@ -1627,15 +1888,40 @@ class FH6TrackerGUI(tk.Tk):
 
         mins = int(duration) // 60
         secs = int(duration) % 60
-        stats = (
-            f"Top Speed: {max_speed:.0f} MPH   |   Avg Speed: {avg_speed:.0f} MPH   |   "
-            f"Peak Power: {max_hp:.0f} HP\n"
-            f"Throttle: {throttle_pct:.0f}%   |   Braking: {braking_pct:.0f}%   |   "
-            f"Top Gear: {top_gear}   |   Gears Used: {', '.join(str(g) for g in sorted(gear_usage.keys()))}"
-        )
+        if race_type == "Drag Racing":
+            avg_shift_rpm = 0
+            shift_data = self._compute_shift_analysis(samples)
+            if shift_data:
+                avg_shift_rpm = shift_data["avg_rpm"]
+            stats = (
+                f"Top Speed: {max_speed:.0f} MPH   |   Peak Power: {max_hp:.0f} HP   |   Max RPM: {max_rpm:.0f}\n"
+                f"Avg Shift RPM: {avg_shift_rpm:.0f}   |   Gears Used: {', '.join(str(g) for g in sorted(gear_usage.keys()))}"
+            )
+        elif race_type == "Dirt Racing":
+            avg_steer = sum(abs(s) for s in steers) / len(steers) if steers else 0
+            steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+            stats = (
+                f"Top Speed: {max_speed:.0f} MPH   |   Avg Speed: {avg_speed:.0f} MPH   |   Peak Power: {max_hp:.0f} HP\n"
+                f"Throttle: {throttle_pct:.0f}%   |   Braking: {braking_pct:.0f}%   |   "
+                f"Avg Steer: {avg_steer:.2f}   |   Smoothness: {steer_smoothness:.3f}"
+            )
+        elif race_type == "Drift":
+            avg_steer = sum(abs(s) for s in steers) / len(steers) if steers else 0
+            stats = (
+                f"Top Speed: {max_speed:.0f} MPH   |   Peak Power: {max_hp:.0f} HP   |   Max RPM: {max_rpm:.0f}\n"
+                f"Handbrake: {handbrake_pct:.0f}%   |   Avg Steer Angle: {avg_steer:.2f}   |   "
+                f"Throttle: {throttle_pct:.0f}%   |   Braking: {braking_pct:.0f}%"
+            )
+        else:
+            stats = (
+                f"Top Speed: {max_speed:.0f} MPH   |   Avg Speed: {avg_speed:.0f} MPH   |   "
+                f"Peak Power: {max_hp:.0f} HP\n"
+                f"Throttle: {throttle_pct:.0f}%   |   Braking: {braking_pct:.0f}%   |   "
+                f"Top Gear: {top_gear}   |   Gears Used: {', '.join(str(g) for g in sorted(gear_usage.keys()))}"
+            )
         self._race_stats_var.set(stats)
 
-    def _generate_driving_tips(self, samples, duration):
+    def _generate_driving_tips(self, samples, duration, race_type="Road Racing"):
         if not samples or len(samples) < 20:
             self._race_tips_var.set("Not enough data for tips — need a longer race for meaningful analysis.")
             return
@@ -1647,119 +1933,187 @@ class FH6TrackerGUI(tk.Tk):
         speeds = [s.get("spd", 0) for s in samples]
         gears = [s.get("gear", 0) for s in samples]
         rpms = [s.get("rpm", 0) for s in samples]
+        hbrakes = [s.get("hbrk", 0) for s in samples]
         max_speed = max(speeds)
         avg_speed = sum(speeds) / len(speeds)
 
-        # --- Braking analysis (biggest time-loss for most players) ---
-        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
-        if braking_pct > 30:
-            tips.append((
-                1,
-                f"You're braking for {braking_pct:.0f}% of the race — that's a lot of lost time.",
-                "Focus on braking LATER and HARDER in a straight line, then release the brake as you turn in. "
-                "Most corners in FH6 can be taken with one firm brake input, not multiple taps."
-            ))
-        elif braking_pct > 20:
-            tips.append((
-                2,
-                f"Braking takes up {braking_pct:.0f}% of the race — slightly high.",
-                "Try braking a half-second later than you think you need to. "
-                "Trust the car's grip and brake firmly once, then get back on the power early."
-            ))
-        elif braking_pct < 5 and max_speed > 80:
-            tips.append((
-                2,
-                "Almost no braking detected — you might be coasting through corners.",
-                "Coasting is slower than braking late and getting on the power early. "
-                "Try braking firmly right before the corner, then accelerating through the exit."
-            ))
+        if race_type == "Dirt Racing":
+            braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+            if braking_pct > 25:
+                tips.append((1, f"Braking {braking_pct:.0f}% of the time — too much for dirt.",
+                    "On dirt, you can brake later and lighter than on tarmac. "
+                    "Let the surface slow the car — trail-brake into corners instead of heavy stopping."))
+            throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+            if throttle_pct < 45:
+                tips.append((1, f"Throttle commitment at {throttle_pct:.0f}% — get on the power sooner.",
+                    "Dirt racing rewards early throttle. Even with some wheelspin, "
+                    "getting the power down early through corners builds momentum."))
+            steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+            if steer_smoothness > 0.10:
+                tips.append((2, f"Steering is twitchy (avg change: {steer_smoothness:.3f}).",
+                    "Dirt requires smoother inputs than you think. Let the car slide naturally "
+                    "and use small steering corrections rather than sawing at the wheel."))
+            avg_steer = sum(abs(s) for s in steers) / len(steers)
+            if avg_steer < 0.12:
+                tips.append((2, f"Average steering angle is only {avg_steer:.2f} — don't be afraid to slide.",
+                    "On dirt, you need to steer more aggressively to rotate the car. "
+                    "Initiate turns with a bit of opposite lock and let the rear step out."))
+            overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
+            if overlap > 5:
+                tips.append((2, f"Pedal overlap {overlap:.0f}% — brake and throttle together less.",
+                    "On dirt, try to brake BEFORE the corner, then get back on the power. "
+                    "Trail-braking is useful, but full pedal overlap just unsettles the car."))
+            if not tips:
+                tips.append((0, "Solid dirt driving!", "Consistency is key on loose surfaces. "
+                    "Focus on carrying momentum through corners rather than outright speed."))
 
-        # --- Brake overlap (wasted energy) ---
-        overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
-        if overlap > 5:
-            tips.append((
-                1,
-                f"You're pressing brake and throttle at the same time {overlap:.0f}% of the race.",
-                "Brake overlap kills both speed and fuel. Lift off the throttle fully before braking, "
-                "then get back on the power only after you've released the brake."
-            ))
+        elif race_type == "Drift":
+            handbrake_pct = sum(1 for h in hbrakes if h > 0.1) / len(hbrakes) * 100
+            if handbrake_pct < 2:
+                tips.append((1, "Very little handbrake usage — drifting needs it!",
+                    "In FH6, use the handbrake (default: Space / B) to initiate and extend drifts. "
+                    "Tap it while turning to break traction, then counter-steer and modulate throttle."))
+            elif handbrake_pct < 8:
+                tips.append((3, f"Handbrake used {handbrake_pct:.0f}% of the time — could use more.",
+                    "Try using the handbrake more aggressively in hairpins and long sweepers. "
+                    "The key is a quick tap, not holding it."))
+            avg_steer = sum(abs(s) for s in steers) / len(steers)
+            if avg_steer < 0.2:
+                tips.append((1, f"Average steering angle is only {avg_steer:.2f} — not much angle.",
+                    "For longer drifts, you need more steering lock. "
+                    "Initiate with a quick flick, then counter-steer to hold the slide."))
+            if max_speed < 60:
+                tips.append((2, f"Top speed is only {max_speed:.0f} MPH — too slow for big drift scores.",
+                    "Drift zones reward speed + angle. Try entering corners faster "
+                    "and using more throttle to maintain speed through the slide."))
+            throttle_mod = sum(abs(throttles[i] - throttles[i - 1]) for i in range(1, len(throttles))) / len(throttles)
+            if throttle_mod < 0.05:
+                tips.append((2, "Throttle is very steady — try modulating it mid-drift.",
+                    "Feathering the throttle mid-slide helps control your angle and speed. "
+                    "Pulse the throttle to extend or tighten the drift."))
+            if not tips:
+                tips.append((0, "Solid drift technique!", "Try chaining longer drifts and linking corners for higher scores."))
 
-        # --- Brake pumping ---
-        brake_transitions = sum(1 for i in range(1, len(brakes)) if brakes[i] > 0.3 and brakes[i - 1] < 0.1)
-        if brake_transitions > 15 and duration > 10:
-            tips.append((
-                2,
-                f"You pumped the brakes {brake_transitions} times — that's frequent.",
-                "Pumping brakes unsettles the car and extends braking distance. "
-                "Brake once, firmly, then release. One smooth input per corner is faster."
-            ))
+        elif race_type == "Drag Racing":
+            shift_data = self._compute_shift_analysis(samples)
+            if shift_data:
+                max_rpm = shift_data["max_rpm_observed"]
+                if shift_data["avg_rpm"] < max_rpm * 0.75:
+                    tips.append((1, f"Shifting at {shift_data['avg_rpm']:.0f} RPM — shift higher!",
+                        "For max acceleration in a drag race, shift just before the redline "
+                        "(around 90-95% of max RPM). Short-shifting costs you ET."))
+                if shift_data["over_shifts"] >= 1:
+                    tips.append((2, f"Hit the rev limiter {shift_data['over_shifts']} times.",
+                        "Hitting the limiter kills momentum. Practice the timing so you shift "
+                        "just before the needle hits the red zone."))
+            braking_pct_drag = sum(1 for b in brakes if b > 0.2) / len(brakes) * 100
+            if braking_pct_drag > 5:
+                tips.append((1, f"Braking {braking_pct_drag:.0f}% of the time — drag races are full throttle!",
+                    "In a drag race, you should almost never touch the brakes after launch. "
+                    "If you're braking, you're not accelerating."))
+            launch_rpm = rpms[0] if rpms else 0
+            max_rpm = max(rpms) if rpms else 8000
+            if launch_rpm < max_rpm * 0.5:
+                tips.append((2, f"Launch at only {launch_rpm:.0f} RPM — too low.",
+                    "For the best launch, hold the RPM at around 3000-4000 before dropping the clutch "
+                    "(or mashing the throttle in automatic). Experiment to find the sweet spot."))
+            if max_speed < 120:
+                tips.append((3, f"Only hit {max_speed:.0f} MPH — check your gearing/tune.",
+                    "If you're not hitting high speeds, consider a drag tune with longer gears. "
+                    "AWD swaps can also help with launches."))
+            if not tips:
+                tips.append((0, "Solid drag run!", "Work on your reaction time and shift consistency to drop your ET further."))
 
-        # --- Throttle commitment ---
-        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
-        if throttle_pct < 30 and max_speed > 50:
-            tips.append((
-                1,
-                f"Throttle is only at full for {throttle_pct:.0f}% of the race — you're leaving speed on the table.",
-                "In FH6, most cars have enough grip to be at full throttle for 55-70% of a race. "
-                "After each corner, commit to the throttle decisively instead of feathering it."
-            ))
-        elif throttle_pct < 45 and max_speed > 50:
-            tips.append((
-                3,
-                f"Throttle commitment at {throttle_pct:.0f}% — there's room to be more aggressive.",
-                "Trust the car's traction. Once you've passed the apex, progressively but firmly "
-                "push the throttle to 100% rather than holding at 50-70%."
-            ))
+        elif race_type == "Cross Country":
+            air_time = sum(1 for i in range(1, len(speeds)) if speeds[i] < 5 and speeds[i - 1] > 30)
+            if air_time > 5:
+                tips.append((2, f"Seems like you were airborne {air_time} times — watch your landings.",
+                    "Air control is key in Cross Country. Tilt the nose down before landing "
+                    "and be ready on the throttle to regain speed instantly."))
+            braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+            if braking_pct > 25:
+                tips.append((1, f"Braking {braking_pct:.0f}% — too much for off-road.",
+                    "In Cross Country, you want to stay on the power as much as possible. "
+                    "Lift off early instead of braking hard, and let the terrain slow you naturally."))
+            throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+            if throttle_pct < 50:
+                tips.append((1, f"Throttle commitment at {throttle_pct:.0f}% — be more aggressive.",
+                    "Off-road rewards constant power. Keep the throttle pinned over bumps and "
+                    "through shallow water. Momentum is everything in the dirt."))
+            if not tips:
+                tips.append((0, "Solid off-road driving!", "Focus on picking smooth lines through rough terrain "
+                    "and keeping your speed up over jumps."))
 
-        # --- Steering smoothness ---
-        steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
-        if steer_smoothness > 0.10:
-            tips.append((
-                2,
-                f"Steering is very jerky (avg change: {steer_smoothness:.3f}).",
-                "Smooth steering is fast steering. Make one clean turn-in motion per corner "
-                "instead of sawing at the wheel. Small, deliberate inputs keep the car balanced."
-            ))
-        elif steer_smoothness > 0.06:
-            tips.append((
-                3,
-                f"Steering could be smoother (avg change: {steer_smoothness:.3f}).",
-                "Try to visualize a smooth arc through each corner. "
-                "Turn the wheel once to the angle you need, hold it, then unwind on exit."
-            ))
+        else:
+            # Circuit / Street / PR Stunts: current tips
+            braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
+            if braking_pct > 30:
+                tips.append((1, f"You're braking for {braking_pct:.0f}% of the race — that's a lot of lost time.",
+                    "Focus on braking LATER and HARDER in a straight line, then release the brake as you turn in. "
+                    "Most corners in FH6 can be taken with one firm brake input, not multiple taps."))
+            elif braking_pct > 20:
+                tips.append((2, f"Braking takes up {braking_pct:.0f}% of the race — slightly high.",
+                    "Try braking a half-second later than you think you need to. "
+                    "Trust the car's grip and brake firmly once, then get back on the power early."))
+            elif braking_pct < 5 and max_speed > 80:
+                tips.append((2, "Almost no braking detected — you might be coasting through corners.",
+                    "Coasting is slower than braking late and getting on the power early. "
+                    "Try braking firmly right before the corner, then accelerating through the exit."))
 
-        # --- Shift analysis ---
-        shift_data = self._compute_shift_analysis(samples)
-        if shift_data:
-            if shift_data["under_shifts"] >= 3:
-                tips.append((
-                    2,
-                    f"You short-shifted {shift_data['under_shifts']} times (shifted below 5500 RPM).",
-                    f"Your shifts averaged {shift_data['avg_rpm']:.0f} RPM. "
-                    "Hold each gear longer — shift around 6500-7000 RPM for most cars to stay in the power band."
-                ))
-            if shift_data["over_shifts"] >= 2:
-                tips.append((
-                    3,
-                    f"You hit the rev limiter {shift_data['over_shifts']} times.",
-                    "Bouncing off the limiter loses power. Shift just before the redline "
-                    "for a small loss to keep the engine in its peak power range."
-                ))
+            overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
+            if overlap > 5:
+                tips.append((1, f"You're pressing brake and throttle at the same time {overlap:.0f}% of the race.",
+                    "Brake overlap kills both speed and fuel. Lift off the throttle fully before braking, "
+                    "then get back on the power only after you've released the brake."))
 
-        # --- Speed analysis ---
-        if avg_speed < 50 and max_speed > 80:
-            tips.append((
-                2,
-                f"Average speed is only {avg_speed:.0f} MPH despite hitting {max_speed:.0f} MPH.",
-                "Big gap between avg and top speed suggests you're over-slowing for corners. "
-                "Focus on carrying more speed through turns rather than stopping and accelerating."
-            ))
+            brake_transitions = sum(1 for i in range(1, len(brakes)) if brakes[i] > 0.3 and brakes[i - 1] < 0.1)
+            if brake_transitions > 15 and duration > 10:
+                tips.append((2, f"You pumped the brakes {brake_transitions} times — that's frequent.",
+                    "Pumping brakes unsettles the car and extends braking distance. "
+                    "Brake once, firmly, then release. One smooth input per corner is faster."))
 
-        # --- Sort by priority (1=highest) and show top 5 ---
+            throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
+            if throttle_pct < 30 and max_speed > 50:
+                tips.append((1, f"Throttle is only at full for {throttle_pct:.0f}% of the race — you're leaving speed on the table.",
+                    "In FH6, most cars have enough grip to be at full throttle for 55-70% of a race. "
+                    "After each corner, commit to the throttle decisively instead of feathering it."))
+            elif throttle_pct < 45 and max_speed > 50:
+                tips.append((3, f"Throttle commitment at {throttle_pct:.0f}% — there's room to be more aggressive.",
+                    "Trust the car's traction. Once you've passed the apex, progressively but firmly "
+                    "push the throttle to 100% rather than holding at 50-70%."))
+
+            steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+            if steer_smoothness > 0.10:
+                tips.append((2, f"Steering is very jerky (avg change: {steer_smoothness:.3f}).",
+                    "Smooth steering is fast steering. Make one clean turn-in motion per corner "
+                    "instead of sawing at the wheel. Small, deliberate inputs keep the car balanced."))
+            elif steer_smoothness > 0.06:
+                tips.append((3, f"Steering could be smoother (avg change: {steer_smoothness:.3f}).",
+                    "Try to visualize a smooth arc through each corner. "
+                    "Turn the wheel once to the angle you need, hold it, then unwind on exit."))
+
+            shift_data = self._compute_shift_analysis(samples)
+            if shift_data:
+                if shift_data["under_shifts"] >= 3:
+                    tips.append((2, f"You short-shifted {shift_data['under_shifts']} times (shifted below 5500 RPM).",
+                        f"Your shifts averaged {shift_data['avg_rpm']:.0f} RPM. "
+                        "Hold each gear longer — shift around 6500-7000 RPM for most cars to stay in the power band."))
+                if shift_data["over_shifts"] >= 2:
+                    tips.append((3, f"You hit the rev limiter {shift_data['over_shifts']} times.",
+                        "Bouncing off the limiter loses power. Shift just before the redline "
+                        "for a small loss to keep the engine in its peak power range."))
+
+            if avg_speed < 50 and max_speed > 80:
+                tips.append((2, f"Average speed is only {avg_speed:.0f} MPH despite hitting {max_speed:.0f} MPH.",
+                    "Big gap between avg and top speed suggests you're over-slowing for corners. "
+                    "Focus on carrying more speed through turns rather than stopping and accelerating."))
+
+            if not tips:
+                tips.append((0, "Your driving looks solid!",
+                    "Focus on consistency — lap after lap, try to repeat your best corners. Small refinements make the difference."))
+
         tips.sort(key=lambda x: x[0])
         top_tips = tips[:5]
-        if not top_tips:
-            top_tips = [(0, "Your driving looks solid!", "Focus on consistency — lap after lap, try to repeat your best corners. Small refinements make the difference.")]
 
         output = []
         for _, headline, advice in top_tips:
@@ -1959,8 +2313,11 @@ class FH6TrackerGUI(tk.Tk):
             ("race_speed", "Race Speed chart height:", 60, 350),
             ("race_inputs", "Race Throttle/Brake chart height:", 60, 350),
             ("race_steering", "Race Steering chart height:", 40, 250),
+            ("race_rpm", "Race RPM chart height:", 40, 250),
+            ("race_power", "Race Power chart height:", 40, 250),
+            ("race_gear", "Race Gear chart height:", 40, 250),
         ]
-        chart_defaults = {"history_canvas": 150, "rate_canvas": 120, "race_speed": 120, "race_inputs": 120, "race_steering": 80}
+        chart_defaults = {"history_canvas": 150, "rate_canvas": 120, "race_speed": 120, "race_inputs": 120, "race_steering": 80, "race_rpm": 100, "race_power": 100, "race_gear": 80}
         for i, (key, label, lo, hi) in enumerate(chart_defs):
             ttk.Label(chart_settings_frame, text=label).grid(row=i, column=0, sticky="w", padx=8, pady=4)
             var = tk.StringVar(value=str(chart_heights.get(key, chart_defaults[key])))
@@ -4745,7 +5102,7 @@ class FH6TrackerGUI(tk.Tk):
     # =====================================================================
     def _apply_chart_heights(self):
         chart_heights = {}
-        chart_defaults = {"history_canvas": 150, "rate_canvas": 120, "race_speed": 120, "race_inputs": 120, "race_steering": 80}
+        chart_defaults = {"history_canvas": 150, "rate_canvas": 120, "race_speed": 120, "race_inputs": 120, "race_steering": 80, "race_rpm": 100, "race_power": 100, "race_gear": 80}
         for key, default in chart_defaults.items():
             var = self._chart_height_vars.get(key)
             if var is None:
@@ -4769,6 +5126,9 @@ class FH6TrackerGUI(tk.Tk):
             self._chart_frame.rowconfigure(0, minsize=chart_heights["race_speed"])
             self._chart_frame.rowconfigure(1, minsize=chart_heights["race_inputs"])
             self._chart_frame.rowconfigure(2, minsize=chart_heights["race_steering"])
+            self._chart_frame.rowconfigure(3, minsize=chart_heights.get("race_rpm", 100))
+            self._chart_frame.rowconfigure(4, minsize=chart_heights.get("race_power", 100))
+            self._chart_frame.rowconfigure(5, minsize=chart_heights.get("race_gear", 80))
 
         self._draw_credit_history()
         self._draw_credit_rate_chart()
