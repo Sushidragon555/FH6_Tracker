@@ -1768,7 +1768,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def build_settings_tab(self):
         self.settings_tab.columnconfigure(0, weight=1)
-        self.settings_tab.rowconfigure(2, weight=1)
+        self.settings_tab.rowconfigure(0, weight=1)
 
         # Wrap everything in a canvas+scrollbar so content always fits
         settings_canvas = tk.Canvas(self.settings_tab, highlightthickness=0, width=700)
@@ -1776,8 +1776,6 @@ class FH6TrackerGUI(tk.Tk):
         settings_canvas.configure(yscrollcommand=settings_scroll.set)
         settings_canvas.grid(row=0, column=0, sticky="nsew")
         settings_scroll.grid(row=0, column=1, sticky="ns")
-        self.settings_tab.rowconfigure(0, weight=1)
-        self.settings_tab.columnconfigure(0, weight=1)
 
         settings_inner = ttk.Frame(settings_canvas)
         settings_canvas.create_window((0, 0), window=settings_inner, anchor="nw", tags="inner")
@@ -1907,6 +1905,7 @@ class FH6TrackerGUI(tk.Tk):
         self._popup_test_var = tk.StringVar(value="")
         ttk.Label(test_popup_frame, textvariable=self._popup_test_var, style="Secondary.TLabel").pack(side="left")
 
+        settings_inner.rowconfigure(2, weight=1)
         preview_frame = ttk.LabelFrame(settings_inner, text="OCR Region Preview")
         preview_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 8))
         preview_frame.columnconfigure(0, weight=1)
