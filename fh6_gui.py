@@ -404,6 +404,14 @@ def load_settings():
         "performance_mode": settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE),
         "tesseract_path": settings.get("tesseract_path") or _find_tesseract() or "",
         "shown_tutorials": settings.get("shown_tutorials", []),
+        "window_geometry": settings.get("window_geometry"),
+        "chart_heights": settings.get("chart_heights", {
+            "history_canvas": 150,
+            "rate_canvas": 120,
+            "race_speed": 120,
+            "race_inputs": 120,
+            "race_steering": 80,
+        }),
     }
 
 
@@ -547,13 +555,26 @@ class FH6TrackerGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"Forza Horizon 6 Tracker v{APP_VERSION}")
-        self.geometry("1100x760")
         self.minsize(1000, 680)
         self.configure(padx=14, pady=14)
 
         self.tracker_process = None
         self.last_status = "Stopped"
         self.settings = load_settings()
+
+        saved_geom = self.settings.get("window_geometry")
+        if saved_geom:
+            try:
+                self.geometry(saved_geom)
+            except tk.TclError:
+                self.update_idletasks()
+                sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+                self.geometry(f"1100x760+{(sw - 1100) // 2}+{(sh - 760) // 2}")
+        else:
+            self.update_idletasks()
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            self.geometry(f"1100x760+{(sw - 1100) // 2}+{(sh - 760) // 2}")
+        self.after(100, self._validate_window_position)
         self.tracker_running = False
         self._tracker_restart_count = 0
         self._tracker_restart_window_start = 0.0
@@ -608,6 +629,7 @@ class FH6TrackerGUI(tk.Tk):
         self._last_tracker_status = None
         self.style = ttk.Style(self)
         self.create_widgets()
+        self._apply_chart_heights()
         self.apply_theme(self.settings.get("theme", "light"))
         self._cleanup_old_races()
         self._run_startup_ocr_diagnostic()
@@ -959,15 +981,21 @@ class FH6TrackerGUI(tk.Tk):
         history_frame = ttk.LabelFrame(self.methods_tab, text="Session Earnings History")
         history_frame.grid(row=5, column=0, sticky="ew", padx=8, pady=(0, 8))
         history_frame.columnconfigure(0, weight=1)
-        history_frame.rowconfigure(0, weight=1)
-        self.history_canvas = tk.Canvas(history_frame, bg="white", height=150)
+        history_frame.grid_propagate(False)
+        history_height = self.settings.get("chart_heights", {}).get("history_canvas", 150)
+        history_frame.configure(height=history_height + 28)
+        self.history_frame = history_frame
+        self.history_canvas = tk.Canvas(history_frame, bg="white", height=history_height)
         self.history_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
         rate_frame = ttk.LabelFrame(self.methods_tab, text="Credit Rate (Live)")
         rate_frame.grid(row=6, column=0, sticky="ew", padx=8, pady=(0, 8))
         rate_frame.columnconfigure(0, weight=1)
-        rate_frame.rowconfigure(0, weight=1)
-        self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=120)
+        rate_frame.grid_propagate(False)
+        rate_height = self.settings.get("chart_heights", {}).get("rate_canvas", 120)
+        rate_frame.configure(height=rate_height + 44)
+        self.rate_frame = rate_frame
+        self.rate_canvas = tk.Canvas(rate_frame, bg="white", height=rate_height)
         self.rate_canvas.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         self.rate_stats_var = tk.StringVar(value="No rate data yet")
         ttk.Label(rate_frame, textvariable=self.rate_stats_var, style="Secondary.TLabel").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
@@ -1159,19 +1187,45 @@ class FH6TrackerGUI(tk.Tk):
         self._race_breakdown_var = tk.StringVar(value="")
         ttk.Label(breakdown_frame, textvariable=self._race_breakdown_var, justify="left", font=("Consolas", 9), wraplength=600).grid(row=0, column=0, sticky="w", padx=8, pady=6)
 
-        chart_frame = ttk.Frame(right)
-        chart_frame.grid(row=3, column=0, sticky="nsew")
-        chart_frame.columnconfigure(0, weight=1)
-        chart_frame.rowconfigure(0, weight=1)
-        chart_frame.rowconfigure(1, weight=1)
-        chart_frame.rowconfigure(2, weight=1)
+        chart_outer_frame = ttk.Frame(right)
+        chart_outer_frame.grid(row=3, column=0, sticky="nsew")
+        chart_outer_frame.columnconfigure(0, weight=1)
+        chart_outer_frame.rowconfigure(0, weight=1)
 
-        self._race_canvas_speed = tk.Canvas(chart_frame, height=120, highlightthickness=0)
-        self._race_canvas_speed.grid(row=0, column=0, sticky="nsew", pady=(0, 4))
-        self._race_canvas_inputs = tk.Canvas(chart_frame, height=120, highlightthickness=0)
-        self._race_canvas_inputs.grid(row=1, column=0, sticky="nsew", pady=(0, 4))
-        self._race_canvas_steer = tk.Canvas(chart_frame, height=80, highlightthickness=0)
-        self._race_canvas_steer.grid(row=2, column=0, sticky="nsew")
+        chart_scrollbar = ttk.Scrollbar(chart_outer_frame, orient="vertical")
+        chart_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        chart_canvas = tk.Canvas(chart_outer_frame, highlightthickness=0, yscrollcommand=chart_scrollbar.set)
+        chart_canvas.grid(row=0, column=0, sticky="nsew")
+        chart_scrollbar.configure(command=chart_canvas.yview)
+
+        chart_frame = ttk.Frame(chart_canvas)
+        chart_canvas_window = chart_canvas.create_window((0, 0), window=chart_frame, anchor="nw", tags="chart_inner")
+
+        chart_frame.columnconfigure(0, weight=1)
+        chart_heights = self.settings.get("chart_heights", {})
+        chart_frame.rowconfigure(0, minsize=chart_heights.get("race_speed", 120))
+        chart_frame.rowconfigure(1, minsize=chart_heights.get("race_inputs", 120))
+        chart_frame.rowconfigure(2, minsize=chart_heights.get("race_steering", 80))
+        self._chart_frame = chart_frame
+        self._chart_canvas = chart_canvas
+
+        def _chart_inner_configure(_event):
+            chart_canvas.itemconfig("chart_inner", width=chart_canvas.winfo_width())
+            chart_canvas.configure(scrollregion=chart_canvas.bbox("all"))
+        chart_frame.bind("<Configure>", _chart_inner_configure)
+        chart_canvas.bind("<Configure>", _chart_inner_configure)
+
+        if os.name == "nt":
+            chart_canvas.bind("<Enter>", lambda e: chart_canvas.bind_all("<MouseWheel>", lambda ev: chart_canvas.yview_scroll(int(-1 * (ev.delta / 120)), "units")))
+            chart_canvas.bind("<Leave>", lambda e: chart_canvas.unbind_all("<MouseWheel>"))
+
+        self._race_canvas_speed = tk.Canvas(chart_frame, height=chart_heights.get("race_speed", 120), highlightthickness=0)
+        self._race_canvas_speed.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self._race_canvas_inputs = tk.Canvas(chart_frame, height=chart_heights.get("race_inputs", 120), highlightthickness=0)
+        self._race_canvas_inputs.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+        self._race_canvas_steer = tk.Canvas(chart_frame, height=chart_heights.get("race_steering", 80), highlightthickness=0)
+        self._race_canvas_steer.grid(row=2, column=0, sticky="ew")
 
         # Re-render charts when the frame is resized (e.g. window resize)
         self._chart_resize_after_id = None
@@ -1893,6 +1947,30 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(update_frame, text="Send Feedback", command=self._open_feedback).grid(row=1, column=2, padx=(4, 8), pady=6, sticky="w")
 
         self._update_pending = False
+
+        chart_settings_frame = ttk.LabelFrame(settings_inner, text="Chart Sizes (pixels)")
+        chart_settings_frame.grid(row=5, column=0, sticky="ew", padx=8, pady=(0, 8))
+        chart_settings_frame.columnconfigure(2, weight=1)
+
+        chart_heights = self.settings.get("chart_heights", {})
+        self._chart_height_vars = {}
+        chart_defs = [
+            ("history_canvas", "Session Earnings History height:", 80, 400),
+            ("rate_canvas", "Credit Rate (Live) height:", 60, 350),
+            ("race_speed", "Race Speed chart height:", 60, 350),
+            ("race_inputs", "Race Throttle/Brake chart height:", 60, 350),
+            ("race_steering", "Race Steering chart height:", 40, 250),
+        ]
+        chart_defaults = {"history_canvas": 150, "rate_canvas": 120, "race_speed": 120, "race_inputs": 120, "race_steering": 80}
+        for i, (key, label, lo, hi) in enumerate(chart_defs):
+            ttk.Label(chart_settings_frame, text=label).grid(row=i, column=0, sticky="w", padx=8, pady=4)
+            var = tk.StringVar(value=str(chart_heights.get(key, chart_defaults[key])))
+            self._chart_height_vars[key] = var
+            ttk.Spinbox(chart_settings_frame, from_=lo, to=hi, textvariable=var, width=6).grid(
+                row=i, column=1, sticky="w", padx=(4, 8), pady=4)
+            var.trace_add("write", lambda *_, v=var: v.set(re.sub(r"[^0-9]", "", v.get())))
+        ttk.Label(chart_settings_frame, text="Adjusts the default height of each chart. Race charts also grow when the window is resized.",
+                  style="Secondary.TLabel").grid(row=len(chart_defs), column=0, columnspan=3, sticky="w", padx=8, pady=(0, 4))
 
     def build_logs_tab(self):
         self.logs_tab.columnconfigure(0, weight=1)
@@ -4664,6 +4742,51 @@ class FH6TrackerGUI(tk.Tk):
                 self.show_notice(f"Could not create debug directory: {exc}")
 
     # =====================================================================
+    # CHART HEIGHTS & WINDOW GEOMETRY
+    # =====================================================================
+    def _apply_chart_heights(self):
+        chart_heights = {}
+        chart_defaults = {"history_canvas": 150, "rate_canvas": 120, "race_speed": 120, "race_inputs": 120, "race_steering": 80}
+        for key, default in chart_defaults.items():
+            var = self._chart_height_vars.get(key)
+            if var is None:
+                chart_heights[key] = default
+                continue
+            try:
+                val = max(40, min(400, int(var.get())))
+            except (ValueError, TypeError):
+                val = default
+            chart_heights[key] = val
+            var.set(str(val))
+
+        self.settings["chart_heights"] = chart_heights
+
+        if hasattr(self, "history_frame"):
+            self.history_frame.configure(height=chart_heights["history_canvas"] + 28)
+        if hasattr(self, "rate_frame"):
+            self.rate_frame.configure(height=chart_heights["rate_canvas"] + 44)
+
+        if hasattr(self, "_chart_frame"):
+            self._chart_frame.rowconfigure(0, minsize=chart_heights["race_speed"])
+            self._chart_frame.rowconfigure(1, minsize=chart_heights["race_inputs"])
+            self._chart_frame.rowconfigure(2, minsize=chart_heights["race_steering"])
+
+        self._draw_credit_history()
+        self._draw_credit_rate_chart()
+        if hasattr(self, "_selected_race_data") and self._selected_race_data:
+            self._render_race_analysis(self._selected_race_data)
+
+    def _validate_window_position(self):
+        x = self.winfo_x()
+        y = self.winfo_y()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        if x + w < 0 or y + h < 0 or x > sw or y > sh:
+            self.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+    # =====================================================================
     # SETTINGS SAVE
     # =====================================================================
     def save_all_settings(self):
@@ -4691,6 +4814,7 @@ class FH6TrackerGUI(tk.Tk):
         except (ValueError, TypeError):
             self.settings["forza_check_interval"] = 10.0
         save_settings(self.settings)
+        self._apply_chart_heights()
         self.apply_theme(self.settings["theme"])
         if pytesseract is not None:
             self._set_tesseract_path()
@@ -5005,6 +5129,11 @@ class FH6TrackerGUI(tk.Tk):
 
     def _minimize_to_tray(self):
         """Hide the window and show only the tray icon."""
+        try:
+            self.settings["window_geometry"] = self.geometry()
+            save_settings(self.settings)
+        except Exception:
+            pass
         self._setup_tray_icon()
         self.withdraw()
 
@@ -5018,6 +5147,11 @@ class FH6TrackerGUI(tk.Tk):
     def _on_close(self):
         if getattr(self, "_tray_created", False):
             self._remove_tray_icon()
+        try:
+            self.settings["window_geometry"] = self.geometry()
+            save_settings(self.settings)
+        except Exception:
+            pass
         self._record_session_to_history()
         for after_id in (self._refresh_after_id, self._session_timer_after_id,
                          self._method_timer_after_id, self._notice_after_id):
