@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+import threading
 import tkinter as tk
 import webbrowser
 import zipfile
@@ -60,6 +61,7 @@ AUTO_LOG_PATH = os.path.join(BUNDLE_DIR or BASE_DIR, "auto_log.py")
 OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
 MASTER_FILE = os.path.join(BUNDLE_DIR or BASE_DIR, "fh6_master_list.json")
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
+MAX_LOG_MB = 10
 SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.json")
 METHODS_FILE = os.path.join(BASE_DIR, "methods_history.json")
 CREDIT_TRANSACTIONS_FILE = os.path.join(BASE_DIR, "credit_transactions.json")
@@ -622,6 +624,7 @@ class FH6TrackerGUI(tk.Tk):
         self._last_change_check_time = 0.0
         self._last_fullscreen_scan_time = 0.0
         self._collection_dirty = True
+        self._race_analysis_cache = {}
         self._last_races_refresh_time = 0.0
         self._last_methods_refresh_time = 0.0
         self._last_recs_refresh_time = 0.0
@@ -1336,6 +1339,11 @@ class FH6TrackerGUI(tk.Tk):
                 data = json.load(fh)
         except Exception:
             return
+        samples = data.get("samples", [])
+        max_samples = 3000
+        if len(samples) > max_samples:
+            step = len(samples) / max_samples
+            data["samples"] = [samples[int(i * step)] for i in range(max_samples)]
         self._selected_race_data = data
         w = self._race_canvas_speed.winfo_width()
         if w < 50:
@@ -1476,20 +1484,19 @@ class FH6TrackerGUI(tk.Tk):
             canvas.create_line(pad_l - 4, y, pad_l, y, fill="#cccccc")
             canvas.create_text(pad_l - 6, y, text=f"{val:.0f}", anchor="e", fill="#888888", font=("Segoe UI", 7))
         for field, color, label in zip(fields, colors, labels):
-            points = []
-            step = max(1, len(data) // 300)
+            max_points = 200
+            step = max(1, len(data) // max_points)
+            flat = []
             for i in range(0, len(data), step):
                 t = data[i].get("t", 0)
                 v = data[i].get(field, 0)
                 x = pad_l + (t / t_max) * cw
                 y = pad_t + ch - ((v - y_min) / max(y_max - y_min, 0.001)) * ch
-                points.append((x, y))
-            if len(points) >= 2:
-                flat = [c for p in points for c in p]
-                canvas.create_line(flat, fill=color, width=1.5, smooth=True)
-            if points:
-                lx, ly = points[-1]
-                canvas.create_text(lx + 4, ly, text=label, anchor="w", fill=color, font=("Segoe UI", 7))
+                flat.extend((x, y))
+            if len(flat) >= 4:
+                canvas.create_line(*flat, fill=color, width=1.5, smooth=True)
+            if flat:
+                canvas.create_text(flat[-2] + 4, flat[-1], text=label, anchor="w", fill=color, font=("Segoe UI", 7))
 
     def _draw_speed_chart(self, samples):
         self._draw_chart(
@@ -2511,8 +2518,24 @@ class FH6TrackerGUI(tk.Tk):
     # REFRESH LOOP & TAB MANAGEMENT
     # =========================================================================
 
+    def _rotate_csv_log(self):
+        try:
+            size_mb = os.path.getsize(LOG_FILE) / (1024 * 1024)
+            if size_mb > MAX_LOG_MB:
+                base, ext = os.path.splitext(LOG_FILE)
+                for i in range(4, 0, -1):
+                    old = f"{base}.{i}{ext}"
+                    new = f"{base}.{i + 1}{ext}"
+                    if os.path.exists(old):
+                        os.replace(old, new)
+                os.replace(LOG_FILE, f"{base}.1{ext}")
+                logger.info("Rotated telemetry log (>%d MB)", MAX_LOG_MB)
+        except OSError:
+            pass
+
     def refresh_loop(self):
         now = time.monotonic()
+        self._rotate_csv_log()
         # Only spawn tasklist periodically; window check is nearly free and runs every cycle.
         check_interval = self._forza_process_check_interval()
         if now - self._forza_process_check_time >= check_interval:
@@ -3333,11 +3356,80 @@ class FH6TrackerGUI(tk.Tk):
             return True
 
         return False
+    def _threaded_ocr(self):
+        if not self.credit_ocr_var.get():
+            return
+        def _do_ocr():
+            image = self._grab_credit_image()
+            if image is None:
+                return
+            text = self._ocr_credit_text_from_image(image)
+            self.after(0, lambda: self._handle_ocr_result(text, image))
+        threading.Thread(target=_do_ocr, daemon=True).start()
+
+    def _handle_ocr_result(self, text, image):
+        if not text or not text.strip():
+            return
+        self._last_ocr_raw_text = text or ""
+        self._save_debug_capture(image, "balance", text)
+        change = detect_credit_change_from_text(text, self.last_credit_balance)
+        balance = parse_credit_balance_from_text(text)
+        if balance is None:
+            balance = parse_balance_number_only(text)
+        if balance is None and text.strip():
+            balance = parse_balance_number_only(self._ocr_numeric_text_from_image(image))
+        if balance is not None:
+            self._process_credit_balance(balance)
+
+    def _process_credit_balance(self, balance):
+        now = time.monotonic()
+        if self.last_credit_balance is None:
+            self.last_credit_balance = balance
+            if self._session_start_balance is None:
+                self._session_start_balance = balance
+            self._reset_pending_balance()
+            self._recent_balances = [balance]
+            self._ocr_success_count += 1
+            self._credit_rate_points.append((now, balance))
+            return
+        if balance == self.last_credit_balance:
+            self._reset_pending_balance()
+            self._recent_balances.append(balance)
+            if len(self._recent_balances) > 5:
+                self._recent_balances = self._recent_balances[-5:]
+            self._ocr_success_count += 1
+            return
+        delta = balance - self.last_credit_balance
+        if delta > 100_000_000 or delta <= 0:
+            self._recent_balances.append(balance)
+            if len(self._recent_balances) > 5:
+                self._recent_balances = self._recent_balances[-5:]
+            return
+        median_balance = self._median_of_recent() or self.last_credit_balance
+        if balance == self._pending_balance:
+            self._pending_balance_count += 1
+        else:
+            self._pending_balance = balance
+            self._pending_balance_count = 1
+        if self._pending_balance_count < 2:
+            return
+        confirmed_delta = balance - median_balance
+        if confirmed_delta > 0 and confirmed_delta <= 100_000_000:
+            old_balance = self.last_credit_balance
+            self.update_session_credits(confirmed_delta)
+            self.last_credit_balance = balance
+            self._log_credit_transaction(confirmed_delta, old_balance, balance)
+            self._ocr_success_count += 1
+            self._recent_balances.append(balance)
+            if len(self._recent_balances) > 5:
+                self._recent_balances = self._recent_balances[-5:]
+            self._reset_pending_balance()
 
     def detect_credit_popup_change(self):
         # --- Entry gates ---
         # Only proceed if OCR dependencies are installed, the checkbox is enabled,
         # the rate-limit has elapsed, and Forza is detected as running.
+        
         if pyautogui is None or pytesseract is None or ImageGrab is None:
             missing = [name for name, val in {
                 "pyautogui": pyautogui, "pytesseract": pytesseract, "PIL.ImageGrab": ImageGrab
@@ -3380,118 +3472,13 @@ class FH6TrackerGUI(tk.Tk):
         region_set = self.get_credit_region() is not None
         if not region_set:
             return
-
-        image = self._grab_credit_image()
-        if image is None:
-            logger.warning("Credit scan: _grab_credit_image returned None")
+        # Skip balance scanning during race recording — you can't earn credits
+        # while driving and the HUD numbers aren't visible on-screen anyway.
+        # Popup scanning above still catches post-race rewards.
+        if getattr(self, "_recording", False):
             return
-
-        # Run OCR on the cropped region image.
-        text = self._ocr_credit_text_from_image(image)
-        self._last_ocr_raw_text = text or ""
-        self._save_debug_capture(image, "balance", text)
-        if not text or not text.strip():
-            logger.warning("Credit scan: OCR returned empty text")
-            return
-
-        logger.warning("Credit scan: raw OCR = '%s'", (text or "")[:80])
-
-        # Try to extract a balance number from the OCR text.
-        # First pass: look for keyword patterns ("Credits:", "CR", etc.)
-        # Second pass (fallback): numeric-only OCR with digit whitelist
-        change = detect_credit_change_from_text(text, self.last_credit_balance) if text else None
-        balance = parse_credit_balance_from_text(text) if text else None
-        if balance is None:
-            balance = parse_balance_number_only(text)
-            if balance:
-                logger.warning("Credit scan: standalone number balance = %s", balance)
-        if balance is None and text.strip():
-            balance = parse_balance_number_only(self._ocr_numeric_text_from_image(image))
-            logger.warning("Credit scan: numeric pass balance = %s", balance)
-
-        if balance is not None:
-            # ----- FIRST READ: No previous balance yet, just set the baseline -----
-            if self.last_credit_balance is None:
-                self.last_credit_balance = balance
-                if self._session_start_balance is None:
-                    self._session_start_balance = balance
-                self._reset_pending_balance()
-                self._recent_balances = [balance]
-                self._ocr_success_count += 1
-                self._credit_rate_points.append((now, balance))
-                logger.warning("Credit scan: initial balance set to %s", balance)
-                return
-
-            # ----- SAME BALANCE: No change detected, reset pending counter -----
-            if balance == self.last_credit_balance:
-                self._reset_pending_balance()
-                self._recent_balances.append(balance)
-                if len(self._recent_balances) > 5:
-                    self._recent_balances = self._recent_balances[-5:]
-                self._ocr_success_count += 1
-                return
-
-            # ----- BALANCE CHANGED: Compute delta, check plausibility -----
-            delta = balance - self.last_credit_balance
-            logger.warning("Credit scan: delta=%s (last=%s, cur=%s)", delta, self.last_credit_balance, balance)
-            # Reject if delta is negative (spend/spend) or implausibly large (OCR error)
-            if delta > 100_000_000 or delta <= 0:
-                logger.warning("Credit scan: delta %s rejected by plausibility check", delta)
-                self._recent_balances.append(balance)
-                if len(self._recent_balances) > 5:
-                    self._recent_balances = self._recent_balances[-5:]
-                return
-
-            # Use median of recent readings as the baseline to reduce jitter
-            median_balance = self._median_of_recent() or self.last_credit_balance
-
-            # ----- CONFIRMATION GATE: require 2 consecutive identical reads -----
-            # This prevents a single garbled OCR frame from injecting a phantom gain.
-            if balance == self._pending_balance:
-                self._pending_balance_count += 1
-                logger.warning("Credit scan: pending balance confirmed count=%s", self._pending_balance_count)
-            else:
-                self._pending_balance = balance
-                self._pending_balance_count = 1
-                logger.warning("Credit scan: new pending balance=%s (count=1)", balance)
-            if self._pending_balance_count < 2:
-                return
-
-            # ----- CONFIRMED: The same new balance appeared twice in a row -----
-            confirmed_delta = balance - median_balance
-            logger.warning("Credit scan: confirmed! delta=%s (median=%s, new_bal=%s)", confirmed_delta, median_balance, balance)
-            if confirmed_delta > 0 and confirmed_delta <= 100_000_000:
-                old_balance = self.last_credit_balance
-                self.update_session_credits(confirmed_delta)
-                self.last_credit_balance = balance
-                self._log_credit_transaction(confirmed_delta, old_balance, balance)
-                self._ocr_success_count += 1
-                self._recent_balances.append(balance)
-                if len(self._recent_balances) > 5:
-                    self._recent_balances = self._recent_balances[-5:]
-                self._reset_pending_balance()
-                return
-            logger.warning("Credit scan: confirmed_delta %s rejected", confirmed_delta)
-
-            self._recent_balances.append(balance)
-            if len(self._recent_balances) > 5:
-                self._recent_balances = self._recent_balances[-5:]
-
-        # ----- FALLBACK: Use detect_credit_change_from_text result directly -----
-        # Only reached if the balance-parsing path above didn't return a result.
-        # Handles cases where text contains keywords but no clean number extraction.
-        if change is None or change <= 0:
-            return
-
-        if self.last_credit_balance is None:
-            self.last_credit_balance = max(0, self.get_session_credits())
-
-        old_balance = self.last_credit_balance
-        self.update_session_credits(change)
-        self.last_credit_balance = (self.last_credit_balance or 0) + change
-        self._log_credit_transaction(change, old_balance, self.last_credit_balance)
-        logger.warning("Credit scan: fallback popup change applied: %s", change)
-
+        self._threaded_ocr()
+        return
 
     # =====================================================================
     # SESSION STATE MANAGEMENT
