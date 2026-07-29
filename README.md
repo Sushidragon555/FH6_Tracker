@@ -107,6 +107,7 @@ Analyze your driving from recorded races.
 - **Speed, Throttle, Brake, Steering Charts** — Visualize your inputs over the course of a race.
 - **Race Summary** — Average speed, max speed, throttle/brake percentages, gear usage.
 - **Driving Tips** — Algorithmic suggestions based on your telemetry.
+- **Race Type** — Auto-detected for racing disciplines (Road, Street, Dirt, Drag, Cross Country). **Drift** and **PR Stunts** are set manually — they aren't races, so the auto-detector won't assign them.
 
 <!-- Add a screenshot of race analysis here -->
 <!-- ![Race Analysis](screenshots/race_analysis.png) -->

@@ -1194,6 +1194,7 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_combo = ttk.Combobox(race_type_frame, textvariable=self._race_type_var, values=["Road Racing", "Street Racing", "Dirt Racing", "Drag Racing", "Drift", "Cross Country", "PR Stunts"], state="readonly", width=16)
         self._race_type_combo.pack(side="left")
         self._race_type_combo.bind("<<ComboboxSelected>>", lambda e: self._rerender_race_charts())
+        ttk.Label(race_type_frame, text="(Drift & PR Stunts are manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
         ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
         self._chart_toggle_vars = {}
         chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear")]
@@ -1367,12 +1368,13 @@ class FH6TrackerGUI(tk.Tk):
         if (max_speed > 140 and duration < 30 and throttle_pct > 75 and braking_pct < 8):
             return "Drag Racing"
 
-        # Drift: handbrake usage, high steering angle
-        if handbrake_pct > 3 and avg_steer > 0.25:
+        # Drift: handbrake usage, high steering angle.
+        # Require stronger evidence to avoid misclassifying road races.
+        if handbrake_pct > 8 and avg_steer > 0.35:
             return "Drift"
-        if handbrake_pct > 5:
+        if handbrake_pct > 12:
             return "Drift"
-        if avg_steer > 0.35 and steer_smoothness > 0.06:
+        if avg_steer > 0.45 and steer_smoothness > 0.10:
             return "Drift"
 
         # Dirt Racing: circuit-like but more steering correction, lower avg speed
@@ -1411,40 +1413,40 @@ class FH6TrackerGUI(tk.Tk):
         mins = int(dur) // 60
         secs = int(dur) % 60
         auto_type = self._auto_detect_race_type(samples, dur)
-        if auto_type and hasattr(self, "_race_type_var"):
+        if auto_type and auto_type not in ("Drift", "PR Stunts") and hasattr(self, "_race_type_var"):
             self._race_type_var.set(auto_type)
             race_type = auto_type
         else:
             race_type = self._race_type_var.get() if hasattr(self, "_race_type_var") else "Road Racing"
         self._race_info_var.set(f"{car}  |  {start}  |  {mins}:{secs:02d}  |  {len(samples)} samples  |  {race_type}")
 
-        toggle = self._chart_toggle_vars if hasattr(self, "_chart_toggle_vars") else {}
-        if toggle.get("spd", True):
+        toggle = getattr(self, "_chart_toggle_vars", {})
+        if "spd" not in toggle or toggle["spd"].get():
             self._race_canvas_speed.grid()
             self._draw_speed_chart(samples)
         else:
             self._race_canvas_speed.grid_remove()
-        if toggle.get("inputs", True):
+        if "inputs" not in toggle or toggle["inputs"].get():
             self._race_canvas_inputs.grid()
             self._draw_inputs_chart(samples)
         else:
             self._race_canvas_inputs.grid_remove()
-        if toggle.get("steer", True):
+        if "steer" not in toggle or toggle["steer"].get():
             self._race_canvas_steer.grid()
             self._draw_steering_chart(samples)
         else:
             self._race_canvas_steer.grid_remove()
-        if toggle.get("rpm", True):
+        if "rpm" not in toggle or toggle["rpm"].get():
             self._race_canvas_rpm.grid()
             self._draw_rpm_chart(samples)
         else:
             self._race_canvas_rpm.grid_remove()
-        if toggle.get("pwr", True):
+        if "pwr" not in toggle or toggle["pwr"].get():
             self._race_canvas_power.grid()
             self._draw_power_chart(samples)
         else:
             self._race_canvas_power.grid_remove()
-        if toggle.get("gear", True):
+        if "gear" not in toggle or toggle["gear"].get():
             self._race_canvas_gear.grid()
             self._draw_gear_chart(samples)
         else:
