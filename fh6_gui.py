@@ -3824,7 +3824,7 @@ class FH6TrackerGUI(tk.Tk):
         balance = parse_credit_balance_from_text(text)
         if balance is None:
             balance = parse_balance_number_only(text)
-        if balance is None and region is not None:
+        if balance is None and capture_region is not None:
             # Try numeric-only pass.
             try:
                 num_text = pytesseract.image_to_string(self._upscale_for_ocr(image), config="--psm 7 -c tessedit_char_whitelist=0123456789.,kKmM").strip()
