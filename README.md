@@ -2,27 +2,27 @@
 
 A **Forza Horizon 6** companion desktop app that tracks your car collection, automatically detects credit earnings via OCR, analyzes race telemetry, and helps you farm credits efficiently.
 
-## 📖 About
+## About
 
 > **TL;DR:** I got tired of manually tracking cars and guessing which credit farms were actually worth my time—so I coded a companion app to do the heavy lifting. *FH6 Tracker* automatically tracks your collection, logs your payouts live, and breaks down your driving telemetry so you can spend less time staring at spreadsheets and more time behind the wheel.
 
 ---
 
-### 🎯 Why I Built This
+### Why I Built This
 Look, I love the *Forza Horizon* series, but the grind can get tedious fast. Whether you're trying to collect every single car in the game or just trying to figure out if that 30-minute race was actually worth the credit payout, doing it manually sucks. 
 
 I built this project to solve my own headache—to make tracking my garage seamless, optimize my credit farming, and actually understand my driving inputs. Over time, it turned into a full-blown tool that I knew other players could use to shave time off their laps and skip the repetitive grind.
 
 ---
 
-### 🛡️ Is It Safe? (Zero Risk to Your Account)
+### Is It Safe? (Zero Risk to Your Account)
 **Short answer: 100% yes.** 
 
 *FH6 Tracker* runs entirely on local data that Forza intentionally broadcasts through its built-in **Data Out** network feature. 
 
-* 🚫 **No File Tampering:** It never modifies game files, memory, or scripts.
-* 🔒 **No Save Risks:** It never touches your local or cloud save files.
-* 🌐 **100% Local:** It operates entirely on your PC and never sends data to external servers.
+* No File Tampering:** It never modifies game files, memory, or scripts.
+* No Save Risks:** It never touches your local or cloud save files.
+* 100% Local:** It operates entirely on your PC and never sends data to external servers.
 
 ---
 
