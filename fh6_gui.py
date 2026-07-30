@@ -1220,7 +1220,7 @@ class FH6TrackerGUI(tk.Tk):
         chart_scrollbar.configure(command=chart_canvas.yview)
 
         chart_frame = ttk.Frame(chart_canvas)
-        chart_canvas_window = chart_canvas.create_window((0, 0), window=chart_frame, anchor="nw", tags="chart_inner")
+        chart_canvas.create_window((0, 0), window=chart_frame, anchor="nw", tags="chart_inner")
 
         chart_frame.columnconfigure(0, weight=1)
         chart_heights = self.settings.get("chart_heights", {})
@@ -1386,8 +1386,7 @@ class FH6TrackerGUI(tk.Tk):
             return "Drift"
 
         # Dirt Racing: circuit-like but more steering correction, lower avg speed
-        steer_smoothness2 = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
-        if (duration > 50 and avg_steer > 0.15 and avg_speed < 65 and throttle_pct > 45 and steer_smoothness2 > 0.04):
+        if (duration > 50 and avg_steer > 0.15 and avg_speed < 65 and throttle_pct > 45 and steer_smoothness > 0.04):
             return "Dirt Racing"
 
         # Cross Country: high speed variance, inconsistent traction
@@ -1727,9 +1726,6 @@ class FH6TrackerGUI(tk.Tk):
                 score += 5
             elif brake_overlap > 10:
                 score -= 10
-
-            if brake_overlap > 10:
-                score -= 5
 
             if braking_pct > 35:
                 score -= 10
@@ -4597,7 +4593,9 @@ class FH6TrackerGUI(tk.Tk):
             ("Double-click Missing", "Add car to owned"),
             ("Right-click Owned", "Context menu (remove, export, search)"),
             ("Right-click Missing", "Context menu (add, view details)"),
+            ("F5 (in-game)", "Force popup scan"),
             ("F6 (in-game)", "Start/stop race recording"),
+            ("F7 (in-game)", "Toggle method tracking"),
         ]
         dialog = tk.Toplevel(self)
         dialog.title("Keyboard Shortcuts")
@@ -5446,7 +5444,8 @@ class FH6TrackerGUI(tk.Tk):
             ctypes.windll.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self._tray_nid))
             self._tray_created = True
             # Hook the Windows message loop to intercept tray callback
-            self._orig_wndproc = ctypes.windll.user32.SetWindowLongW(
+            SetWindowLong = ctypes.windll.user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.windll.user32.SetWindowLongW
+            self._orig_wndproc = SetWindowLong(
                 self.winfo_id(), -4, ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.c_uint, ctypes.c_uint)(self._wndproc))
         except Exception:
             self._tray_created = False
@@ -5469,7 +5468,8 @@ class FH6TrackerGUI(tk.Tk):
             NIM_DELETE = 0x00000002
             ctypes.windll.shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._tray_nid))
             if getattr(self, "_orig_wndproc", None):
-                ctypes.windll.user32.SetWindowLongW(self.winfo_id(), -4, self._orig_wndproc)
+                SetWindowLong = ctypes.windll.user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.windll.user32.SetWindowLongW
+                SetWindowLong(self.winfo_id(), -4, self._orig_wndproc)
                 self._orig_wndproc = None
             self._tray_created = False
         except Exception:
