@@ -24,7 +24,7 @@ I built this project to solve my own headache—to make tracking my garage seaml
 * No Save Risks:** It never touches your local or cloud save files.
 * 100% Local:** It operates entirely on your PC and never sends data to external servers.
 
----
+---#If you wanna send feedback on it, theres a way in settings tab. 
 
 ## Quick Start
 
