@@ -44,6 +44,7 @@ except Exception:  # pragma: no cover - optional OCR dependencies
 
 APP_VERSION = "1.0.0"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
+ALLOWED_FEEDBACK_HOSTS = ["GAMINGPC"]
 
 # =============================================================================
 # PATHS & CONSTANTS
@@ -2303,6 +2304,11 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Button(update_frame, text="Check for Updates", command=self._check_for_updates).grid(row=1, column=0, padx=8, pady=6, sticky="w")
         ttk.Button(update_frame, text="Restart App", command=self._restart_app).grid(row=1, column=1, padx=(4, 8), pady=6, sticky="w")
         ttk.Button(update_frame, text="Send Feedback", command=self._open_feedback).grid(row=1, column=2, padx=(4, 8), pady=6, sticky="w")
+        self._view_feedback_btn = ttk.Button(update_frame, text="View Feedback", command=self._open_feedback_viewer)
+        self._view_feedback_btn.grid(row=1, column=3, padx=(4, 8), pady=6, sticky="w")
+        host = os.environ.get("COMPUTERNAME", "")
+        if host not in ALLOWED_FEEDBACK_HOSTS:
+            self._view_feedback_btn.grid_remove()
 
         self._update_pending = False
 
@@ -4823,6 +4829,155 @@ class FH6TrackerGUI(tk.Tk):
                    command=_open_github).pack(side="left", padx=(0, 8))
         ttk.Button(btn_frame, text="Save Locally",
                    command=_save_feedback).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_frame, text="Close",
+                   command=dlg.destroy).pack(side="right")
+
+    def _open_feedback_viewer(self):
+        feedback_dir = os.path.join(BASE_DIR, "feedback")
+        if not os.path.isdir(feedback_dir):
+            messagebox.showinfo("No Feedback",
+                                "No saved feedback found.\n\n"
+                                "Feedback files are saved when you use\n"
+                                "'Save Locally' in the Send Feedback dialog.")
+            return
+
+        files = sorted(
+            [f for f in os.listdir(feedback_dir) if f.endswith(".json")],
+            reverse=True,
+        )
+        if not files:
+            messagebox.showinfo("No Feedback",
+                                "No saved feedback files found.")
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Saved Feedback")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.geometry("750x550")
+        dlg.minsize(500, 350)
+
+        top_frame = ttk.Frame(dlg)
+        top_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        list_frame = ttk.Frame(top_frame)
+        list_frame.pack(fill="y", side="left", padx=(0, 10))
+
+        ttk.Label(list_frame, text="Saved Feedback:").pack(anchor="w")
+        listbox = tk.Listbox(list_frame, width=40, height=20,
+                             font=("TkFixedFont", 9))
+        listbox.pack(fill="y", expand=True)
+
+        scroll_list = ttk.Scrollbar(list_frame, orient="vertical",
+                                    command=listbox.yview)
+        scroll_list.pack(side="right", fill="y")
+        listbox.configure(yscrollcommand=scroll_list.set)
+
+        detail_frame = ttk.Frame(top_frame)
+        detail_frame.pack(fill="both", expand=True, side="left")
+
+        ttk.Label(detail_frame, text="Details:").pack(anchor="w")
+        text_area = scrolledtext.ScrolledText(
+            detail_frame, wrap="word", font=("TkFixedFont", 9),
+            state="disabled",
+        )
+        text_area.pack(fill="both", expand=True)
+
+        def _load_file(filename):
+            filepath = os.path.join(feedback_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                text_area.configure(state="normal")
+                text_area.delete("1.0", "end")
+                text_area.insert("end",
+                    f"Type:       {data.get('type', 'N/A')}\n"
+                    f"Timestamp:  {data.get('timestamp', 'N/A')}\n"
+                    f"Email:      {data.get('email', 'N/A')}\n"
+                    f"{'─' * 60}\n"
+                    f"Message:\n{data.get('message', 'N/A')}\n"
+                    f"{'─' * 60}\n"
+                    f"Context:\n{data.get('context', 'N/A')}\n"
+                )
+                text_area.configure(state="disabled")
+            except Exception as e:
+                text_area.configure(state="normal")
+                text_area.delete("1.0", "end")
+                text_area.insert("end", f"Error reading file: {e}")
+                text_area.configure(state="disabled")
+
+        for fname in files:
+            listbox.insert("end", fname)
+        if files:
+            listbox.selection_set(0)
+            _load_file(files[0])
+
+        listbox.bind("<<ListboxSelect>>",
+                     lambda e: _load_file(listbox.get(listbox.curselection()[0]))
+                     if listbox.curselection() else None)
+
+        btn_frame = ttk.Frame(dlg)
+        btn_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        def _delete_selected():
+            sel = listbox.curselection()
+            if not sel:
+                return
+            fname = listbox.get(sel[0])
+            if messagebox.askyesno("Delete Feedback",
+                                   f"Delete '{fname}'?",
+                                   parent=dlg):
+                os.remove(os.path.join(feedback_dir, fname))
+                listbox.delete(sel[0])
+                if listbox.size():
+                    listbox.selection_set(0)
+                    _load_file(listbox.get(0))
+                else:
+                    text_area.configure(state="normal")
+                    text_area.delete("1.0", "end")
+                    text_area.configure(state="disabled")
+
+        def _delete_all():
+            if not listbox.size():
+                return
+            if messagebox.askyesno("Delete All",
+                                   "Delete ALL saved feedback?",
+                                   parent=dlg):
+                for fname in listbox.get(0, "end"):
+                    os.remove(os.path.join(feedback_dir, fname))
+                listbox.delete(0, "end")
+                text_area.configure(state="normal")
+                text_area.delete("1.0", "end")
+                text_area.configure(state="disabled")
+
+        def _export_all():
+            if not listbox.size():
+                return
+            import datetime as dt
+            ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"feedback_export_{ts}.zip"
+            zip_path = filedialog.asksaveasfilename(
+                defaultextension=".zip",
+                filetypes=[("ZIP", "*.zip")],
+                initialfile=default_name,
+                title="Export All Feedback",
+            )
+            if not zip_path:
+                return
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fname in listbox.get(0, "end"):
+                    zf.write(os.path.join(feedback_dir, fname), arcname=fname)
+
+        ttk.Button(btn_frame, text="Delete Selected",
+                   command=_delete_selected).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_frame, text="Delete All",
+                   command=_delete_all).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_frame, text="Export All (ZIP)",
+                   command=_export_all).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_frame, text="Open Folder",
+                   command=lambda: os.startfile(feedback_dir)
+                   if hasattr(os, "startfile") else None
+                   ).pack(side="left", padx=(0, 4))
         ttk.Button(btn_frame, text="Close",
                    command=dlg.destroy).pack(side="right")
 
