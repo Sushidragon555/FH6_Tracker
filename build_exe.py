@@ -23,12 +23,13 @@ DATA_FILES = [
     "import_owned_cars.py",
     "fh6_id_reference.json",
     "fh6_master_list.json",
-    "owned_cars.json",
     "requirements.txt",
     "Start Here.bat",
 ]
 
-EXTRA_DIRS = ["races"]
+# NOTE: owned_cars.json and races/ are intentionally NOT bundled — they are
+# per-user progress files (gitignored) and would seed every release with the
+# developer's personal collection/race data. Both are auto-created on first run.
 
 
 def build():
@@ -55,12 +56,6 @@ def build():
         src = os.path.join(PROJECT_DIR, df)
         if os.path.exists(src):
             cmd.extend(["--add-data", f"{src};."])
-
-    # Add extra directories
-    for d in EXTRA_DIRS:
-        src = os.path.join(PROJECT_DIR, d)
-        if os.path.isdir(src):
-            cmd.extend(["--add-data", f"{src};{d}"])
 
     cmd.append(os.path.join(PROJECT_DIR, "run.py"))
 
