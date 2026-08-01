@@ -67,6 +67,8 @@ SESSION_STATE_FILE = os.path.join(BASE_DIR, "session_state.json")
 METHODS_FILE = os.path.join(BASE_DIR, "methods_history.json")
 CREDIT_TRANSACTIONS_FILE = os.path.join(BASE_DIR, "credit_transactions.json")
 RACES_DIR = os.path.join(BASE_DIR, "races")
+LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
+OVERLAY_BG = "#ff00fe"  # chroma-key color: every pixel of this color is fully transparent on Windows
 APP_LOG_FILE = os.path.join(BASE_DIR, "fh6_tracker.log")
 METHOD_NAMES = [
     "Wheelspins",
@@ -408,6 +410,8 @@ def load_settings():
         "tesseract_path": settings.get("tesseract_path") or _find_tesseract() or "",
         "shown_tutorials": settings.get("shown_tutorials", []),
         "window_geometry": settings.get("window_geometry"),
+        "race_overlay_enabled": settings.get("race_overlay_enabled", False),
+        "race_overlay_corner": settings.get("race_overlay_corner", "TL"),
         "chart_heights": settings.get("chart_heights", {
             "history_canvas": 150,
             "rate_canvas": 120,
@@ -652,7 +656,7 @@ class FH6TrackerGUI(tk.Tk):
         self.bind("<Control-n>", lambda e: self.add_car_var_entry.focus_set())
         self.bind("<Control-r>", lambda e: self.refresh_all())
         self.bind_all("<F5>", lambda e: self._force_popup_scan())
-        self.bind_all("<F6>", lambda e: self._toggle_race_recording())
+        self.bind_all("<F6>", lambda e: self._on_f6_shortcut())
         self.bind_all("<F7>", lambda e: self._toggle_method_hotkey())
         self.protocol("WM_DELETE_WINDOW", self._minimize_to_tray)
 
@@ -1168,7 +1172,25 @@ class FH6TrackerGUI(tk.Tk):
         self._record_btn = ttk.Button(record_frame, text="Start Recording", command=self._toggle_race_recording)
         self._record_btn.pack(fill="x", padx=4, pady=(4, 2))
         self._record_status_var = tk.StringVar(value="  (or press F6)")
-        ttk.Label(record_frame, textvariable=self._record_status_var, style="Secondary.TLabel").pack(padx=4, pady=(0, 4))
+        ttk.Label(record_frame, textvariable=self._record_status_var, style="Secondary.TLabel").pack(padx=4, pady=(0, 2))
+
+        overlay_frame = ttk.Frame(record_frame)
+        overlay_frame.pack(fill="x", padx=4, pady=(2, 2))
+        self.overlay_enabled_var = tk.BooleanVar(value=self.settings.get("race_overlay_enabled", False))
+        self.overlay_corner_var = tk.StringVar(value=self.settings.get("race_overlay_corner", "TL"))
+        ttk.Checkbutton(
+            overlay_frame,
+            text="Overlay live data on FH6 window while recording",
+            variable=self.overlay_enabled_var,
+            command=self._on_overlay_toggle,
+        ).pack(anchor="w")
+        corner_row = ttk.Frame(overlay_frame)
+        corner_row.pack(anchor="w", pady=(2, 0))
+        ttk.Label(corner_row, text="Position:").pack(side="left")
+        for corner, label in (("TL", "Top-left"), ("TR", "Top-right"), ("BL", "Bottom-left"), ("BR", "Bottom-right")):
+            ttk.Radiobutton(corner_row, text=label, variable=self.overlay_corner_var, value=corner, command=self._place_race_overlay).pack(side="left", padx=(4, 0))
+        self._overlay_hint_var = tk.StringVar(value="Transparent & click-through — never blocks your screen.")
+        ttk.Label(record_frame, textvariable=self._overlay_hint_var, style="Secondary.TLabel", wraplength=190).pack(padx=4, pady=(0, 4))
 
         right = ttk.Frame(self.races_tab)
         right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
@@ -3142,6 +3164,20 @@ class FH6TrackerGUI(tk.Tk):
         self.show_notice("OCR diagnostic: " + ("Forza not detected" if not forza else "check Live tab"))
         logger.warning("OCR DIAGNOSTIC: %s", result)
 
+    def _on_f6_shortcut(self):
+        """Handle F6 pressed while this window has focus.
+
+        The tracker subprocess registers a *global* F6 hotkey, so whenever the
+        tracker is running it already toggles recording — even while this window
+        has focus. If we also wrote a signal file here, one F6 press would toggle
+        recording twice (once via the hotkey, once via the signal), which could
+        restart recording mid-race and wipe the buffer, causing legitimate races
+        to be discarded as "too short". So while the tracker runs, F6 is a no-op
+        here; the button remains for click users.
+        """
+        if not self.tracker_running:
+            self.show_tutorial_notice("tutorial_start_tracker_first", "Start the tracker first (click Start Tracker).")
+
     def _toggle_race_recording(self):
         """Start or stop manual race recording via signal file to the tracker subprocess."""
         os.makedirs(RACES_DIR, exist_ok=True)
@@ -3159,6 +3195,8 @@ class FH6TrackerGUI(tk.Tk):
             self._recording = True
             self._record_btn.configure(text="Stop Recording")
             self._record_status_var.set("Recording... press Stop or F6 in-game to finish")
+            if self.overlay_enabled_var.get():
+                self._create_race_overlay()
             self.show_notice("Race recording started — drive!")
         else:
             signal_path = os.path.join(RACES_DIR, ".record_stop")
@@ -3171,6 +3209,7 @@ class FH6TrackerGUI(tk.Tk):
             self._recording = False
             self._record_btn.configure(text="Start Recording")
             self._record_status_var.set("  (or press F6)")
+            self._destroy_race_overlay()
             self.show_notice("Race recording stopped — check Race Analysis tab")
             # Refresh twice: once quickly to catch fast saves, once after a
             # longer delay in case the subprocess was still processing the stop.
@@ -3183,6 +3222,198 @@ class FH6TrackerGUI(tk.Tk):
         if children:
             self.race_list_tree.selection_set(children[0])
             self._on_race_select(None)
+
+    # =====================================================================
+    # RACE OVERLAY — transparent, click-through live dashboard over FH6
+    # =====================================================================
+
+    def _on_overlay_toggle(self):
+        """Show/hide the live overlay when its checkbox is toggled."""
+        if self.overlay_enabled_var.get():
+            if self._recording:
+                self._create_race_overlay()
+        else:
+            self._destroy_race_overlay()
+
+    def _create_race_overlay(self):
+        if getattr(self, "_overlay", None) is not None and self._overlay.winfo_exists():
+            return
+        overlay = tk.Toplevel(self)
+        overlay.overrideredirect(True)
+        overlay.attributes("-topmost", True)
+        overlay.configure(bg=OVERLAY_BG)
+        try:
+            overlay.attributes("-transparentcolor", OVERLAY_BG)
+        except tk.TclError:
+            overlay.attributes("-alpha", 0.75)
+        canvas = tk.Canvas(overlay, width=330, height=232, bg=OVERLAY_BG, highlightthickness=0)
+        canvas.pack()
+        self._overlay = overlay
+        self._overlay_canvas = canvas
+        self._overlay_items = self._build_overlay_canvas(canvas)
+        self._place_race_overlay()
+        self._make_overlay_click_through(overlay)
+        self._update_race_overlay()
+        self._overlay_after_id = self.after(500, self._update_race_overlay_loop)
+
+    def _destroy_race_overlay(self):
+        overlay = getattr(self, "_overlay", None)
+        if overlay is not None:
+            try:
+                overlay.destroy()
+            except Exception:
+                pass
+        if getattr(self, "_overlay_after_id", None):
+            try:
+                self.after_cancel(self._overlay_after_id)
+            except Exception:
+                pass
+        self._overlay_after_id = None
+        self._overlay = None
+        self._overlay_canvas = None
+        self._overlay_items = None
+
+    def _update_race_overlay_loop(self):
+        """Self-scheduling fast poll while the overlay is visible."""
+        self._update_race_overlay()
+        # Re-anchor to the game window if it moved (cheap, ~every 5s).
+        self._overlay_place_count = getattr(self, "_overlay_place_count", 0) + 1
+        if self._overlay_place_count >= 10:
+            self._overlay_place_count = 0
+            self._place_race_overlay()
+        if getattr(self, "_overlay", None) is not None:
+            self._overlay_after_id = self.after(500, self._update_race_overlay_loop)
+
+    def _ov_text(self, canvas, items, key, x, y, text, font, fill, anchor="nw"):
+        """Create a text item with a dark drop-shadow for readability over the game."""
+        shadow = canvas.create_text(x + 1, y + 1, anchor=anchor, text=text, fill="#000000", font=font)
+        main = canvas.create_text(x, y, anchor=anchor, text=text, fill=fill, font=font)
+        items[key] = (shadow, main)
+
+    def _build_overlay_canvas(self, canvas):
+        items = {}
+        canvas.create_oval(8, 6, 16, 14, fill="#ff3333", outline="")  # LIVE dot
+        self._ov_text(canvas, items, "car", 22, 5, "Waiting for telemetry...", ("Segoe UI", 10, "bold"), "#ffffff")
+        self._ov_text(canvas, items, "time", 322, 5, "0:00", ("Segoe UI", 10, "bold"), "#ffffff", anchor="ne")
+        self._ov_text(canvas, items, "speed", 10, 24, "0", ("Segoe UI", 42, "bold"), "#ffffff")
+        self._ov_text(canvas, items, "mph", 14, 80, "MPH", ("Segoe UI", 9, "bold"), "#bbbbbb")
+        self._ov_text(canvas, items, "gear", 322, 24, "-", ("Segoe UI", 30, "bold"), "#58a6ff", anchor="ne")
+        self._ov_text(canvas, items, "rpm", 322, 60, "RPM -", ("Segoe UI", 10, "bold"), "#dddddd", anchor="ne")
+
+        bar_y = {}
+        bars = [
+            ("thr", "THR", "#3fb950"),
+            ("brk", "BRK", "#f85149"),
+            ("str", "STR", "#58a6ff"),
+            ("hbrk", "HBK", "#d29922"),
+        ]
+        for idx, (key, label, color) in enumerate(bars):
+            y = 106 + idx * 28
+            bar_y[key] = y
+            self._ov_text(canvas, items, key + "_label", 10, y - 15, label, ("Segoe UI", 8, "bold"), color)
+            canvas.create_rectangle(10, y, 150, y + 12, fill="#101010", outline="#3f3f3f")
+            items[key + "_fill"] = canvas.create_rectangle(10, y, 10, y + 12, fill=color, outline="")
+            items[key + "_val"] = canvas.create_text(150, y - 15, anchor="ne", text="", fill="#eeeeee", font=("Segoe UI", 8, "bold"))
+        items["bar_y"] = bar_y
+        items["spark"] = canvas.create_line(196, 106, 322, 106, fill="#58a6ff", width=2)
+        return items
+
+    def _overlay_set(self, key, text):
+        ids = self._overlay_items.get(key)
+        if not ids:
+            return
+        if isinstance(ids, int):
+            self._overlay_canvas.itemconfig(ids, text=text)
+        else:
+            for item in ids:
+                self._overlay_canvas.itemconfig(item, text=text)
+
+    def _place_race_overlay(self):
+        overlay = getattr(self, "_overlay", None)
+        if overlay is None or not overlay.winfo_exists():
+            return
+        rect = self._get_forza_window_rect_cached()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        w, h, margin = 330, 232, 8
+        left, top = (rect[0], rect[1]) if rect else (0, 0)
+        right, bottom = (rect[2], rect[3]) if rect else (sw, sh)
+        corner = self.overlay_corner_var.get() if hasattr(self, "overlay_corner_var") else "TL"
+        if corner == "TR":
+            x, y = right - w - margin, top + margin
+        elif corner == "BL":
+            x, y = left + margin, bottom - h - margin
+        elif corner == "BR":
+            x, y = right - w - margin, bottom - h - margin
+        else:
+            x, y = left + margin, top + margin
+        overlay.geometry(f"{w}x{h}+{int(x)}+{int(y)}")
+
+    def _make_overlay_click_through(self, window):
+        """Make the overlay let mouse/keyboard input pass straight through to the game."""
+        if os.name != "nt":
+            return
+        try:
+            hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)  # GWL_EXSTYLE
+            ctypes.windll.user32.SetWindowLongW(hwnd, -20, ex_style | 0x00000020 | 0x00080000)  # WS_EX_TRANSPARENT | WS_EX_LAYERED
+        except Exception:
+            pass
+
+    def _update_race_overlay(self):
+        """Poll .live_race.json and redraw the overlay with current telemetry."""
+        overlay = getattr(self, "_overlay", None)
+        if overlay is None or not overlay.winfo_exists():
+            return
+        data = None
+        try:
+            if os.path.exists(LIVE_RACE_FILE):
+                with open(LIVE_RACE_FILE, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+        except (OSError, ValueError, TypeError):
+            data = None
+        if not data or not data.get("recording"):
+            self._overlay_set("car", "Waiting for telemetry...")
+            self._overlay_set("time", "")
+            self._overlay_set("speed", "-")
+            self._overlay_set("gear", "-")
+            self._overlay_set("rpm", "RPM -")
+            for key in ("thr", "brk", "str", "hbrk"):
+                self._overlay_set(key + "_val", "")
+                y = self._overlay_items["bar_y"][key]
+                self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10, y + 12)
+            self._overlay_canvas.coords(self._overlay_items["spark"], 196, 106, 322, 106)
+            return
+
+        sample = data.get("sample") or {}
+        recent = data.get("recent") or []
+        self._overlay_set("car", (data.get("car_name") or "Unknown")[:26])
+        elapsed = float(data.get("elapsed", 0) or 0)
+        m, s = divmod(int(elapsed), 60)
+        self._overlay_set("time", f"{m}:{s:02d}")
+        self._overlay_set("speed", str(int(sample.get("spd", 0) or 0)))
+        gear = sample.get("gear")
+        self._overlay_set("gear", str(gear) if gear is not None else "-")
+        self._overlay_set("rpm", "RPM " + f"{int(sample.get('rpm', 0) or 0):,}")
+
+        for key, attr in (("thr", "thr"), ("brk", "brk"), ("str", "str"), ("hbrk", "hbrk")):
+            value = max(0.0, min(1.0, float(sample.get(attr, 0) or 0)))
+            self._overlay_set(key + "_val", f"{int(round(value * 100))}%")
+            y = self._overlay_items["bar_y"][key]
+            self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10 + int(value * 140), y + 12)
+
+        speeds = [s.get("spd", 0) or 0 for s in recent]
+        if speeds:
+            x0, y0, x1, y1 = 196, 106, 322, 202
+            high = max(60.0, max(speeds))
+            n = len(speeds)
+            pts = []
+            for i, spd in enumerate(speeds):
+                px = x0 + (x1 - x0) * (i / (n - 1))
+                py = y1 - (y1 - y0) * (min(spd, high) / high)
+                pts.append(px)
+                pts.append(py)
+            self._overlay_canvas.coords(self._overlay_items["spark"], *pts)
 
     def _force_popup_scan(self):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
@@ -5310,6 +5541,8 @@ class FH6TrackerGUI(tk.Tk):
         self.settings["ocr_debug_logging"] = bool(self.ocr_debug_var.get())
         self.settings["performance_mode"] = self.performance_var.get() or car_lookup.DEFAULT_PERFORMANCE_MODE
         self.settings["disable_popup_scan"] = bool(self.disable_popup_scan_var.get())
+        self.settings["race_overlay_enabled"] = bool(self.overlay_enabled_var.get())
+        self.settings["race_overlay_corner"] = self.overlay_corner_var.get() or "TL"
         try:
             self.settings["forza_check_interval"] = max(5.0, min(60.0, float(self.forza_check_interval_var.get() or 10)))
         except (ValueError, TypeError):
@@ -5334,6 +5567,16 @@ class FH6TrackerGUI(tk.Tk):
     # =====================================================================
     # TRACKER START / STOP / HEALTH
     # =====================================================================
+    def _cleanup_record_signals(self):
+        """Remove stale recording signal files so a restart can't auto-trigger them."""
+        for name in (".record_start", ".record_stop"):
+            try:
+                path = os.path.join(RACES_DIR, name)
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
     def toggle_tracker(self):
         if self.tracker_running:
             self.stop_tracker()
@@ -5346,6 +5589,7 @@ class FH6TrackerGUI(tk.Tk):
             self._update_tracker_button()
             return
 
+        self._cleanup_record_signals()
         try:
             tracker_log = os.path.join(BASE_DIR, "tracker.log")
             env = os.environ.copy()
@@ -5374,6 +5618,8 @@ class FH6TrackerGUI(tk.Tk):
             except subprocess.TimeoutExpired:
                 self.tracker_process.kill()
         self.tracker_process = None
+        self._cleanup_record_signals()
+        self._destroy_race_overlay()
         self.tracker_running = False
         self.last_status = "Stopped"
         self.status_var.set("Status: Stopped")
@@ -5394,9 +5640,12 @@ class FH6TrackerGUI(tk.Tk):
                     if is_recording:
                         self._record_btn.configure(text="Stop Recording")
                         self._record_status_var.set("Recording... press Stop or F6 in-game to finish")
+                        if self.overlay_enabled_var.get():
+                            self._create_race_overlay()
                     else:
                         self._record_btn.configure(text="Start Recording")
                         self._record_status_var.set("  (or press F6)")
+                        self._destroy_race_overlay()
         except (OSError, PermissionError):
             pass
 
@@ -5414,8 +5663,17 @@ class FH6TrackerGUI(tk.Tk):
                     if event_type == "saved":
                         self.refresh_races_panel()
                         self.after(100, self._auto_select_latest_race)
-                    elif event_type == "discarded":
-                        self.show_notice("Race too short to analyze.")
+                    elif event_type.startswith("discarded"):
+                        message = "Race too short to analyze."
+                        parts = event_type.split(":")
+                        if len(parts) >= 3 and parts[1].isdigit():
+                            try:
+                                samples = int(parts[1])
+                                duration = float(parts[2])
+                                message = f"Race too short to analyze — only {samples} sample{'s' if samples != 1 else ''} captured over {duration:.1f}s. Record for longer, or make sure Forza telemetry is live (tracker should show RPM/speed)."
+                            except ValueError:
+                                pass
+                        self.show_notice(message)
         except (OSError, PermissionError):
             pass
 
@@ -5665,6 +5923,7 @@ class FH6TrackerGUI(tk.Tk):
                     pass
         self.end_session()
         self.stop_tracker()
+        self._destroy_race_overlay()
         self.destroy()
 
 

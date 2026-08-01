@@ -101,6 +101,7 @@ UDP_PORT = 9999
 OWNED_FILE = car_lookup.OWNED_FILE
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 RACES_DIR = os.path.join(BASE_DIR, "races")
+LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
 TEST_MODE = os.environ.get("FH6_TEST_MODE", "0") == "1"
 
 # Race telemetry capture settings. Forza sends ~60 packets/sec. We sample every
@@ -140,6 +141,14 @@ race_car_name = "Unknown Vehicle"
 race_car_id = 0
 race_packet_count = 0
 race_manual_override = False  # True when user manually triggered recording
+last_live_write_time = 0.0    # throttle for .live_race.json writes
+last_signal_check = 0.0       # throttle for .record_start/.record_stop polling
+
+# Serialises all recording state transitions. F6 presses and GUI signal files can
+# arrive from different threads; without this, two near-simultaneous events can
+# double-start (wiping the buffer) or double-stop, producing "race too short"
+# discards for races that were actually recorded in full.
+race_lock = threading.RLock()
 
 # Signal file path for GUI <-> subprocess communication
 RECORD_START_FILE = os.path.join(RACES_DIR, ".record_start")
@@ -181,10 +190,46 @@ def save_race(buffer, car_name, car_id, start_time, end_time, duration):
     print(f"\n [🏁] Race saved: {filename} ({len(buffer)} samples, {duration:.1f}s)")
 
 
+def _write_live_race():
+    """Write a compact live snapshot the GUI overlay polls while recording.
+
+    Throttled by the caller so this only hits disk a few times per second.
+    """
+    global last_live_write_time
+    if not race_buffer:
+        return
+    try:
+        import json as _json
+        duration = time.monotonic() - race_start_time_mono
+        recent = race_buffer[-90:]
+        data = {
+            "recording": True,
+            "car_name": race_car_name,
+            "elapsed": round(duration, 1),
+            "sample": race_buffer[-1],
+            "recent": recent,
+        }
+        with open(LIVE_RACE_FILE, "w", encoding="utf-8") as fh:
+            _json.dump(data, fh)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def _clear_live_race():
+    """Remove the live snapshot so the GUI overlay hides."""
+    try:
+        if os.path.exists(LIVE_RACE_FILE):
+            os.remove(LIVE_RACE_FILE)
+    except OSError:
+        pass
+
+
 def start_race(parsed, now_mono, timestamp_str):
-    """Begin recording a new race."""
+    """Begin recording a new race. Caller must hold ``race_lock``."""
     global race_in_progress, race_buffer, race_start_time_mono, race_start_timestamp
     global race_car_name, race_car_id, race_packet_count
+    if race_in_progress:
+        return
     race_in_progress = True
     race_buffer = []
     race_start_time_mono = now_mono
@@ -194,6 +239,7 @@ def start_race(parsed, now_mono, timestamp_str):
     race_car_name = id_reference.get(car_id_str, "Unknown Vehicle")
     race_car_name = car_lookup.resolve_canonical_name(race_car_name, canonical_index)
     race_packet_count = 0
+    _clear_live_race()
     _write_tracker_status(True)
     print(f"\n [🏁] Race started! Recording telemetry for {race_car_name}...")
 
@@ -219,16 +265,23 @@ def _write_race_event(event_type):
 
 
 def end_race(now_mono, timestamp_str):
-    """Finish the current race and save the telemetry data."""
+    """Finish the current race and save the telemetry data.
+
+    Caller must hold ``race_lock``. Safe to call when nothing is recording —
+    a late/second stop signal is ignored instead of starting a new race.
+    """
     global race_in_progress, race_buffer, race_car_name, race_car_id, race_packet_count
+    if not race_in_progress:
+        return
     race_in_progress = False
     race_packet_count = 0
     _write_tracker_status(False)
+    _clear_live_race()
     duration = now_mono - race_start_time_mono
     if duration < RACE_MIN_DURATION or len(race_buffer) < 10:
         print(f"\n [🏁] Race ended ({duration:.1f}s, {len(race_buffer)} samples) — too short to analyze (need {RACE_MIN_DURATION}s min).")
+        _write_race_event(f"discarded:{len(race_buffer)}:{duration:.1f}")
         race_buffer = []
-        _write_race_event("discarded")
         return
     save_race(race_buffer, race_car_name, race_car_id, race_start_timestamp, timestamp_str, duration)
     _write_race_event("saved")
@@ -238,22 +291,23 @@ def end_race(now_mono, timestamp_str):
 def toggle_race_recording():
     """Toggle manual race recording on/off via F6 hotkey."""
     global race_in_progress, race_manual_override
-    now = time.monotonic()
-    now_str = datetime.now(timezone.utc).isoformat()
-    if not race_in_progress:
-        race_manual_override = True
-        start_race({"car_ordinal": int(active_car_id) if active_car_id.isdigit() else 0,
-                     "rpm": 0, "speed_mph": 0,
-                     "timestamp_ms": int(time.time() * 1000),
-                     "engine_max_rpm": 0,
-                     "throttle": 0, "brake": 0, "steering": 0,
-                     "handbrake": 0, "gear": 0, "power": 0, "torque": 0, "boost": 0,
-                     "is_race_on": 1}, now, now_str)
-        print(f"\n [REC] Manual recording STARTED — press F6 or Stop Recording to finish.")
-    else:
-        race_manual_override = False
-        end_race(now, now_str)
-        print(f"\n [REC] Manual recording STOPPED.")
+    with race_lock:
+        now = time.monotonic()
+        now_str = datetime.now(timezone.utc).isoformat()
+        if not race_in_progress:
+            race_manual_override = True
+            start_race({"car_ordinal": int(active_car_id) if active_car_id.isdigit() else 0,
+                         "rpm": 0, "speed_mph": 0,
+                         "timestamp_ms": int(time.time() * 1000),
+                         "engine_max_rpm": 0,
+                         "throttle": 0, "brake": 0, "steering": 0,
+                         "handbrake": 0, "gear": 0, "power": 0, "torque": 0, "boost": 0,
+                         "is_race_on": 1}, now, now_str)
+            print(f"\n [REC] Manual recording STARTED — press F6 or Stop Recording to finish.")
+        else:
+            race_manual_override = False
+            end_race(now, now_str)
+            print(f"\n [REC] Manual recording STOPPED.")
 
 
 def _check_signal_files():
@@ -264,27 +318,29 @@ def _check_signal_files():
             os.remove(RECORD_START_FILE)
         except OSError:
             pass
-        if not race_in_progress:
-            now = time.monotonic()
-            now_str = datetime.now(timezone.utc).isoformat()
-            race_manual_override = True
-            start_race({"car_ordinal": int(active_car_id) if active_car_id.isdigit() else 0,
-                         "rpm": 0, "speed_mph": 0,
-                         "timestamp_ms": int(time.time() * 1000),
-                         "engine_max_rpm": 0,
-                         "throttle": 0, "brake": 0, "steering": 0,
-                         "handbrake": 0, "gear": 0, "power": 0, "torque": 0, "boost": 0,
-                         "is_race_on": 1}, now, now_str)
+        with race_lock:
+            if not race_in_progress:
+                now = time.monotonic()
+                now_str = datetime.now(timezone.utc).isoformat()
+                race_manual_override = True
+                start_race({"car_ordinal": int(active_car_id) if active_car_id.isdigit() else 0,
+                             "rpm": 0, "speed_mph": 0,
+                             "timestamp_ms": int(time.time() * 1000),
+                             "engine_max_rpm": 0,
+                             "throttle": 0, "brake": 0, "steering": 0,
+                             "handbrake": 0, "gear": 0, "power": 0, "torque": 0, "boost": 0,
+                             "is_race_on": 1}, now, now_str)
     if os.path.exists(RECORD_STOP_FILE):
         try:
             os.remove(RECORD_STOP_FILE)
         except OSError:
             pass
-        if race_in_progress and race_manual_override:
-            now = time.monotonic()
-            now_str = datetime.now(timezone.utc).isoformat()
-            race_manual_override = False
-            end_race(now, now_str)
+        with race_lock:
+            if race_in_progress and race_manual_override:
+                now = time.monotonic()
+                now_str = datetime.now(timezone.utc).isoformat()
+                race_manual_override = False
+                end_race(now, now_str)
 
 
 # Start global hotkey listener (F6 for recording) in a background thread
@@ -358,7 +414,12 @@ else:
                 now_str = datetime.now(timezone.utc).isoformat()
 
                 # --- Check for GUI signal files (start/stop recording) ---
-                if not race_in_progress or race_packet_count % 10 == 0:
+                # Time-based (not packet-count based): start/stop must be picked up
+                # promptly even during menus/results screens, where the car ordinal
+                # is invalid and the capture loop (which advances race_packet_count)
+                # is paused.
+                if now - last_signal_check >= 0.3:
+                    last_signal_check = now
                     _check_signal_files()
 
                 # --- Auto race detection DISABLED ---
@@ -407,6 +468,10 @@ else:
                             "trq": int(parsed["torque"]),
                             "hbrk": round(parsed["handbrake"], 3),
                         })
+                        # Feed the GUI overlay a compact live snapshot (~2x/sec).
+                        if now - last_live_write_time >= 0.5:
+                            last_live_write_time = now
+                            _write_live_race()
 
                 # --- Regular telemetry logging ---
                 if car_changed or (now - last_log_time) >= LOG_INTERVAL_SECONDS:

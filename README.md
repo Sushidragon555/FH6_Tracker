@@ -108,6 +108,7 @@ Analyze your driving from recorded races.
 - **Race Summary**  Average speed, max speed, throttle/brake percentages, gear usage.
 - **Driving Tips**  Algorithmic suggestions based on your telemetry.
 - **Race Type**  Auto-detected for racing disciplines (Road, Street, Dirt, Drag, Cross Country). **Drift** and **PR Stunts** are set manually  they aren't races, so the auto-detector won't assign them.
+- **Live Overlay**  While recording, enable **"Overlay live data on FH6 window while recording"** to float a transparent, click-through dashboard (speed, gear, RPM, throttle/brake/steering gauges, speed history) over the game. It never blocks input or vision, and auto-hides when recording stops.
 
 <!-- Add a screenshot of race analysis here -->
 <!-- ![Race Analysis](screenshots/race_analysis.png) -->
