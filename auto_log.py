@@ -25,7 +25,16 @@ VK_F6 = 0x75
 _user32 = ctypes.windll.user32
 _kernel32 = ctypes.windll.kernel32
 
-WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.wintypes.HWND, ctypes.c_uint, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
+# On 64-bit Windows, WPARAM/LPARAM/LRESULT are pointer-sized (64-bit).
+# ctypes.wintypes defines them as 32-bit, so the window proc would overflow
+# when forwarding 64-bit lParam values to DefWindowProcW (and during
+# CreateWindowExW), crashing the hotkey thread at startup on x64.
+_PTR_SIZE = ctypes.sizeof(ctypes.c_void_p)
+WPARAM = ctypes.c_uint64 if _PTR_SIZE == 8 else ctypes.c_uint32
+LPARAM = ctypes.c_int64 if _PTR_SIZE == 8 else ctypes.c_int32
+LRESULT = ctypes.c_int64 if _PTR_SIZE == 8 else ctypes.c_int32
+
+WNDPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.wintypes.HWND, ctypes.c_uint, WPARAM, LPARAM)
 
 
 class _WNDCLASS(ctypes.Structure):
@@ -43,6 +52,27 @@ class _WNDCLASS(ctypes.Structure):
         ("lpszClassName", ctypes.wintypes.LPCWSTR),
         ("hIconSm", ctypes.wintypes.HANDLE),
     ]
+
+
+_user32.DefWindowProcW.restype = LRESULT
+_user32.DefWindowProcW.argtypes = [ctypes.wintypes.HWND, ctypes.c_uint, WPARAM, LPARAM]
+
+_user32.RegisterClassW.restype = ctypes.c_ushort
+_user32.RegisterClassW.argtypes = [ctypes.POINTER(_WNDCLASS)]
+
+_user32.CreateWindowExW.restype = ctypes.wintypes.HWND
+_user32.CreateWindowExW.argtypes = [
+    ctypes.c_uint, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.wintypes.HWND, ctypes.wintypes.HMENU, ctypes.wintypes.HINSTANCE,
+    ctypes.c_void_p,
+]
+
+_user32.RegisterHotKey.restype = ctypes.c_int
+_user32.RegisterHotKey.argtypes = [ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_uint, ctypes.c_uint]
+
+_user32.GetMessageW.restype = ctypes.c_int
+_user32.GetMessageW.argtypes = [ctypes.POINTER(ctypes.wintypes.MSG), ctypes.wintypes.HWND, ctypes.c_uint, ctypes.c_uint]
 
 
 def _wndproc(hwnd, msg, wparam, lparam):
@@ -79,7 +109,8 @@ def _start_hotkey_listener():
 
     # Register hotkey: 0 = no modifier
     if not _user32.RegisterHotKey(_hotkey_hwnd, HOTKEY_ID_RECORD, 0, VK_F6):
-        print(" [⚠️] Could not register F6 hotkey (may be in use).")
+        _err = _kernel32.GetLastError()
+        print(f" [⚠️] Could not register F6 hotkey (Win32 error {_err}).")
     else:
         print(" [✓] F6 hotkey registered — works in-game without admin.")
 
@@ -143,6 +174,8 @@ race_packet_count = 0
 race_manual_override = False  # True when user manually triggered recording
 last_live_write_time = 0.0    # throttle for .live_race.json writes
 last_signal_check = 0.0       # throttle for .record_start/.record_stop polling
+last_packet_mono = 0.0        # monotonic time of the last successfully parsed packet
+last_notice_write = 0.0       # throttle for .tracker_notice warnings
 
 # Serialises all recording state transitions. F6 presses and GUI signal files can
 # arrive from different threads; without this, two near-simultaneous events can
@@ -264,6 +297,21 @@ def _write_race_event(event_type):
         pass
 
 
+def _write_tracker_notice(message):
+    """Write a one-shot notice the GUI surfaces to the user (e.g. no telemetry)."""
+    global last_notice_write
+    now = time.monotonic()
+    if now - last_notice_write < 10.0:
+        return
+    last_notice_write = now
+    try:
+        notice_path = os.path.join(RACES_DIR, ".tracker_notice")
+        with open(notice_path, "w", encoding="utf-8") as fh:
+            fh.write(message)
+    except OSError:
+        pass
+
+
 def end_race(now_mono, timestamp_str):
     """Finish the current race and save the telemetry data.
 
@@ -279,8 +327,14 @@ def end_race(now_mono, timestamp_str):
     _clear_live_race()
     duration = now_mono - race_start_time_mono
     if duration < RACE_MIN_DURATION or len(race_buffer) < 10:
-        print(f"\n [🏁] Race ended ({duration:.1f}s, {len(race_buffer)} samples) — too short to analyze (need {RACE_MIN_DURATION}s min).")
-        _write_race_event(f"discarded:{len(race_buffer)}:{duration:.1f}")
+        if len(race_buffer) == 0:
+            reason = "no_data"
+        elif len(race_buffer) < 10:
+            reason = "too_few_samples"
+        else:
+            reason = "too_short"
+        print(f"\n [🏁] Race ended ({duration:.1f}s, {len(race_buffer)} samples) — discarded ({reason}).")
+        _write_race_event(f"discarded:{len(race_buffer)}:{duration:.1f}:{reason}")
         race_buffer = []
         return
     save_race(race_buffer, race_car_name, race_car_id, race_start_timestamp, timestamp_str, duration)
@@ -342,6 +396,18 @@ def _check_signal_files():
                 race_manual_override = False
                 end_race(now, now_str)
 
+    # Warn the user while a manual race is active but no telemetry is arriving.
+    # A silent "race too short to analyze" at the end tells them nothing; this
+    # surfaces the real problem (Data Out off, wrong port, dead socket) mid-race.
+    if race_in_progress and race_manual_override and last_packet_mono:
+        idle_for = time.monotonic() - last_packet_mono
+        if idle_for > 8.0:
+            _write_tracker_notice(
+                f"Recording, but no Forza data received for {int(idle_for)}s — "
+                f"check that Data Out is enabled on UDP port {UDP_PORT} and "
+                f"that no other tracker instance is running."
+            )
+
 
 # Start global hotkey listener (F6 for recording) in a background thread
 _hotkey_thread = threading.Thread(target=_start_hotkey_listener, daemon=True)
@@ -388,6 +454,10 @@ else:
                 sock = None
         if sock is None:
             print(" [⚠️] Telemetry logging skipped — socket could not be opened after retries.")
+            _write_tracker_notice(
+                f"Could not bind UDP port {UDP_PORT} — another tracker instance may be running. "
+                f"Close the old one and restart."
+            )
             sys.exit(0)
     try:
         sock.settimeout(1.0)
@@ -412,6 +482,7 @@ else:
 
                 now = time.monotonic()
                 now_str = datetime.now(timezone.utc).isoformat()
+                last_packet_mono = now
 
                 # --- Check for GUI signal files (start/stop recording) ---
                 # Time-based (not packet-count based): start/stop must be picked up
@@ -429,6 +500,34 @@ else:
                 # manual-only: press F6 in-game or click Start Recording in
                 # the GUI.
 
+                # --- Race telemetry capture ---
+                # Runs BEFORE the ordinal gate on purpose: a manually started race
+                # must record telemetry even if this car's ordinal is 0/unknown,
+                # otherwise such users would get "race too short" every time.
+                if race_in_progress:
+                    race_packet_count += 1
+                    if race_packet_count % RACE_SAMPLE_EVERY == 0:
+                        t = round(now - race_start_time_mono, 3)
+                        race_buffer.append({
+                            "t": t,
+                            "spd": round(speed_mph, 1),
+                            "rpm": int(current_rpm),
+                            "thr": round(parsed["throttle"], 3),
+                            "brk": round(parsed["brake"], 3),
+                            "str": round(parsed["steering"], 3),
+                            "gear": parsed["gear"],
+                            "pwr": int(parsed["power"]),
+                            "trq": int(parsed["torque"]),
+                            "hbrk": round(parsed["handbrake"], 3),
+                        })
+                        # Feed the GUI overlay a compact live snapshot (~2x/sec).
+                        if now - last_live_write_time >= 0.5:
+                            last_live_write_time = now
+                            _write_live_race()
+
+                # --- Ordinal gate: skip menus/results screens ---
+                # Only gates car-name resolution and regular logging; manual-race
+                # capture above deliberately runs regardless of ordinal validity.
                 if not car_lookup.is_real_ordinal(car_ordinal):
                     print(" Waiting for gameplay to start (In Menus/Loading)...       ", end="\r")
                     continue
@@ -450,28 +549,6 @@ else:
                         print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
                 else:
                     current_mapped_car_name = "Unknown Vehicle"
-
-                # --- Race telemetry capture ---
-                if race_in_progress:
-                    race_packet_count += 1
-                    if race_packet_count % RACE_SAMPLE_EVERY == 0:
-                        t = round(now - race_start_time_mono, 3)
-                        race_buffer.append({
-                            "t": t,
-                            "spd": round(speed_mph, 1),
-                            "rpm": int(current_rpm),
-                            "thr": round(parsed["throttle"], 3),
-                            "brk": round(parsed["brake"], 3),
-                            "str": round(parsed["steering"], 3),
-                            "gear": parsed["gear"],
-                            "pwr": int(parsed["power"]),
-                            "trq": int(parsed["torque"]),
-                            "hbrk": round(parsed["handbrake"], 3),
-                        })
-                        # Feed the GUI overlay a compact live snapshot (~2x/sec).
-                        if now - last_live_write_time >= 0.5:
-                            last_live_write_time = now
-                            _write_live_race()
 
                 # --- Regular telemetry logging ---
                 if car_changed or (now - last_log_time) >= LOG_INTERVAL_SECONDS:

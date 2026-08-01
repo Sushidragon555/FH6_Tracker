@@ -42,9 +42,15 @@ except Exception:  # pragma: no cover - optional OCR dependencies
     ImageOps = None
     ImageTk = None
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
 ALLOWED_FEEDBACK_HOSTS = ["GAMINGPC"]
+
+# Paste your Discord webhook URL here to let every user send feedback with one
+# click (no GitHub login required). Create one at: Server Settings -> Integrations
+# -> Webhooks -> New Webhook. Leave empty to only offer GitHub/local save.
+# It can also be overridden per-machine from the Settings -> Updates field.
+DISCORD_FEEDBACK_WEBHOOK = ""
 
 # =============================================================================
 # PATHS & CONSTANTS
@@ -412,6 +418,7 @@ def load_settings():
         "window_geometry": settings.get("window_geometry"),
         "race_overlay_enabled": settings.get("race_overlay_enabled", False),
         "race_overlay_corner": settings.get("race_overlay_corner", "TL"),
+        "feedback_discord_webhook": settings.get("feedback_discord_webhook") or DISCORD_FEEDBACK_WEBHOOK,
         "chart_heights": settings.get("chart_heights", {
             "history_canvas": 150,
             "rate_canvas": 120,
@@ -635,6 +642,7 @@ class FH6TrackerGUI(tk.Tk):
         self._last_recs_refresh_time = 0.0
         self._last_race_event_mtime = 0.0
         self._last_tracker_status = None
+        self._last_tracker_notice_mtime = 0.0
         self.style = ttk.Style(self)
         self.create_widgets()
         self._apply_chart_heights()
@@ -2331,6 +2339,15 @@ class FH6TrackerGUI(tk.Tk):
         host = os.environ.get("COMPUTERNAME", "")
         if host not in ALLOWED_FEEDBACK_HOSTS:
             self._view_feedback_btn.grid_remove()
+
+        if host in ALLOWED_FEEDBACK_HOSTS:
+            webhook_row = ttk.Frame(update_frame)
+            webhook_row.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 6))
+            webhook_row.columnconfigure(1, weight=1)
+            ttk.Label(webhook_row, text="Discord webhook (feedback):").grid(row=0, column=0, sticky="w", padx=(0, 6))
+            self.feedback_webhook_var = tk.StringVar(value=self.settings.get("feedback_discord_webhook", ""))
+            ttk.Entry(webhook_row, textvariable=self.feedback_webhook_var).grid(row=0, column=1, sticky="ew")
+            ttk.Button(webhook_row, text="Save", command=self._save_feedback_webhook).grid(row=0, column=2, padx=(6, 0))
 
         self._update_pending = False
 
@@ -4936,6 +4953,17 @@ class FH6TrackerGUI(tk.Tk):
                 return
         self._on_close()
 
+    def _save_feedback_webhook(self):
+        """Persist the (dev-only) Discord webhook URL used for feedback delivery."""
+        url = self.feedback_webhook_var.get().strip()
+        if url and not url.startswith("https://discord.com/api/webhooks/"):
+            messagebox.showwarning("Invalid webhook",
+                                   "Webhook URL should start with https://discord.com/api/webhooks/")
+            return
+        self.settings["feedback_discord_webhook"] = url
+        save_settings(self.settings)
+        self.show_notice("Feedback webhook saved." if url else "Feedback webhook cleared.")
+
     def _open_feedback(self):
         dlg = tk.Toplevel(self)
         dlg.title("Send Feedback")
@@ -5014,6 +5042,43 @@ class FH6TrackerGUI(tk.Tk):
                     pass
             return "\n".join(parts)
 
+        def _send_to_discord():
+            webhook = (self.settings.get("feedback_discord_webhook") or "").strip()
+            if not webhook:
+                messagebox.showinfo("Not configured",
+                                    "No Discord webhook is configured for feedback delivery.",
+                                    parent=dlg)
+                return
+            body = msg_text.get("1.0", "end").strip()
+            if not body:
+                messagebox.showwarning("Empty message",
+                                       "Please type a message before sending.",
+                                       parent=dlg)
+                return
+            try:
+                import urllib.request
+                payload = {
+                    "username": "FH6 Tracker Feedback",
+                    "content": (f"**[{fb_type.get()}]**\n{body}\n"
+                                f"*{email_var.get() or 'no email'}*"),
+                }
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(webhook, data=data,
+                                             headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    ok = resp.status in (200, 204)
+            except Exception as exc:
+                messagebox.showerror("Send failed",
+                                     f"Could not send to Discord:\n{exc}", parent=dlg)
+                return
+            if ok:
+                _save_feedback()
+                status_var.set("Sent to Discord and saved locally.")
+                msg_text.delete("1.0", "end")
+                email_var.set("")
+            else:
+                status_var.set("Discord returned an error — saved locally instead.")
+
         def _save_feedback():
             body = msg_text.get("1.0", "end").strip()
             if not body:
@@ -5060,6 +5125,11 @@ class FH6TrackerGUI(tk.Tk):
                    command=_open_github).pack(side="left", padx=(0, 8))
         ttk.Button(btn_frame, text="Save Locally",
                    command=_save_feedback).pack(side="left", padx=(0, 8))
+        webhook_btn = ttk.Button(btn_frame, text="Send via Discord",
+                                 command=_send_to_discord)
+        webhook_btn.pack(side="left", padx=(0, 8))
+        if not (self.settings.get("feedback_discord_webhook") or "").strip():
+            webhook_btn.configure(state="disabled")
         ttk.Button(btn_frame, text="Close",
                    command=dlg.destroy).pack(side="right")
 
@@ -5583,12 +5653,50 @@ class FH6TrackerGUI(tk.Tk):
         else:
             self.start_tracker()
 
+    def _kill_stale_trackers(self):
+        """Kill orphaned tracker subprocesses from a previous run.
+
+        If the GUI was closed or crashed while the tracker subprocess was still
+        running (e.g. task-manager kill, power loss), that orphan keeps UDP port
+        9999 bound. The next launch then can't receive Forza telemetry ("another
+        instance may be running"), and the auto-restart loop can never succeed.
+        This only targets processes running auto_log.py / --tracker, so it can
+        never touch an unrelated process.
+        """
+        try:
+            cmd = [
+                "powershell", "-NoProfile", "-Command",
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.ProcessId -ne $PID -and "
+                "($_.CommandLine -match 'auto_log\\.py' -or $_.CommandLine -match '--tracker') } | "
+                "ForEach-Object { $_.ProcessId }",
+            ]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in out.stdout.splitlines():
+                line = line.strip()
+                if not line.isdigit():
+                    continue
+                pid = int(line)
+                if pid == os.getpid():
+                    continue
+                try:
+                    subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                                   capture_output=True, timeout=10,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+                    logger.info("Killed stale tracker process PID %s", pid)
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("Could not scan for stale tracker processes: %s", exc)
+
     def start_tracker(self):
         if self.tracker_process and self.tracker_process.poll() is None:
             self.tracker_running = True
             self._update_tracker_button()
             return
 
+        self._kill_stale_trackers()
         self._cleanup_record_signals()
         try:
             tracker_log = os.path.join(BASE_DIR, "tracker.log")
@@ -5670,10 +5778,34 @@ class FH6TrackerGUI(tk.Tk):
                             try:
                                 samples = int(parts[1])
                                 duration = float(parts[2])
-                                message = f"Race too short to analyze — only {samples} sample{'s' if samples != 1 else ''} captured over {duration:.1f}s. Record for longer, or make sure Forza telemetry is live (tracker should show RPM/speed)."
+                                reason = parts[3] if len(parts) >= 4 else ""
+                                if reason == "no_data":
+                                    message = ("Race not saved — no game data was received while recording. "
+                                               "Make sure Forza is running with Data Out enabled on UDP port 9999, "
+                                               "and that no other tracker instance is holding the port.")
+                                elif reason == "too_few_samples":
+                                    message = (f"Race not saved — recording ended before enough data was captured "
+                                               f"(only {samples} sample{'s' if samples != 1 else ''}). Record for longer.")
+                                else:
+                                    message = f"Race too short to analyze — only {samples} sample{'s' if samples != 1 else ''} captured over {duration:.1f}s. Record for longer, or make sure Forza telemetry is live (tracker should show RPM/speed)."
                             except ValueError:
                                 pass
                         self.show_notice(message)
+        except (OSError, PermissionError):
+            pass
+
+        # --- Surface one-shot tracker notices (e.g. no telemetry during recording) ---
+        notice_path = os.path.join(RACES_DIR, ".tracker_notice")
+        try:
+            if os.path.exists(notice_path):
+                mtime = os.path.getmtime(notice_path)
+                if mtime != self._last_tracker_notice_mtime:
+                    self._last_tracker_notice_mtime = mtime
+                    with open(notice_path, "r", encoding="utf-8") as fh:
+                        content = fh.read().strip()
+                    os.remove(notice_path)
+                    if content:
+                        self.show_notice(content)
         except (OSError, PermissionError):
             pass
 

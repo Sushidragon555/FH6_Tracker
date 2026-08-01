@@ -15,7 +15,7 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(PROJECT_DIR, "dist")
 BUILD_DIR = os.path.join(PROJECT_DIR, "build")
 APP_NAME = "FH6_Tracker"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 DATA_FILES = [
     "auto_log.py",
