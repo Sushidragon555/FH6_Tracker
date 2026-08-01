@@ -42,7 +42,7 @@ except Exception:  # pragma: no cover - optional OCR dependencies
     ImageOps = None
     ImageTk = None
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
 ALLOWED_FEEDBACK_HOSTS = ["GAMINGPC"]
 
@@ -4998,7 +4998,7 @@ class FH6TrackerGUI(tk.Tk):
 
     def _auto_check_update(self):
         if getattr(sys, "frozen", False):
-            self._check_github_release()
+            self._check_github_release(popup=True, silent_when_current=True)
 
     def _check_for_updates(self):
         self._update_status_var.set("Checking for updates...")
@@ -5009,7 +5009,7 @@ class FH6TrackerGUI(tk.Tk):
         else:
             self._check_git_update()
 
-    def _check_github_release(self):
+    def _check_github_release(self, popup=False, silent_when_current=False):
         import urllib.request
         import urllib.error
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -5033,8 +5033,19 @@ class FH6TrackerGUI(tk.Tk):
                     self._update_pending = True
                     self._pending_download_url = download_url
                 self._update_status_var.set(msg)
+                if popup and download_url:
+                    if messagebox.askyesno(
+                        "Update available",
+                        f"A newer version of FH6 Tracker is available:\n\n"
+                        f"  v{tag}  (you have v{APP_VERSION})\n\n"
+                        f"This release includes fixes and improvements.\n"
+                        f"Download it now?",
+                        parent=self.root,
+                    ):
+                        webbrowser.open(download_url)
             else:
-                self._update_status_var.set(f"You're up to date (v{APP_VERSION}).")
+                if not silent_when_current:
+                    self._update_status_var.set(f"You're up to date (v{APP_VERSION}).")
         except urllib.error.URLError:
             self._update_status_var.set("Could not reach GitHub (no internet?).")
         except Exception as exc:
