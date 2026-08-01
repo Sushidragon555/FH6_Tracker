@@ -559,6 +559,89 @@ def get_forza_window_rect():
     return None
 
 
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_ulong),
+        ("rcMonitor", ctypes.wintypes.RECT),
+        ("rcWork", ctypes.wintypes.RECT),
+        ("dwFlags", ctypes.c_ulong),
+    ]
+
+
+# 64-bit pointer-size correctness for these Win32 calls (same lesson as the
+# hotkey fix): without argtypes ctypes truncates the byref() pointers to 32-bit.
+_user32 = ctypes.windll.user32
+_user32.GetMonitorInfoW.restype = ctypes.c_int
+_user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(_MONITORINFO)]
+_user32.GetSystemMetrics.restype = ctypes.c_int
+_user32.EnumDisplayMonitors.restype = ctypes.c_int
+_user32.EnumDisplayMonitors.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+_user32.GetParent.restype = ctypes.c_void_p
+_user32.GetParent.argtypes = [ctypes.c_void_p]
+_user32.SetWindowPos.restype = ctypes.c_int
+_user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+
+
+def _get_virtual_screen():
+    """Return (left, top, right, bottom) of the whole virtual desktop, or None."""
+    try:
+        # GetSystemMetrics is reliable here; SPI_GETVIRTUALSCREEN can return
+        # garbage on some multi-monitor/DPI setups.
+        x = _user32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
+        y = _user32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
+        cx = _user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+        cy = _user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+        return (x, y, x + cx, y + cy)
+    except Exception:
+        pass
+    return None
+
+
+_MONITORENUMPROC = ctypes.WINFUNCTYPE(
+    ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.POINTER(ctypes.wintypes.RECT), ctypes.c_void_p)
+
+
+def _enumerate_monitors():
+    """Return a list of monitor rects (virtual coords): (left, top, right, bottom)."""
+    rects = []
+    try:
+        def _cbk(hmon, hdc, lprc, data):
+            info = _MONITORINFO()
+            info.cbSize = ctypes.sizeof(_MONITORINFO)
+            if _user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+                r = info.rcMonitor
+                rects.append((r.left, r.top, r.right, r.bottom))
+            return True
+
+        _user32.EnumDisplayMonitors(None, None, _MONITORENUMPROC(_cbk), None)
+    except Exception:
+        pass
+    return rects
+
+
+def get_monitor_rect(x, y):
+    """Return the monitor rect (virtual coords) containing (x, y).
+
+    Falls back to the nearest monitor's rect when the point isn't inside any
+    (DPI-virtualization mismatch, or the window spans multiple displays).
+    """
+    monitors = _enumerate_monitors()
+    if monitors:
+        for left, top, right, bottom in monitors:
+            if left <= x <= right and top <= y <= bottom:
+                return (left, top, right, bottom)
+        best, best_dist = None, None
+        for left, top, right, bottom in monitors:
+            mc_x, mc_y = (left + right) / 2.0, (top + bottom) / 2.0
+            dist = (mc_x - x) ** 2 + (mc_y - y) ** 2
+            if best_dist is None or dist < best_dist:
+                best_dist, best = dist, (left, top, right, bottom)
+        if best:
+            return best
+    return _get_virtual_screen()
+
+
 # =============================================================================
 # =============================================================================
 # FH6TrackerGUI — MAIN APPLICATION CLASS
@@ -3349,12 +3432,28 @@ class FH6TrackerGUI(tk.Tk):
         overlay = getattr(self, "_overlay", None)
         if overlay is None or not overlay.winfo_exists():
             return
-        rect = self._get_forza_window_rect_cached()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
         w, h, margin = 330, 232, 8
-        left, top = (rect[0], rect[1]) if rect else (0, 0)
-        right, bottom = (rect[2], rect[3]) if rect else (sw, sh)
+
+        # Prefer the monitor the FH6 window is on, so the overlay follows the
+        # game across displays. Fall back to the GUI's own monitor (then the
+        # primary screen) when the game window isn't detected.
+        rect = self._get_forza_window_rect_cached()
+        monitor = None
+        if rect:
+            monitor = get_monitor_rect((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
+        if not monitor:
+            try:
+                monitor = get_monitor_rect(self.winfo_rootx() + 50, self.winfo_rooty() + 50)
+            except Exception:
+                monitor = None
+        if not monitor:
+            monitor = _get_virtual_screen()
+        if not monitor:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            monitor = (0, 0, sw, sh)
+
+        left, top, right, bottom = monitor
         corner = self.overlay_corner_var.get() if hasattr(self, "overlay_corner_var") else "TL"
         if corner == "TR":
             x, y = right - w - margin, top + margin
@@ -3364,7 +3463,34 @@ class FH6TrackerGUI(tk.Tk):
             x, y = right - w - margin, bottom - h - margin
         else:
             x, y = left + margin, top + margin
-        overlay.geometry(f"{w}x{h}+{int(x)}+{int(y)}")
+        x = max(left + margin, min(x, right - w - margin))
+        y = max(top + margin, min(y, bottom - h - margin))
+
+        if os.name == "nt":
+            self._set_overlay_pos(overlay, int(x), int(y), w, h)
+        else:
+            overlay.geometry(f"{w}x{h}+{int(x)}+{int(y)}")
+
+    def _set_overlay_pos(self, overlay, x, y, w, h):
+        """Move/resize the overlay with Win32 so it works on any monitor.
+
+        ``wm geometry`` can't express virtual-screen coordinates (negative
+        offsets mean "edge-relative", so monitors left of/above the primary
+        would land in the wrong place). ``SetWindowPos`` uses real screen
+        coordinates, so the overlay can track FH6 across all displays.
+        """
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetParent(overlay.winfo_id())
+            if not hwnd:
+                hwnd = overlay.winfo_id()
+            # HWND_TOPMOST = -1; SWP_NOACTIVATE | SWP_SHOWWINDOW
+            user32.SetWindowPos(hwnd, -1, x, y, w, h, 0x0010 | 0x0040)
+        except Exception:
+            try:
+                overlay.geometry(f"{w}x{h}+{x}+{y}")
+            except Exception:
+                pass
 
     def _make_overlay_click_through(self, window):
         """Make the overlay let mouse/keyboard input pass straight through to the game."""
