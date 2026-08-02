@@ -74,6 +74,7 @@ METHODS_FILE = os.path.join(BASE_DIR, "methods_history.json")
 CREDIT_TRANSACTIONS_FILE = os.path.join(BASE_DIR, "credit_transactions.json")
 RACES_DIR = os.path.join(BASE_DIR, "races")
 LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
+LIVE_CHART_FILE = os.path.join(RACES_DIR, ".live_chart.json")
 OVERLAY_BG = "#ff00fe"  # chroma-key color: every pixel of this color is fully transparent on Windows
 APP_LOG_FILE = os.path.join(BASE_DIR, "fh6_tracker.log")
 METHOD_NAMES = [
@@ -1255,7 +1256,12 @@ class FH6TrackerGUI(tk.Tk):
         self.race_list_tree.pack(fill="y", expand=True)
         self.race_list_tree.bind("<<TreeviewSelect>>", self._on_race_select)
 
-        ttk.Button(left, text="Refresh List", command=self.refresh_races_panel).pack(fill="x", padx=4, pady=(4, 0))
+        btn_row = ttk.Frame(left)
+        btn_row.pack(fill="x", padx=4, pady=(4, 0))
+        ttk.Button(btn_row, text="Refresh List", command=self.refresh_races_panel).pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(btn_row, text="Delete Selected", command=self._delete_selected_race).pack(side="left", expand=True, fill="x", padx=(2, 0))
+        ttk.Button(left, text="Delete All Races", command=self._delete_all_races).pack(fill="x", padx=4, pady=(2, 0))
+        self.race_list_tree.bind("<Delete>", lambda e: self._delete_selected_race())
 
         record_frame = ttk.LabelFrame(left, text="Race Recording")
         record_frame.pack(fill="x", padx=4, pady=(8, 0))
@@ -1313,6 +1319,7 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_combo.bind("<<ComboboxSelected>>", self._on_race_type_changed)
         self._race_type_source = None      # start_time of the race auto-detect ran on
         self._race_type_overridden = False  # True once the user manually picks a type
+        self._race_type_was_auto_detected = False  # True once auto-detect locked a result
         ttk.Label(race_type_frame, text="(Drift & PR Stunts are manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
         ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
         self._chart_toggle_vars = {}
@@ -1400,6 +1407,12 @@ class FH6TrackerGUI(tk.Tk):
 
         self._selected_race_data = None
         self._race_needs_rerender = False
+        # Live chart mode: while recording, the Race Analysis panel renders the
+        # race-so-far from the tracker's .live_chart.json (~1x/sec) instead of a
+        # saved file, so charts build up in real time as you drive.
+        self._live_chart_active = False
+        self._live_chart_data = None
+        self._live_chart_after_id = None
 
     def _cleanup_old_races(self):
         """Delete race files older than 7 days to keep storage low."""
@@ -1542,21 +1555,30 @@ class FH6TrackerGUI(tk.Tk):
         mins = int(dur) // 60
         secs = int(dur) % 60
         auto_type = None
-        # Auto-detect only once per race (keyed on start_time). Re-renders caused
-        # by chart toggles or the dropdown itself must never overwrite the user's
-        # manual pick, and switching to another race resets the override.
+        # Auto-detect once per race (keyed on start_time), retrying while live
+        # data is still growing until there's enough to classify, then locking
+        # the result. Re-renders from chart toggles or the dropdown itself must
+        # never overwrite the user's manual pick, and switching to another race
+        # resets the override.
         start_key = data.get("start_time", "")
         if start_key != self._race_type_source:
             self._race_type_source = start_key
             self._race_type_overridden = False
+            self._race_type_was_auto_detected = False
             auto_type = self._auto_detect_race_type(samples, dur)
-            if not auto_type and hasattr(self, "_race_type_var"):
+            if auto_type:
+                self._race_type_was_auto_detected = True
+                if hasattr(self, "_race_type_var"):
+                    self._race_type_var.set(auto_type)
+            elif hasattr(self, "_race_type_var"):
                 self._race_type_var.set("Road Racing")
-        if auto_type and not self._race_type_overridden and hasattr(self, "_race_type_var"):
-            self._race_type_var.set(auto_type)
-            race_type = auto_type
-        else:
-            race_type = self._race_type_var.get() if hasattr(self, "_race_type_var") else "Road Racing"
+        elif not self._race_type_overridden and not self._race_type_was_auto_detected:
+            auto_type = self._auto_detect_race_type(samples, dur)
+            if auto_type:
+                self._race_type_was_auto_detected = True
+                if hasattr(self, "_race_type_var"):
+                    self._race_type_var.set(auto_type)
+        race_type = self._race_type_var.get() if hasattr(self, "_race_type_var") else "Road Racing"
         self._race_info_var.set(f"{car}  |  {start}  |  {mins}:{secs:02d}  |  {len(samples)} samples  |  {race_type}")
 
         toggle = getattr(self, "_chart_toggle_vars", {})
@@ -1687,7 +1709,9 @@ class FH6TrackerGUI(tk.Tk):
         )
 
     def _rerender_race_charts(self):
-        if self._selected_race_data:
+        if self._live_chart_active and self._live_chart_data:
+            self._render_race_analysis(self._live_chart_data)
+        elif self._selected_race_data:
             self._render_race_analysis(self._selected_race_data)
 
     @staticmethod
@@ -3317,6 +3341,7 @@ class FH6TrackerGUI(tk.Tk):
             self._recording = True
             self._record_btn.configure(text="Stop Recording")
             self._record_status_var.set("Recording... press Stop or F6 in-game to finish")
+            self._set_live_chart_active(True)
             if self.overlay_enabled_var.get():
                 self._create_race_overlay()
             self.show_notice("Race recording started — drive!")
@@ -3331,6 +3356,7 @@ class FH6TrackerGUI(tk.Tk):
             self._recording = False
             self._record_btn.configure(text="Start Recording")
             self._record_status_var.set("  (or press F6)")
+            self._set_live_chart_active(False)
             self.show_notice("Race recording stopped — check Race Analysis tab")
             # Refresh twice: once quickly to catch fast saves, once after a
             # longer delay in case the subprocess was still processing the stop.
@@ -3343,6 +3369,93 @@ class FH6TrackerGUI(tk.Tk):
         if children:
             self.race_list_tree.selection_set(children[0])
             self._on_race_select(None)
+
+    def _delete_selected_race(self):
+        """Delete the currently selected race file from disk and refresh the list."""
+        sel = self.race_list_tree.selection()
+        if not sel:
+            self.show_notice("Select a race to delete first.")
+            return
+        fname = sel[0]
+        if not messagebox.askyesno("Delete Race",
+                                   f"Delete '{fname}'?\nThis cannot be undone.",
+                                   parent=self):
+            return
+        try:
+            os.remove(os.path.join(RACES_DIR, fname))
+        except OSError as exc:
+            self.show_notice(f"Could not delete race: {exc}")
+            return
+        self._selected_race_data = None
+        self._race_info_var.set("Select a race from the list to analyze it.")
+        self.refresh_races_panel()
+        self.show_notice("Race deleted.")
+
+    def _delete_all_races(self):
+        """Delete every saved race file and reset the analysis panel."""
+        children = self.race_list_tree.get_children()
+        if not children:
+            self.show_notice("No races to delete.")
+            return
+        if not messagebox.askyesno("Delete All Races",
+                                   f"Delete ALL {len(children)} saved races?\n"
+                                   "This cannot be undone.",
+                                   parent=self):
+            return
+        deleted = 0
+        for iid in children:
+            try:
+                os.remove(os.path.join(RACES_DIR, iid))
+                deleted += 1
+            except OSError:
+                pass
+        self._selected_race_data = None
+        self._race_info_var.set("Select a race from the list to analyze it.")
+        self.refresh_races_panel()
+        self.show_notice(f"Deleted {deleted} race(s).")
+
+    def _set_live_chart_active(self, active):
+        """Start/stop the live Race Analysis chart poller while recording."""
+        if active == self._live_chart_active:
+            return
+        self._live_chart_active = active
+        if active:
+            self._live_chart_data = None
+            self._race_info_var.set("Recording... live charts will build here while you drive.")
+            self._live_chart_after_id = self.after(400, self._update_live_charts)
+        else:
+            if getattr(self, "_live_chart_after_id", None):
+                try:
+                    self.after_cancel(self._live_chart_after_id)
+                except Exception:
+                    pass
+                self._live_chart_after_id = None
+            self._live_chart_data = None
+            if not self.race_list_tree.get_children():
+                self._race_info_var.set("Select a race from the list to analyze it.")
+
+    def _update_live_charts(self):
+        """Poll the tracker's live chart file and render the race-so-far (~1x/sec)."""
+        if not self._live_chart_active:
+            self._live_chart_after_id = None
+            return
+        data = None
+        try:
+            if os.path.exists(LIVE_CHART_FILE):
+                with open(LIVE_CHART_FILE, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+        except (OSError, ValueError, TypeError):
+            data = None
+        samples = (data or {}).get("samples") or []
+        dur = float((data or {}).get("duration_seconds") or 0)
+        car = (data or {}).get("car_name") or "Unknown"
+        mins, secs = divmod(int(dur), 60)
+        if len(samples) >= 5:
+            self._live_chart_data = data
+            self._render_race_analysis(data)
+        else:
+            self._race_info_var.set(f"{car}  |  RECORDING...  |  {mins}:{secs:02d}  |  gathering data")
+        self._live_chart_after_id = self.after(1000, self._update_live_charts)
 
     # =====================================================================
     # RACE OVERLAY — transparent, click-through live dashboard over FH6
@@ -5912,11 +6025,13 @@ class FH6TrackerGUI(tk.Tk):
                     if is_recording:
                         self._record_btn.configure(text="Stop Recording")
                         self._record_status_var.set("Recording... press Stop or F6 in-game to finish")
+                        self._set_live_chart_active(True)
                         if self.overlay_enabled_var.get():
                             self._create_race_overlay()
                     else:
                         self._record_btn.configure(text="Start Recording")
                         self._record_status_var.set("  (or press F6)")
+                        self._set_live_chart_active(False)
         except (OSError, PermissionError):
             pass
 

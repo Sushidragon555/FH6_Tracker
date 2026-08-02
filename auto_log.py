@@ -145,6 +145,7 @@ OWNED_FILE = car_lookup.OWNED_FILE
 LOG_FILE = os.path.join(BASE_DIR, "telemetry_log.csv")
 RACES_DIR = os.path.join(BASE_DIR, "races")
 LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
+LIVE_CHART_FILE = os.path.join(RACES_DIR, ".live_chart.json")
 TEST_MODE = os.environ.get("FH6_TEST_MODE", "0") == "1"
 
 # Race telemetry capture settings. Forza sends ~60 packets/sec. We sample every
@@ -190,6 +191,7 @@ race_car_id = 0
 race_packet_count = 0
 race_manual_override = False  # True when user manually triggered recording
 last_live_write_time = 0.0    # throttle for .live_race.json writes
+last_live_chart_write_time = 0.0  # throttle for .live_chart.json writes
 last_signal_check = 0.0       # throttle for .record_start/.record_stop polling
 last_packet_mono = 0.0        # monotonic time of the last successfully parsed packet
 last_notice_write = 0.0       # throttle for .tracker_notice warnings
@@ -265,11 +267,43 @@ def _write_live_race():
         pass
 
 
+def _decimate(samples, max_points=2400):
+    """Evenly reduce a sample list to at most ``max_points`` for live charts."""
+    if len(samples) <= max_points:
+        return samples
+    step = len(samples) / max_points
+    return [samples[int(i * step)] for i in range(max_points)]
+
+
+def _write_live_chart():
+    """Write the full race-so-far sample set (decimated) so the GUI can render
+    live charts in the Race Analysis tab while the race is still being recorded.
+    Throttled by the caller to ~1x/sec; separate from .live_race.json so the
+    tiny overlay snapshot stays cheap to poll."""
+    if not race_in_progress:
+        return
+    try:
+        import json as _json
+        data = {
+            "recording": True,
+            "car_name": race_car_name or "Unknown Vehicle",
+            "start_time": race_start_timestamp,
+            "duration_seconds": round(time.monotonic() - race_start_time_mono, 1),
+            "samples": _decimate(race_buffer, 2400),
+        }
+        with open(LIVE_CHART_FILE, "w", encoding="utf-8") as fh:
+            _json.dump(data, fh)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
 def _clear_live_race():
-    """Remove the live snapshot so the GUI overlay hides."""
+    """Remove the live snapshots so the GUI overlay hides."""
     try:
         if os.path.exists(LIVE_RACE_FILE):
             os.remove(LIVE_RACE_FILE)
+        if os.path.exists(LIVE_CHART_FILE):
+            os.remove(LIVE_CHART_FILE)
     except OSError:
         pass
 
@@ -550,6 +584,10 @@ else:
                         if now - last_live_write_time >= 0.5:
                             last_live_write_time = now
                             _write_live_race()
+                        # Feed the GUI's live Race Analysis charts (~1x/sec).
+                        if now - last_live_chart_write_time >= 1.0:
+                            last_live_chart_write_time = now
+                            _write_live_chart()
 
                 # --- Ordinal gate: skip menus/results screens ---
                 # Only gates car-name resolution and regular logging; manual-race
