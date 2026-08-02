@@ -1,0 +1,76 @@
+name: Build & attach release assets
+
+# Builds the Windows app and attaches it to a GitHub Release for ANY version
+# tag (v1.0.0, v1.0.1, ...), so every release page has a downloadable app zip.
+#
+# - Pushing a tag like `v1.0.3` builds that version and attaches the app.
+# - Run manually (Actions -> "Build & attach release assets" -> Run workflow)
+#   and pick an existing tag (e.g. v1.0.0, v1.0.1) to upload its app zip too.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to build & upload (e.g. v1.0.1). Leave blank to use the pushed tag / default branch."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pip install -r requirements.txt
+
+      - name: Build exe
+        run: python build_exe.py
+
+      - name: Zip app folder
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          Compress-Archive -Path "dist/FH6_Tracker" -DestinationPath "FH6_Tracker-$tag-windows.zip"
+
+      - name: Attach to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $asset = "FH6_Tracker-$tag-windows.zip"
+          gh release view $tag --json id 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $asset --clobber
+          } else {
+            gh release create $tag $asset --title $tag --notes "FH6 Tracker $tag"
+          }
