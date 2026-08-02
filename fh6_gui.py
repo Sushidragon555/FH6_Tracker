@@ -42,7 +42,7 @@ except Exception:  # pragma: no cover - optional OCR dependencies
     ImageOps = None
     ImageTk = None
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
 ALLOWED_FEEDBACK_HOSTS = ["GAMINGPC"]
 
@@ -2704,6 +2704,16 @@ class FH6TrackerGUI(tk.Tk):
             pass
 
     def refresh_loop(self):
+        """Periodic heartbeat. Any error in a single cycle must not kill the
+        whole loop, so the body runs in a try and we always reschedule."""
+        try:
+            self._refresh_loop_body()
+        except Exception:
+            logger.exception("refresh_loop crashed")
+        finally:
+            self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
+
+    def _refresh_loop_body(self):
         now = time.monotonic()
         self._rotate_csv_log()
         # Only spawn tasklist periodically; window check is nearly free and runs every cycle.
@@ -2747,7 +2757,6 @@ class FH6TrackerGUI(tk.Tk):
                 self._live_ocr_status_var.set("OCR active — balance region only (popup scan disabled)")
             bal = self.last_credit_balance or self.get_session_credits()
             self._live_ocr_balance_var.set(format_credits(bal))
-        self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
 
     def refresh_all(self):
         self.update_forza_session_state(running_now=self._forza_running_cache)
@@ -3873,12 +3882,18 @@ class FH6TrackerGUI(tk.Tk):
     def _threaded_ocr(self):
         if not self.credit_ocr_var.get():
             return
+        if getattr(self, "_ocr_in_flight", False):
+            return
+        self._ocr_in_flight = True
         def _do_ocr():
-            image = self._grab_credit_image()
-            if image is None:
-                return
-            text = self._ocr_credit_text_from_image(image)
-            self.after(0, lambda: self._handle_ocr_result(text, image))
+            try:
+                image = self._grab_credit_image()
+                if image is None:
+                    return
+                text = self._ocr_credit_text_from_image(image)
+                self.after(0, lambda: self._handle_ocr_result(text, image))
+            finally:
+                self._ocr_in_flight = False
         threading.Thread(target=_do_ocr, daemon=True).start()
 
     def _handle_ocr_result(self, text, image):
@@ -5150,44 +5165,70 @@ class FH6TrackerGUI(tk.Tk):
     def _check_github_release(self, popup=False, silent_when_current=False):
         import urllib.request
         import urllib.error
+
+        if getattr(self, "_update_checking", False):
+            return
+        self._update_checking = True
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": f"FH6-Tracker/{APP_VERSION}"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
+
+        def _status(msg):
+            var = getattr(self, "_update_status_var", None)
+            if var is not None:
+                var.set(msg)
+
+        def _fetch():
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": f"FH6-Tracker/{APP_VERSION}"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return json.loads(resp.read().decode())
+            except urllib.error.URLError:
+                return None
+            except Exception:
+                return False
+
+        def _finish(data):
+            self._update_checking = False
+            if data is None:
+                _status("Could not reach GitHub (no internet?).")
+                return
+            if data is False:
+                _status("Update check failed.")
+                return
             tag = data.get("tag_name", "").lstrip("v")
             if not tag:
-                self._update_status_var.set("Could not check for updates.")
+                _status("Could not check for updates.")
                 return
-            if tag != APP_VERSION:
-                download_url = None
-                for asset in data.get("assets", []):
-                    if asset.get("name", "").endswith(".zip"):
-                        download_url = asset.get("browser_download_url")
-                        break
-                msg = f"Update available: v{tag} (current: v{APP_VERSION})"
-                if download_url:
-                    msg += " — Download from Releases page"
-                    self._update_pending = True
-                    self._pending_download_url = download_url
-                self._update_status_var.set(msg)
-                if popup and download_url:
-                    if messagebox.askyesno(
-                        "Update available",
-                        f"A newer version of FH6 Tracker is available:\n\n"
-                        f"  v{tag}  (you have v{APP_VERSION})\n\n"
-                        f"This release includes fixes and improvements.\n"
-                        f"Download it now?",
-                        parent=self.root,
-                    ):
-                        webbrowser.open(download_url)
-            else:
+            if tag == APP_VERSION:
                 if not silent_when_current:
-                    self._update_status_var.set(f"You're up to date (v{APP_VERSION}).")
-        except urllib.error.URLError:
-            self._update_status_var.set("Could not reach GitHub (no internet?).")
-        except Exception as exc:
-            self._update_status_var.set(f"Update check failed: {str(exc)[:80]}")
+                    _status(f"You're up to date (v{APP_VERSION}).")
+                return
+            download_url = None
+            for asset in data.get("assets", []):
+                if asset.get("name", "").endswith(".zip"):
+                    download_url = asset.get("browser_download_url")
+                    break
+            msg = f"Update available: v{tag} (current: v{APP_VERSION})"
+            if download_url:
+                msg += " — Download from Releases page"
+                self._update_pending = True
+                self._pending_download_url = download_url
+            _status(msg)
+            if popup and download_url:
+                if messagebox.askyesno(
+                    "Update available",
+                    f"A newer version of FH6 Tracker is available:\n\n"
+                    f"  v{tag}  (you have v{APP_VERSION})\n\n"
+                    f"This release includes fixes and improvements.\n"
+                    f"Download it now?",
+                    parent=self,
+                ):
+                    webbrowser.open(download_url)
+
+        def _worker():
+            data = _fetch()
+            self.after(0, _finish, data)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _check_git_update(self):
         try:
@@ -6236,6 +6277,15 @@ class FH6TrackerGUI(tk.Tk):
             NIF_ICON = 0x00000002
             NIF_TIP = 0x00000004
 
+            user32 = ctypes.windll.user32
+            user32.SetWindowLongPtrW.argtypes = [ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+            user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+            user32.SetWindowLongW.argtypes = [ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_long]
+            user32.SetWindowLongW.restype = ctypes.c_long
+            user32.CallWindowProcW.argtypes = [ctypes.c_void_p, ctypes.wintypes.HWND, ctypes.c_uint,
+                                               ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM]
+            user32.CallWindowProcW.restype = ctypes.c_ssize_t
+
             class NOTIFYICONDATA(ctypes.Structure):
                 _fields_ = [
                     ("cbSize", ctypes.c_uint32),
@@ -6266,10 +6316,19 @@ class FH6TrackerGUI(tk.Tk):
             self._tray_nid.szTip = "FH6 Tracker — click to restore"
             ctypes.windll.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self._tray_nid))
             self._tray_created = True
-            # Hook the Windows message loop to intercept tray callback
-            SetWindowLong = ctypes.windll.user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.windll.user32.SetWindowLongW
+            # Hook the Windows message loop to intercept tray callback.
+            # Keep a reference to the callback so it doesn't get garbage collected,
+            # and use pointer-sized HWND/WPARAM/LPARAM so args aren't truncated on x64.
+            self._tray_wndproc_cb = ctypes.WINFUNCTYPE(
+                ctypes.c_long,
+                ctypes.wintypes.HWND,
+                ctypes.c_uint,
+                ctypes.wintypes.WPARAM,
+                ctypes.wintypes.LPARAM,
+            )(self._wndproc)
+            SetWindowLong = user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user32.SetWindowLongW
             self._orig_wndproc = SetWindowLong(
-                self.winfo_id(), -4, ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.c_uint, ctypes.c_uint)(self._wndproc))
+                self.winfo_id(), -4, ctypes.cast(self._tray_wndproc_cb, ctypes.c_void_p).value)
         except Exception:
             self._tray_created = False
 
@@ -6291,7 +6350,8 @@ class FH6TrackerGUI(tk.Tk):
             NIM_DELETE = 0x00000002
             ctypes.windll.shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._tray_nid))
             if getattr(self, "_orig_wndproc", None):
-                SetWindowLong = ctypes.windll.user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.windll.user32.SetWindowLongW
+                user32 = ctypes.windll.user32
+                SetWindowLong = user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user32.SetWindowLongW
                 SetWindowLong(self.winfo_id(), -4, self._orig_wndproc)
                 self._orig_wndproc = None
             self._tray_created = False
