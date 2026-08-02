@@ -2475,12 +2475,6 @@ class FH6TrackerGUI(tk.Tk):
         if host not in DEV_HOSTS:
             self._view_feedback_btn.grid_remove()
 
-        self._capture_shot_btn = ttk.Button(update_frame, text="Capture Tab Screenshots",
-                                            command=self.capture_all_tab_screenshots)
-        self._capture_shot_btn.grid(row=3, column=0, columnspan=4, padx=8, pady=(0, 6), sticky="w")
-        if host not in DEV_HOSTS:
-            self._capture_shot_btn.grid_remove()
-
         if host in DEV_HOSTS:
             webhook_row = ttk.Frame(update_frame)
             webhook_row.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 6))
@@ -2539,6 +2533,11 @@ class FH6TrackerGUI(tk.Tk):
         ttk.Label(header, textvariable=self.screenshots_count_var, style="Secondary.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Button(header, text="Refresh", command=self.refresh_screenshots_panel).grid(row=0, column=1, padx=(8, 4))
         ttk.Button(header, text="Open Folder", command=lambda: os.startfile(SCREENSHOTS_DIR)).grid(row=0, column=2, padx=(4, 0))
+        # Dev-only tool: re-captures every tab for the GitHub README.
+        self._capture_shot_btn = ttk.Button(header, text="Capture Tabs", command=self.capture_all_tab_screenshots)
+        self._capture_shot_btn.grid(row=0, column=3, padx=(4, 0))
+        if os.environ.get("COMPUTERNAME", "") not in DEV_HOSTS:
+            self._capture_shot_btn.grid_remove()
 
         self.screenshots_canvas = tk.Canvas(self.screenshots_tab, highlightthickness=0)
         self.screenshots_canvas.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
@@ -2754,9 +2753,12 @@ class FH6TrackerGUI(tk.Tk):
                     refresher()
                 except Exception:
                     pass
-            self.update_idletasks()
-            time.sleep(1.2)
-            self.update_idletasks()
+            # Pump the event loop so the tab (and its child widgets) fully
+            # paint before we capture. A plain sleep() blocks redraws and
+            # leaves listboxes/canvases blank in the shot.
+            for _ in range(12):
+                self.update()
+                time.sleep(0.1)
             try:
                 shot = self._grab_widget(nb)
                 if shot is None and ImageGrab is not None:
