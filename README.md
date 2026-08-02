@@ -79,7 +79,7 @@ Track your entire Forza Horizon 6 car collection.
 - **Import**  Add cars by pasting a list or importing a `.txt`/`.csv` file.
 
 <!-- Add a screenshot of the collection tab here -->
-<!-- ![Collection Tab](screenshots/collection.png) -->
+![Collection Tab](screenshots/Collection.png)
 
 ### Live Data
 
@@ -90,7 +90,7 @@ Real-time telemetry from your game session.
 - **Auto Garage Detection**  Detects which car you're driving and auto-adds it to your owned list.
 
 <!-- Add a screenshot of the live data tab here -->
-<!-- ![Live Data](screenshots/live_data.png) -->
+![Live Data](screenshots/Live%20Data.png)
 
 ### Automatic Credit Tracking (OCR)
 
@@ -111,7 +111,7 @@ Analyze your driving from recorded races.
 - **Live Overlay**  While recording, enable **"Overlay live data on FH6 window while recording"** to float a transparent, click-through dashboard (speed, gear, RPM, throttle/brake/steering gauges, speed history) over the game. It never blocks input or vision, and auto-hides when recording stops.
 
 <!-- Add a screenshot of race analysis here -->
-<!-- ![Race Analysis](screenshots/race_analysis.png) -->
+![Race Analysis](screenshots/Race%20Analysis.png)
 
 ### Method Tracking
 
