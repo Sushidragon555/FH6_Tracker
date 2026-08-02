@@ -1310,7 +1310,9 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_var = tk.StringVar(value="Road Racing")
         self._race_type_combo = ttk.Combobox(race_type_frame, textvariable=self._race_type_var, values=["Road Racing", "Street Racing", "Dirt Racing", "Drag Racing", "Drift", "Cross Country", "PR Stunts"], state="readonly", width=16)
         self._race_type_combo.pack(side="left")
-        self._race_type_combo.bind("<<ComboboxSelected>>", lambda e: self._rerender_race_charts())
+        self._race_type_combo.bind("<<ComboboxSelected>>", self._on_race_type_changed)
+        self._race_type_source = None      # start_time of the race auto-detect ran on
+        self._race_type_overridden = False  # True once the user manually picks a type
         ttk.Label(race_type_frame, text="(Drift & PR Stunts are manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
         ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
         self._chart_toggle_vars = {}
@@ -1466,6 +1468,12 @@ class FH6TrackerGUI(tk.Tk):
         else:
             self._render_race_analysis(data)
 
+    def _on_race_type_changed(self, _event=None):
+        """User manually picked a race type — lock it in so auto-detect can't
+        overwrite it on the next re-render."""
+        self._race_type_overridden = True
+        self._rerender_race_charts()
+
     @staticmethod
     def _auto_detect_race_type(samples, duration):
         if not samples or len(samples) < 20:
@@ -1533,8 +1541,18 @@ class FH6TrackerGUI(tk.Tk):
         samples = data.get("samples", [])
         mins = int(dur) // 60
         secs = int(dur) % 60
-        auto_type = self._auto_detect_race_type(samples, dur)
-        if auto_type and auto_type not in ("Drift", "PR Stunts") and hasattr(self, "_race_type_var"):
+        auto_type = None
+        # Auto-detect only once per race (keyed on start_time). Re-renders caused
+        # by chart toggles or the dropdown itself must never overwrite the user's
+        # manual pick, and switching to another race resets the override.
+        start_key = data.get("start_time", "")
+        if start_key != self._race_type_source:
+            self._race_type_source = start_key
+            self._race_type_overridden = False
+            auto_type = self._auto_detect_race_type(samples, dur)
+            if not auto_type and hasattr(self, "_race_type_var"):
+                self._race_type_var.set("Road Racing")
+        if auto_type and not self._race_type_overridden and hasattr(self, "_race_type_var"):
             self._race_type_var.set(auto_type)
             race_type = auto_type
         else:
@@ -1582,7 +1600,7 @@ class FH6TrackerGUI(tk.Tk):
         if w < 50 or h < 50 or not data:
             canvas.create_text(w // 2, h // 2, text="No data", fill="#888888")
             return
-        pad_l, pad_r, pad_t, pad_b = 50, 10, 20, 20
+        pad_l, pad_r, pad_t, pad_b = 46, 16, 18, 18
         cw = w - pad_l - pad_r
         ch = h - pad_t - pad_b
         if cw < 10 or ch < 10:
@@ -1609,7 +1627,11 @@ class FH6TrackerGUI(tk.Tk):
             if len(flat) >= 4:
                 canvas.create_line(*flat, fill=color, width=1.5, smooth=True)
             if flat:
-                canvas.create_text(flat[-2] + 4, flat[-1], text=label, anchor="w", fill=color, font=("Segoe UI", 7))
+                # Keep the trailing legend label fully inside the canvas so the
+                # charts never get clipped at the right/bottom edge.
+                label_x = min(flat[-2] + 4, w - pad_r - 8 * len(label))
+                label_y = max(pad_t, min(flat[-1], pad_t + ch - 2))
+                canvas.create_text(label_x, label_y, text=label, anchor="w", fill=color, font=("Segoe UI", 7))
 
     def _draw_speed_chart(self, samples):
         self._draw_chart(
@@ -3309,7 +3331,6 @@ class FH6TrackerGUI(tk.Tk):
             self._recording = False
             self._record_btn.configure(text="Start Recording")
             self._record_status_var.set("  (or press F6)")
-            self._destroy_race_overlay()
             self.show_notice("Race recording stopped — check Race Analysis tab")
             # Refresh twice: once quickly to catch fast saves, once after a
             # longer delay in case the subprocess was still processing the stop.
@@ -3330,7 +3351,7 @@ class FH6TrackerGUI(tk.Tk):
     def _on_overlay_toggle(self):
         """Show/hide the live overlay when its checkbox is toggled."""
         if self.overlay_enabled_var.get():
-            if self._recording:
+            if self.tracker_running or self._recording:
                 self._create_race_overlay()
         else:
             self._destroy_race_overlay()
@@ -3515,7 +3536,7 @@ class FH6TrackerGUI(tk.Tk):
                     data = json.load(fh)
         except (OSError, ValueError, TypeError):
             data = None
-        if not data or not data.get("recording"):
+        if not data or not data.get("sample"):
             self._overlay_set("car", "Waiting for telemetry...")
             self._overlay_set("time", "")
             self._overlay_set("speed", "-")
@@ -3530,10 +3551,14 @@ class FH6TrackerGUI(tk.Tk):
 
         sample = data.get("sample") or {}
         recent = data.get("recent") or []
+        recording = bool(data.get("recording"))
         self._overlay_set("car", (data.get("car_name") or "Unknown")[:26])
-        elapsed = float(data.get("elapsed", 0) or 0)
-        m, s = divmod(int(elapsed), 60)
-        self._overlay_set("time", f"{m}:{s:02d}")
+        if recording:
+            elapsed = float(data.get("elapsed", 0) or 0)
+            m, s = divmod(int(elapsed), 60)
+            self._overlay_set("time", f"{m}:{s:02d}")
+        else:
+            self._overlay_set("time", "LIVE")
         self._overlay_set("speed", str(int(sample.get("spd", 0) or 0)))
         gear = sample.get("gear")
         self._overlay_set("gear", str(gear) if gear is not None else "-")
@@ -5850,6 +5875,8 @@ class FH6TrackerGUI(tk.Tk):
             self.last_status = "Running"
             self.status_var.set("Status: Running")
             self._update_tracker_button()
+            if self.overlay_enabled_var.get():
+                self._create_race_overlay()
         except Exception as exc:
             self.last_status = "Error"
             self.status_var.set(f"Status: Error ({exc})")
@@ -5890,7 +5917,6 @@ class FH6TrackerGUI(tk.Tk):
                     else:
                         self._record_btn.configure(text="Start Recording")
                         self._record_status_var.set("  (or press F6)")
-                        self._destroy_race_overlay()
         except (OSError, PermissionError):
             pass
 

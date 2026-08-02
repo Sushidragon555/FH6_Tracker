@@ -11,6 +11,18 @@ from datetime import datetime, timezone
 
 import car_lookup
 
+# The tracker logs unicode status glyphs (✓ ⚠️ 🏁 …). When the GUI launches it,
+# stdout is redirected to a file and Windows defaults the stream to cp1252,
+# which can't encode those chars — a single print would crash the hotkey thread.
+# Force UTF-8 (with lossy fallback) so logging never takes the process down.
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None:
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+del _stream
+
 # ==========================================
 # GLOBAL HOTKEYS via Win32 RegisterHotKey
 # Works without admin privileges, unlike the keyboard library.
@@ -166,6 +178,11 @@ canonical_index = car_lookup.build_canonical_index()
 # Race detection state
 race_in_progress = False
 race_buffer = []
+# Rolling telemetry window the GUI overlay polls while driving (not just while
+# recording), so the overlay shows live data at all times.
+live_recent = []
+live_sample_tick = 0
+session_start_mono = time.monotonic()
 race_start_time_mono = 0.0
 race_start_timestamp = ""
 race_car_name = "Unknown Vehicle"
@@ -224,23 +241,23 @@ def save_race(buffer, car_name, car_id, start_time, end_time, duration):
 
 
 def _write_live_race():
-    """Write a compact live snapshot the GUI overlay polls while recording.
+    """Write a compact live snapshot the GUI overlay polls continuously.
 
-    Throttled by the caller so this only hits disk a few times per second.
+    Unlike before, this runs while driving as well as while recording, so the
+    overlay stays live between races. Throttled by the caller to ~2x/sec.
     """
-    global last_live_write_time
-    if not race_buffer:
+    if not live_recent:
         return
     try:
         import json as _json
-        duration = time.monotonic() - race_start_time_mono
-        recent = race_buffer[-90:]
+        duration = (time.monotonic() - race_start_time_mono) if race_in_progress else 0.0
         data = {
-            "recording": True,
-            "car_name": race_car_name,
+            "recording": bool(race_in_progress),
+            "car_name": (race_car_name if race_in_progress else current_mapped_car_name)
+                        or "Unknown Vehicle",
             "elapsed": round(duration, 1),
-            "sample": race_buffer[-1],
-            "recent": recent,
+            "sample": live_recent[-1],
+            "recent": live_recent[-90:],
         }
         with open(LIVE_RACE_FILE, "w", encoding="utf-8") as fh:
             _json.dump(data, fh)
@@ -419,6 +436,11 @@ print(" Open Forza and drive around to verify connection!")
 print(" Press F6 in-game or click Start Recording in the GUI")
 print(" to record a race (auto-detection removed for FH6).")
 print("==========================================================\n")
+if sys.stdout is not None:
+    try:
+        sys.stdout.flush()
+    except OSError:
+        pass
 
 last_id = None
 last_log_time = 0.0
@@ -504,22 +526,26 @@ else:
                 # Runs BEFORE the ordinal gate on purpose: a manually started race
                 # must record telemetry even if this car's ordinal is 0/unknown,
                 # otherwise such users would get "race too short" every time.
+                sample = {
+                    "t": round((now - race_start_time_mono) if race_in_progress
+                               else (now - session_start_mono), 3),
+                    "spd": round(speed_mph, 1),
+                    "rpm": int(current_rpm),
+                    "thr": round(parsed["throttle"], 3),
+                    "brk": round(parsed["brake"], 3),
+                    "str": round(parsed["steering"], 3),
+                    "gear": parsed["gear"],
+                    "pwr": int(parsed["power"]),
+                    "trq": int(parsed["torque"]),
+                    "hbrk": round(parsed["handbrake"], 3),
+                }
                 if race_in_progress:
                     race_packet_count += 1
                     if race_packet_count % RACE_SAMPLE_EVERY == 0:
-                        t = round(now - race_start_time_mono, 3)
-                        race_buffer.append({
-                            "t": t,
-                            "spd": round(speed_mph, 1),
-                            "rpm": int(current_rpm),
-                            "thr": round(parsed["throttle"], 3),
-                            "brk": round(parsed["brake"], 3),
-                            "str": round(parsed["steering"], 3),
-                            "gear": parsed["gear"],
-                            "pwr": int(parsed["power"]),
-                            "trq": int(parsed["torque"]),
-                            "hbrk": round(parsed["handbrake"], 3),
-                        })
+                        race_buffer.append(sample)
+                        live_recent.append(sample)
+                        if len(live_recent) > 90:
+                            del live_recent[:-90]
                         # Feed the GUI overlay a compact live snapshot (~2x/sec).
                         if now - last_live_write_time >= 0.5:
                             last_live_write_time = now
@@ -549,6 +575,17 @@ else:
                         print(f"\n [✓] Automatically Added from ID Map: {current_mapped_car_name}")
                 else:
                     current_mapped_car_name = "Unknown Vehicle"
+
+                # --- Live overlay feed (always, while driving, ~20Hz sampling) ---
+                if not race_in_progress:
+                    if live_sample_tick % RACE_SAMPLE_EVERY == 0:
+                        live_recent.append(sample)
+                        if len(live_recent) > 90:
+                            del live_recent[:-90]
+                    live_sample_tick += 1
+                    if now - last_live_write_time >= 0.5:
+                        last_live_write_time = now
+                        _write_live_race()
 
                 # --- Regular telemetry logging ---
                 if car_changed or (now - last_log_time) >= LOG_INTERVAL_SECONDS:
