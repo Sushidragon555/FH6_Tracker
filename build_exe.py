@@ -49,6 +49,16 @@ def build():
         "--workpath", BUILD_DIR,
         "--hidden-import", "car_lookup",
         "--hidden-import", "auto_log",
+        # OCR / screen-grab deps are imported dynamically via importlib in
+        # fh6_gui.py, so PyInstaller's static analysis misses them. Without these
+        # the built exe silently runs with car detection / credit OCR disabled.
+        "--hidden-import", "pyautogui",
+        "--hidden-import", "pytesseract",
+        "--hidden-import", "PIL",
+        "--hidden-import", "PIL.Image",
+        "--hidden-import", "PIL.ImageOps",
+        "--hidden-import", "PIL.ImageGrab",
+        "--hidden-import", "PIL.ImageTk",
     ]
 
     # Add data files (auto_log.py etc. next to the exe)
