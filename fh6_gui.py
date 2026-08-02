@@ -44,7 +44,9 @@ except Exception:  # pragma: no cover - optional OCR dependencies
 
 APP_VERSION = "1.0.3"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
-ALLOWED_FEEDBACK_HOSTS = ["GAMINGPC"]
+# Only these machine names get the dev-only tools (View Feedback, webhook field,
+# Capture Tab Screenshots, --capture-screenshots CLI). End users never see them.
+DEV_HOSTS = ["GAMINGPC"]
 
 # Paste your Discord webhook URL here to let every user send feedback with one
 # click (no GitHub login required). Create one at: Server Settings -> Integrations
@@ -64,6 +66,7 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(BASE_DIR, "gui_settings.json")
 DEBUG_DIR = os.path.join(BASE_DIR, "ocr_debug")
+SCREENSHOTS_DIR = os.path.join(BASE_DIR, "screenshots")
 AUTO_LOG_PATH = os.path.join(BUNDLE_DIR or BASE_DIR, "auto_log.py")
 OWNED_FILE = os.path.join(BASE_DIR, "owned_cars.json")
 MASTER_FILE = os.path.join(BUNDLE_DIR or BASE_DIR, "fh6_master_list.json")
@@ -824,11 +827,13 @@ class FH6TrackerGUI(tk.Tk):
         self.methods_tab = ttk.Frame(self.notebook)
         self.races_tab = ttk.Frame(self.notebook)
         self.recommendations_tab = ttk.Frame(self.notebook)
+        self.screenshots_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.garage_tab, text="Collection")
         self.notebook.add(self.live_tab, text="Live Data")
         self.notebook.add(self.methods_tab, text="Methods")
         self.notebook.add(self.races_tab, text="Race Analysis")
         self.notebook.add(self.recommendations_tab, text="Recommendations")
+        self.notebook.add(self.screenshots_tab, text="Screenshots")
         self.notebook.add(self.settings_tab, text="Settings")
         self.notebook.add(self.logs_tab, text="Logs")
 
@@ -837,6 +842,7 @@ class FH6TrackerGUI(tk.Tk):
         self.build_methods_tab()
         self.build_races_tab()
         self.build_recommendations_tab()
+        self.build_screenshots_tab()
         self.build_settings_tab()
         self.build_logs_tab()
         self.populate_progress_manufacturers()
@@ -2466,10 +2472,16 @@ class FH6TrackerGUI(tk.Tk):
         self._view_feedback_btn = ttk.Button(update_frame, text="View Feedback", command=self._open_feedback_viewer)
         self._view_feedback_btn.grid(row=1, column=3, padx=(4, 8), pady=6, sticky="w")
         host = os.environ.get("COMPUTERNAME", "")
-        if host not in ALLOWED_FEEDBACK_HOSTS:
+        if host not in DEV_HOSTS:
             self._view_feedback_btn.grid_remove()
 
-        if host in ALLOWED_FEEDBACK_HOSTS:
+        self._capture_shot_btn = ttk.Button(update_frame, text="Capture Tab Screenshots",
+                                            command=self.capture_all_tab_screenshots)
+        self._capture_shot_btn.grid(row=3, column=0, columnspan=4, padx=8, pady=(0, 6), sticky="w")
+        if host not in DEV_HOSTS:
+            self._capture_shot_btn.grid_remove()
+
+        if host in DEV_HOSTS:
             webhook_row = ttk.Frame(update_frame)
             webhook_row.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 6))
             webhook_row.columnconfigure(1, weight=1)
@@ -2514,6 +2526,258 @@ class FH6TrackerGUI(tk.Tk):
         self.log_text = scrolledtext.ScrolledText(self.logs_tab, wrap=tk.WORD, height=24)
         self.log_text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         self.log_text.configure(state="disabled")
+
+    def build_screenshots_tab(self):
+        self.screenshots_tab.columnconfigure(0, weight=1)
+        self.screenshots_tab.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self.screenshots_tab)
+        header.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        header.columnconfigure(0, weight=1)
+
+        self.screenshots_count_var = tk.StringVar(value="No screenshots yet.")
+        ttk.Label(header, textvariable=self.screenshots_count_var, style="Secondary.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(header, text="Refresh", command=self.refresh_screenshots_panel).grid(row=0, column=1, padx=(8, 4))
+        ttk.Button(header, text="Open Folder", command=lambda: os.startfile(SCREENSHOTS_DIR)).grid(row=0, column=2, padx=(4, 0))
+
+        self.screenshots_canvas = tk.Canvas(self.screenshots_tab, highlightthickness=0)
+        self.screenshots_canvas.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        vsb = ttk.Scrollbar(self.screenshots_tab, orient="vertical", command=self.screenshots_canvas.yview)
+        vsb.grid(row=1, column=1, sticky="ns", pady=(0, 8))
+        self.screenshots_canvas.configure(yscrollcommand=vsb.set)
+
+        self.screenshots_inner = ttk.Frame(self.screenshots_canvas)
+        self.screenshots_canvas.create_window((0, 0), window=self.screenshots_inner, anchor="nw")
+        self.screenshots_inner.bind("<Configure>", lambda e: self.screenshots_canvas.configure(scrollregion=self.screenshots_canvas.bbox("all")))
+        # Scroll the thumbnail grid with the wheel only while the mouse is over it
+        self.screenshots_canvas.bind("<Enter>", lambda e: self.screenshots_canvas.bind_all("<MouseWheel>", self._scroll_screenshots))
+        self.screenshots_canvas.bind("<Leave>", lambda e: self.screenshots_canvas.unbind_all("<MouseWheel>"))
+
+        self._screenshots_photos = []
+        self._screenshots_sig = None
+        self._last_screenshots_refresh_time = 0.0
+        self.refresh_screenshots_panel()
+
+    def _scroll_screenshots(self, event):
+        self.screenshots_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def refresh_screenshots_panel(self):
+        """Rebuild the thumbnail grid whenever new screenshots appear in
+        screenshots/. Cheap folder scan; only re-renders on actual changes."""
+        try:
+            os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+        except OSError:
+            pass
+        try:
+            files = sorted(
+                f for f in os.listdir(SCREENSHOTS_DIR)
+                if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"))
+            )
+            sig = tuple(
+                (f, os.path.getsize(os.path.join(SCREENSHOTS_DIR, f)),
+                 int(os.path.getmtime(os.path.join(SCREENSHOTS_DIR, f))))
+                for f in files
+            )
+        except OSError:
+            files, sig = [], None
+        if sig == self._screenshots_sig:
+            return
+        self._screenshots_sig = sig
+
+        for child in self.screenshots_inner.winfo_children():
+            child.destroy()
+        self._screenshots_photos = []
+
+        if not files:
+            self.screenshots_count_var.set(
+                "No screenshots yet. Drop images into the screenshots/ folder "
+                "and they'll show up here automatically.")
+            return
+
+        self.screenshots_count_var.set(f"{len(files)} screenshot{'s' if len(files) != 1 else ''}")
+        width = self.screenshots_canvas.winfo_width()
+        per_row = max(1, width // 210) if width > 10 else 4
+        col = row = 0
+        for name in files:
+            path = os.path.join(SCREENSHOTS_DIR, name)
+            cell = ttk.Frame(self.screenshots_inner, padding=6)
+            cell.grid(row=row, column=col, sticky="nw")
+            photo = None
+            try:
+                if Image is not None and ImageTk is not None:
+                    img = Image.open(path).convert("RGB")
+                    img.thumbnail((200, 130), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+            except Exception:
+                photo = None
+            if photo is not None:
+                lbl = tk.Label(cell, image=photo, cursor="hand2")
+                lbl.image = photo
+                self._screenshots_photos.append(photo)
+                lbl.bind("<Button-1>", lambda e, p=path: os.startfile(p))
+                lbl.grid(row=0, column=0)
+            else:
+                ttk.Label(cell, text="(preview unavailable)", style="Secondary.TLabel").grid(row=0, column=0)
+            name_lbl = ttk.Label(cell, text=name, style="Secondary.TLabel")
+            name_lbl.grid(row=1, column=0, pady=(4, 0))
+            name_lbl.bind("<Button-1>", lambda e, p=path: os.startfile(p))
+            col += 1
+            if col >= per_row:
+                col = 0
+                row += 1
+
+    def _grab_widget(self, widget):
+        """Capture a widget's own rendered pixels via Win32 PrintWindow.
+
+        Unlike ImageGrab.grab(), this never touches the physical screen, so it's
+        immune to DPI-scaled coordinates, covered windows, and the black-screen
+        captures you get from GPU-composited surfaces. Returns a PIL image.
+        """
+        try:
+            import ctypes
+            w = widget.winfo_width()
+            h = widget.winfo_height()
+            if w < 2 or h < 2:
+                self.update_idletasks()
+                w = widget.winfo_width()
+                h = widget.winfo_height()
+            if w < 2 or h < 2:
+                return None
+            hwnd = widget.winfo_id()
+
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+            user32.GetWindowDC.argtypes = [ctypes.wintypes.HWND]
+            user32.GetWindowDC.restype = ctypes.c_void_p
+            user32.ReleaseDC.argtypes = [ctypes.wintypes.HWND, ctypes.c_void_p]
+            user32.ReleaseDC.restype = ctypes.c_int
+            user32.PrintWindow.argtypes = [ctypes.wintypes.HWND, ctypes.c_void_p, ctypes.c_uint]
+            user32.PrintWindow.restype = ctypes.c_int
+            gdi32.CreateCompatibleDC.argtypes = [ctypes.c_void_p]
+            gdi32.CreateCompatibleDC.restype = ctypes.c_void_p
+            gdi32.CreateCompatibleBitmap.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+            gdi32.CreateCompatibleBitmap.restype = ctypes.c_void_p
+            gdi32.SelectObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            gdi32.SelectObject.restype = ctypes.c_void_p
+            gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+            gdi32.DeleteObject.restype = ctypes.c_int
+            gdi32.DeleteDC.argtypes = [ctypes.c_void_p]
+            gdi32.DeleteDC.restype = ctypes.c_int
+            gdi32.GetDIBits.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint,
+                                        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
+            gdi32.GetDIBits.restype = ctypes.c_int
+
+            class BITMAPINFO(ctypes.Structure):
+                _fields_ = [
+                    ("biSize", ctypes.c_uint32),
+                    ("biWidth", ctypes.c_long),
+                    ("biHeight", ctypes.c_long),
+                    ("biPlanes", ctypes.c_uint16),
+                    ("biBitCount", ctypes.c_uint16),
+                    ("biCompression", ctypes.c_uint32),
+                    ("biSizeImage", ctypes.c_uint32),
+                    ("biXPelsPerMeter", ctypes.c_long),
+                    ("biYPelsPerMeter", ctypes.c_long),
+                    ("biClrUsed", ctypes.c_uint32),
+                    ("biClrImportant", ctypes.c_uint32),
+                ]
+
+            hwnd_dc = user32.GetWindowDC(hwnd)
+            if not hwnd_dc:
+                return None
+            mem_dc = gdi32.CreateCompatibleDC(hwnd_dc)
+            bmp = gdi32.CreateCompatibleBitmap(hwnd_dc, w, h)
+            if not mem_dc or not bmp:
+                if mem_dc:
+                    gdi32.DeleteDC(mem_dc)
+                user32.ReleaseDC(hwnd, hwnd_dc)
+                return None
+            old_bmp = gdi32.SelectObject(mem_dc, bmp)
+            try:
+                # PW_RENDERFULLCONTENT: render even if the window is covered
+                # or rendered through DWM composition.
+                user32.PrintWindow(hwnd, mem_dc, 0x00000002)
+            finally:
+                gdi32.SelectObject(mem_dc, old_bmp)
+
+            bmi = BITMAPINFO()
+            bmi.biSize = ctypes.sizeof(BITMAPINFO)
+            bmi.biWidth = w
+            bmi.biHeight = -h  # negative = top-down rows
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            bmi.biCompression = 0  # BI_RGB
+            buf = ctypes.create_string_buffer(w * h * 4)
+            gdi32.GetDIBits(mem_dc, bmp, 0, h, buf, ctypes.byref(bmi), 0)
+            img = Image.frombuffer("RGBA", (w, h), buf.raw, "raw", "BGRA", 0, 1).convert("RGB")
+
+            gdi32.DeleteObject(bmp)
+            gdi32.DeleteDC(mem_dc)
+            user32.ReleaseDC(hwnd, hwnd_dc)
+            return img
+        except Exception as exc:
+            logger.warning("PrintWindow capture failed: %s", exc)
+            return None
+
+    def capture_all_tab_screenshots(self, quiet=False):
+        """Dev tool: screenshot every tab into screenshots/ for the GitHub README."""
+        if Image is None:
+            if not quiet:
+                messagebox.showwarning("Screenshots", "Screenshot capture requires Pillow (PIL).")
+            return
+        os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+        self.lift()
+        self.update_idletasks()
+        time.sleep(0.5)
+
+        nb = self.notebook
+        self.update_idletasks()
+        bbox = (nb.winfo_rootx(), nb.winfo_rooty(),
+                nb.winfo_rootx() + nb.winfo_width(),
+                nb.winfo_rooty() + nb.winfo_height())
+
+        tabs = [
+            (self.garage_tab, "Collection",
+             lambda: (setattr(self, "_collection_dirty", True), self.refresh_collection())),
+            (self.live_tab, "Live Data", self.refresh_live_data),
+            (self.methods_tab, "Methods", self.refresh_methods_panel),
+            (self.races_tab, "Race Analysis", self.refresh_races_panel),
+            (self.recommendations_tab, "Recommendations", self.refresh_recommendations),
+            (self.settings_tab, "Settings", None),
+            (self.logs_tab, "Logs", self.refresh_logs_panel),
+        ]
+        captured = []
+        for tab, title, refresher in tabs:
+            self.notebook.select(tab)
+            if refresher is not None:
+                try:
+                    refresher()
+                except Exception:
+                    pass
+            self.update_idletasks()
+            time.sleep(1.2)
+            self.update_idletasks()
+            try:
+                shot = self._grab_widget(nb)
+                if shot is None and ImageGrab is not None:
+                    shot = ImageGrab.grab(bbox=bbox)
+                if shot is None:
+                    raise RuntimeError("capture failed")
+                filename = os.path.join(SCREENSHOTS_DIR, title + ".png")
+                shot.save(filename)
+                captured.append(os.path.basename(filename))
+            except Exception as exc:
+                logger.warning("Screenshot capture failed for %s: %s", title, exc)
+        if captured:
+            self.screenshots_count_var.set("Captured: " + ", ".join(captured))
+            if not quiet:
+                messagebox.showinfo("Screenshots captured",
+                                    "Saved to screenshots/:\n\n" + "\n".join(captured)
+                                    + "\n\nReview them and commit them for the README.")
+            else:
+                print("Captured:", ", ".join(captured))
+        elif not quiet:
+            messagebox.showwarning("Screenshots", "No screenshots captured.")
 
     def build_recommendations_tab(self):
         self.recommendations_tab.columnconfigure(0, weight=1)
@@ -2775,6 +3039,7 @@ class FH6TrackerGUI(tk.Tk):
             self.methods_tab: (self.refresh_methods_panel, "_last_methods_refresh_time", 10.0),
             self.races_tab: (self.refresh_races_panel, "_last_races_refresh_time", 10.0),
             self.recommendations_tab: (self.refresh_recommendations, "_last_recs_refresh_time", 10.0),
+            self.screenshots_tab: (self.refresh_screenshots_panel, "_last_screenshots_refresh_time", 2.0),
         }
         try:
             selected = self.notebook.select()
@@ -6403,4 +6668,7 @@ class FH6TrackerGUI(tk.Tk):
 
 if __name__ == "__main__":
     app = FH6TrackerGUI()
+    # Dev-only: captures screenshots of every tab for the GitHub README.
+    if "--capture-screenshots" in sys.argv and os.environ.get("COMPUTERNAME", "") in DEV_HOSTS:
+        app.after(1500, lambda: (app.capture_all_tab_screenshots(quiet=True), app.destroy()))
     app.mainloop()

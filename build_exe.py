@@ -85,6 +85,7 @@ def build():
         os.makedirs(races_dst, exist_ok=True)
 
     print(f"\nTo distribute: zip the '{APP_NAME}' folder and share it.")
+    print("Tip: refresh GitHub README screenshots with: python fh6_gui.py --capture-screenshots")
 
 
 if __name__ == "__main__":
