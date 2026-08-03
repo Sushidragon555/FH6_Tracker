@@ -1290,7 +1290,7 @@ class FH6TrackerGUI(tk.Tk):
         corner_row = ttk.Frame(overlay_frame)
         corner_row.pack(anchor="w", pady=(2, 0))
         ttk.Label(corner_row, text="Position:").pack(side="left")
-        for corner, label in (("TL", "Top-left"), ("TR", "Top-right"), ("BL", "Bottom-left"), ("BR", "Bottom-right")):
+        for corner, label in (("TL", "Top-left"), ("TR", "Top-right"), ("ML", "Mid-left"), ("BL", "Bottom-left"), ("BR", "Bottom-right")):
             ttk.Radiobutton(corner_row, text=label, variable=self.overlay_corner_var, value=corner, command=self._place_race_overlay).pack(side="left", padx=(4, 0))
         self._overlay_hint_var = tk.StringVar(value="Transparent & click-through — never blocks your screen.")
         ttk.Label(record_frame, textvariable=self._overlay_hint_var, style="Secondary.TLabel", wraplength=190).pack(padx=4, pady=(0, 4))
@@ -3867,6 +3867,8 @@ class FH6TrackerGUI(tk.Tk):
         corner = self.overlay_corner_var.get() if hasattr(self, "overlay_corner_var") else "TL"
         if corner == "TR":
             x, y = right - w - margin, top + margin
+        elif corner == "ML":
+            x, y = left + margin, top + int((bottom - top) * 0.40) - h // 2
         elif corner == "BL":
             x, y = left + margin, bottom - h - margin
         elif corner == "BR":
