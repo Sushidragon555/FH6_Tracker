@@ -10,6 +10,7 @@ venv/
 telemetry_log.csv
 fh6_tracker.log
 tracker.log
+tracker_overlay.log
 *.tmp
 
 # PyInstaller build output
