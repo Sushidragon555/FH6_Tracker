@@ -30,19 +30,23 @@ I built this project to solve my own headacheto make tracking my garage seamless
 
 ### Download & Run (Takes about 2 minutes)
 
-> **You need Python installed. That's the only requirement.**
+> **No Python required.** The release zip is a ready-to-run app with everything bundled.
 
-**Step 1:** Go to the [Releases page](https://github.com/Sushidragon555/FH6_Tracker/releases) and download the latest source code `.zip`
+**Step 1:** Go to the [Releases page](https://github.com/Sushidragon555/FH6_Tracker/releases) and download the latest **`FH6_Tracker-vX.Y.Z-windows.zip`** (in the "Assets" section).
 
-**Step 2:** **Extract the zip**  right-click the file → **"Extract All..."** → pick a location → click **Extract**
+> **Tip:** Don't download the "Source code" zip — that's for developers running from Python and it can't auto-update. The `-windows.zip` is the finished app.
 
-**Step 3:** Open the extracted folder and **double-click `Start Here.bat`**
+**Step 2:** **Extract the zip** — right-click the file → **"Extract All..."** → pick a location → click **Extract**
 
-That's it  it installs Python packages automatically and launches the app.
+**Step 3:** Open the extracted folder and **double-click `FH6_Tracker.exe`**
 
-> **Don't have Python?** Install it from [python.org](https://www.python.org/downloads/) first. **Important:** check the box that says **"Add Python to PATH"** during install, then run `Start Here.bat` again.
+That's it — the app launches and connects to Forza.
+
+> **Want automatic updates?** Just click **Check for Updates** in the app's Settings tab. When a new version is out, it downloads and installs it for you — your cars, settings, and race history are always kept.
 
 **Step 4:** In the app, go to the **Settings** tab and enable **"Auto-open with Forza"** so it starts tracking when you launch the game.
+
+> **Running from source instead?** (Developers only) Install [Python](https://www.python.org/downloads/) with **"Add Python to PATH"** checked, then double-click `Start Here.bat` instead of the `.exe`.
 
 ---
 
@@ -58,8 +62,8 @@ In Forza Horizon 6, go to **Settings → Advanced** and enable **Data Out**:
 ## Requirements
 
 - **Windows** (required for telemetry and OCR features)
-- **Python 3.10+** (free from [python.org](https://www.python.org/downloads/))
 - **Forza Horizon 6** installed and running
+- **Python 3.10+** — only needed if you run from source instead of the ready-made `.exe` (free from [python.org](https://www.python.org/downloads/))
 
 ### Optional (for automatic credit tracking)
 
