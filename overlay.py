@@ -29,7 +29,7 @@ RACES_DIR = os.path.join(BASE_DIR, "races")
 LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
 AUTO_LOG_PATH = os.path.join(BASE_DIR, "auto_log.py")
 OVERLAY_BG = "#ff00fe"  # chroma-key color: every pixel of this color is transparent on Windows
-W, H, MARGIN = 330, 232, 8
+W, H, MARGIN = 330, 252, 8
 
 # Quit hotkey: Ctrl+Alt+Q
 WM_HOTKEY = 0x0312
@@ -80,6 +80,7 @@ class OverlayApp:
         self._win_rect_time = 0.0
         self._place_count = 0
         self._create_overlay()
+        self._create_control_panel()
         self._start_tracker()
         self._register_quit_hotkey()
         self.root.protocol("WM_DELETE_WINDOW", self._quit)
@@ -130,6 +131,77 @@ class OverlayApp:
         mb.showerror("FH6 Overlay", text)
         self._quit()
 
+    # -------------------------------------------------------- control panel
+    def _create_control_panel(self):
+        """Small always-on-top button bar under the overlay.
+
+        The overlay itself is click-through, so this separate panel is the
+        clickable escape hatch: reopen the GUI, or quit the overlay.
+        """
+        panel = tk.Toplevel(self.root)
+        panel.overrideredirect(True)
+        panel.attributes("-topmost", True)
+        panel.configure(bg="#1a1a1a")
+        panel.attributes("-alpha", 0.92)
+        tk.Button(
+            panel, text="Open GUI", command=self._open_gui,
+            bg="#2ea043", fg="white", activebackground="#3fb950", activeforeground="white",
+            relief="flat", bd=0, padx=10, pady=4,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left", padx=(6, 3), pady=4)
+        tk.Button(
+            panel, text="Quit", command=self._quit,
+            bg="#4a4a4a", fg="white", activebackground="#666666", activeforeground="white",
+            relief="flat", bd=0, padx=10, pady=4,
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(3, 6), pady=4)
+        self._panel = panel
+        self._position_panel()
+
+    def _position_panel(self):
+        try:
+            x = self._overlay.winfo_rootx()
+            y = self._overlay.winfo_rooty() + H + 6
+            self._panel.geometry(f"+{int(x)}+{int(y)}")
+        except Exception:
+            pass
+
+    def _open_gui(self):
+        """Stop the overlay, reset overlay-only mode, and relaunch the GUI."""
+        try:
+            path = os.path.join(BASE_DIR, "gui_settings.json")
+            data = {}
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except Exception:
+                data = {}
+            data["race_overlay_standalone"] = False
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=4)
+        except Exception:
+            pass
+        self._stop_tracker()
+        try:
+            if os.path.exists(LIVE_RACE_FILE):
+                os.remove(LIVE_RACE_FILE)
+        except OSError:
+            pass
+        pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = sys.executable
+        gui_script = os.path.join(BASE_DIR, "fh6_gui.py")
+        if os.path.exists(gui_script):
+            try:
+                subprocess.Popen([pythonw, gui_script], cwd=BASE_DIR,
+                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            except Exception:
+                pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
     # ------------------------------------------------------------ overlay UI
     def _create_overlay(self):
         overlay = tk.Toplevel(self.root)
@@ -159,9 +231,9 @@ class OverlayApp:
         self._ov_text(canvas, items, "car", 22, 5, "Waiting for telemetry...", ("Segoe UI", 10, "bold"), "#ffffff")
         self._ov_text(canvas, items, "time", 322, 5, "0:00", ("Segoe UI", 10, "bold"), "#ffffff", anchor="ne")
         self._ov_text(canvas, items, "speed", 10, 24, "0", ("Segoe UI", 42, "bold"), "#ffffff")
-        self._ov_text(canvas, items, "mph", 14, 80, "MPH", ("Segoe UI", 9, "bold"), "#bbbbbb")
+        self._ov_text(canvas, items, "mph", 14, 90, "MPH", ("Segoe UI", 9, "bold"), "#bbbbbb")
         self._ov_text(canvas, items, "gear", 322, 24, "-", ("Segoe UI", 30, "bold"), "#58a6ff", anchor="ne")
-        self._ov_text(canvas, items, "rpm", 322, 60, "RPM -", ("Segoe UI", 10, "bold"), "#dddddd", anchor="ne")
+        self._ov_text(canvas, items, "rpm", 322, 70, "RPM -", ("Segoe UI", 10, "bold"), "#dddddd", anchor="ne")
 
         bar_y = {}
         bars = [
@@ -171,14 +243,14 @@ class OverlayApp:
             ("hbrk", "HBK", "#d29922"),
         ]
         for idx, (key, label, color) in enumerate(bars):
-            y = 106 + idx * 28
+            y = 122 + idx * 28
             bar_y[key] = y
             self._ov_text(canvas, items, key + "_label", 10, y - 15, label, ("Segoe UI", 8, "bold"), color)
             canvas.create_rectangle(10, y, 150, y + 12, fill="#101010", outline="#3f3f3f")
             items[key + "_fill"] = canvas.create_rectangle(10, y, 10, y + 12, fill=color, outline="")
             items[key + "_val"] = canvas.create_text(150, y - 15, anchor="ne", text="", fill="#eeeeee", font=("Segoe UI", 8, "bold"))
         items["bar_y"] = bar_y
-        items["spark"] = canvas.create_line(196, 106, 322, 106, fill="#58a6ff", width=2)
+        items["spark"] = canvas.create_line(196, 122, 322, 122, fill="#58a6ff", width=2)
         return items
 
     def _overlay_set(self, key, text):
@@ -204,6 +276,10 @@ class OverlayApp:
                 self._place()
             except Exception:
                 pass
+        try:
+            self._position_panel()
+        except Exception:
+            pass
         self.root.after(500, self._loop)
 
     def _update_overlay(self):
@@ -224,7 +300,7 @@ class OverlayApp:
                 self._overlay_set(key + "_val", "")
                 y = self._overlay_items["bar_y"][key]
                 self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10, y + 12)
-            self._overlay_canvas.coords(self._overlay_items["spark"], 196, 106, 322, 106)
+            self._overlay_canvas.coords(self._overlay_items["spark"], 196, 122, 322, 122)
             return
 
         sample = data.get("sample") or {}
@@ -250,7 +326,7 @@ class OverlayApp:
 
         speeds = [s.get("spd", 0) or 0 for s in recent]
         if len(speeds) >= 2:
-            x0, y0, x1, y1 = 196, 106, 322, 202
+            x0, y0, x1, y1 = 196, 122, 322, 218
             high = max(60.0, max(speeds))
             n = len(speeds)
             pts = []
@@ -314,12 +390,16 @@ class OverlayApp:
             pass
 
     # ------------------------------------------------------------------ quit
-    def _quit(self):
+    def _stop_tracker(self):
         if self.tracker and self.tracker.poll() is None:
             try:
                 self.tracker.terminate()
             except Exception:
                 pass
+        self.tracker = None
+
+    def _quit(self):
+        self._stop_tracker()
         try:
             if os.path.exists(LIVE_RACE_FILE):
                 os.remove(LIVE_RACE_FILE)

@@ -3806,7 +3806,7 @@ class FH6TrackerGUI(tk.Tk):
             overlay.attributes("-transparentcolor", OVERLAY_BG)
         except tk.TclError:
             overlay.attributes("-alpha", 0.75)
-        canvas = tk.Canvas(overlay, width=330, height=232, bg=OVERLAY_BG, highlightthickness=0)
+        canvas = tk.Canvas(overlay, width=330, height=252, bg=OVERLAY_BG, highlightthickness=0)
         canvas.pack()
         self._overlay = overlay
         self._overlay_canvas = canvas
@@ -3862,9 +3862,9 @@ class FH6TrackerGUI(tk.Tk):
         self._ov_text(canvas, items, "car", 22, 5, "Waiting for telemetry...", ("Segoe UI", 10, "bold"), "#ffffff")
         self._ov_text(canvas, items, "time", 322, 5, "0:00", ("Segoe UI", 10, "bold"), "#ffffff", anchor="ne")
         self._ov_text(canvas, items, "speed", 10, 24, "0", ("Segoe UI", 42, "bold"), "#ffffff")
-        self._ov_text(canvas, items, "mph", 14, 80, "MPH", ("Segoe UI", 9, "bold"), "#bbbbbb")
+        self._ov_text(canvas, items, "mph", 14, 90, "MPH", ("Segoe UI", 9, "bold"), "#bbbbbb")
         self._ov_text(canvas, items, "gear", 322, 24, "-", ("Segoe UI", 30, "bold"), "#58a6ff", anchor="ne")
-        self._ov_text(canvas, items, "rpm", 322, 60, "RPM -", ("Segoe UI", 10, "bold"), "#dddddd", anchor="ne")
+        self._ov_text(canvas, items, "rpm", 322, 70, "RPM -", ("Segoe UI", 10, "bold"), "#dddddd", anchor="ne")
 
         bar_y = {}
         bars = [
@@ -3874,14 +3874,14 @@ class FH6TrackerGUI(tk.Tk):
             ("hbrk", "HBK", "#d29922"),
         ]
         for idx, (key, label, color) in enumerate(bars):
-            y = 106 + idx * 28
+            y = 122 + idx * 28
             bar_y[key] = y
             self._ov_text(canvas, items, key + "_label", 10, y - 15, label, ("Segoe UI", 8, "bold"), color)
             canvas.create_rectangle(10, y, 150, y + 12, fill="#101010", outline="#3f3f3f")
             items[key + "_fill"] = canvas.create_rectangle(10, y, 10, y + 12, fill=color, outline="")
             items[key + "_val"] = canvas.create_text(150, y - 15, anchor="ne", text="", fill="#eeeeee", font=("Segoe UI", 8, "bold"))
         items["bar_y"] = bar_y
-        items["spark"] = canvas.create_line(196, 106, 322, 106, fill="#58a6ff", width=2)
+        items["spark"] = canvas.create_line(196, 122, 322, 122, fill="#58a6ff", width=2)
         return items
 
     def _overlay_set(self, key, text):
@@ -3898,7 +3898,7 @@ class FH6TrackerGUI(tk.Tk):
         overlay = getattr(self, "_overlay", None)
         if overlay is None or not overlay.winfo_exists():
             return
-        w, h, margin = 330, 232, 8
+        w, h, margin = 330, 252, 8
 
         # Prefer the monitor the FH6 window is on, so the overlay follows the
         # game across displays. Fall back to the GUI's own monitor (then the
@@ -3921,6 +3921,14 @@ class FH6TrackerGUI(tk.Tk):
 
         left, top, right, bottom = monitor
         corner = self.overlay_corner_var.get() if hasattr(self, "overlay_corner_var") else "TL"
+        # Persist a changed corner immediately so the standalone overlay and any
+        # later GUI close pick up the last position the user chose.
+        if self.settings.get("race_overlay_corner") != corner:
+            self.settings["race_overlay_corner"] = corner
+            try:
+                save_settings(self.settings)
+            except Exception:
+                pass
         if corner == "TR":
             x, y = right - w - margin, top + margin
         elif corner == "ML":
@@ -3993,7 +4001,7 @@ class FH6TrackerGUI(tk.Tk):
                 self._overlay_set(key + "_val", "")
                 y = self._overlay_items["bar_y"][key]
                 self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10, y + 12)
-            self._overlay_canvas.coords(self._overlay_items["spark"], 196, 106, 322, 106)
+            self._overlay_canvas.coords(self._overlay_items["spark"], 196, 122, 322, 122)
             return
 
         sample = data.get("sample") or {}
@@ -4019,7 +4027,7 @@ class FH6TrackerGUI(tk.Tk):
 
         speeds = [s.get("spd", 0) or 0 for s in recent]
         if len(speeds) >= 2:
-            x0, y0, x1, y1 = 196, 106, 322, 202
+            x0, y0, x1, y1 = 196, 122, 322, 218
             high = max(60.0, max(speeds))
             n = len(speeds)
             pts = []
@@ -6838,6 +6846,12 @@ Start-Process -FilePath $exe -WorkingDirectory $dst
             self._remove_tray_icon()
         try:
             self.settings["window_geometry"] = self.geometry()
+            if hasattr(self, "overlay_corner_var"):
+                self.settings["race_overlay_corner"] = self.overlay_corner_var.get() or "TL"
+            if hasattr(self, "overlay_enabled_var"):
+                self.settings["race_overlay_enabled"] = bool(self.overlay_enabled_var.get())
+            if hasattr(self, "overlay_standalone_var"):
+                self.settings["race_overlay_standalone"] = bool(self.overlay_standalone_var.get())
             save_settings(self.settings)
         except Exception:
             pass
