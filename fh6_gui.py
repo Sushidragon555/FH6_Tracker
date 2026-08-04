@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -42,7 +43,7 @@ except Exception:  # pragma: no cover - optional OCR dependencies
     ImageOps = None
     ImageTk = None
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
 # Only these machine names get the dev-only tools (View Feedback, webhook field,
 # Capture Tab Screenshots, --capture-screenshots CLI). End users never see them.
@@ -3785,12 +3786,18 @@ class FH6TrackerGUI(tk.Tk):
 
     def _update_race_overlay_loop(self):
         """Self-scheduling fast poll while the overlay is visible."""
-        self._update_race_overlay()
+        try:
+            self._update_race_overlay()
+        except Exception:
+            logger.exception("Race overlay update crashed")
         # Re-anchor to the game window if it moved (cheap, ~every 5s).
         self._overlay_place_count = getattr(self, "_overlay_place_count", 0) + 1
         if self._overlay_place_count >= 10:
             self._overlay_place_count = 0
-            self._place_race_overlay()
+            try:
+                self._place_race_overlay()
+            except Exception:
+                logger.exception("Race overlay placement crashed")
         if getattr(self, "_overlay", None) is not None:
             self._overlay_after_id = self.after(500, self._update_race_overlay_loop)
 
@@ -3962,7 +3969,7 @@ class FH6TrackerGUI(tk.Tk):
             self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10 + int(value * 140), y + 12)
 
         speeds = [s.get("spd", 0) or 0 for s in recent]
-        if speeds:
+        if len(speeds) >= 2:
             x0, y0, x1, y1 = 196, 106, 322, 202
             high = max(60.0, max(speeds))
             n = len(speeds)
@@ -5483,15 +5490,27 @@ class FH6TrackerGUI(tk.Tk):
                 self._pending_download_url = download_url
             _status(msg)
             if popup and download_url:
-                if messagebox.askyesno(
-                    "Update available",
-                    f"A newer version of FH6 Tracker is available:\n\n"
-                    f"  v{tag}  (you have v{APP_VERSION})\n\n"
-                    f"This release includes fixes and improvements.\n"
-                    f"Download it now?",
-                    parent=self,
-                ):
-                    webbrowser.open(download_url)
+                if getattr(sys, "frozen", False):
+                    if messagebox.askyesno(
+                        "Update available",
+                        f"A newer version of FH6 Tracker is available:\n\n"
+                        f"  v{tag}  (you have v{APP_VERSION})\n\n"
+                        f"This release includes fixes and improvements.\n"
+                        f"\nInstall the update automatically? "
+                        f"Your cars, settings and race history will be kept.",
+                        parent=self,
+                    ):
+                        self._start_auto_update(download_url, tag)
+                else:
+                    if messagebox.askyesno(
+                        "Update available",
+                        f"A newer version of FH6 Tracker is available:\n\n"
+                        f"  v{tag}  (you have v{APP_VERSION})\n\n"
+                        f"This release includes fixes and improvements.\n"
+                        f"Download it now?",
+                        parent=self,
+                    ):
+                        webbrowser.open(download_url)
 
         def _worker():
             data = _fetch()
@@ -5509,7 +5528,15 @@ class FH6TrackerGUI(tk.Tk):
             )
             if result.returncode != 0:
                 msg = (result.stderr or result.stdout or "").strip()
-                self._update_status_var.set(f"Update failed: {msg[:120]}")
+                if "not a git repository" in msg.lower():
+                    # Copy installed from a downloaded zip (no .git folder), so
+                    # git can't update it. Fall back to the GitHub release check,
+                    # which points them at the latest packaged release instead.
+                    self._update_status_var.set(
+                        "This copy isn't a git install — checking the Releases page instead.")
+                    self._check_github_release(popup=True)
+                else:
+                    self._update_status_var.set(f"Update failed: {msg[:120]}")
                 return
             output = result.stdout.strip()
             if output and "Already up to date" not in output:
@@ -5521,6 +5548,118 @@ class FH6TrackerGUI(tk.Tk):
             self._update_status_var.set("Git not found. Install git to enable updates.")
         except subprocess.TimeoutExpired:
             self._update_status_var.set("Update timed out (network issue?).")
+
+    def _start_auto_update(self, download_url, tag):
+        """Download the latest release zip in a thread, then offer to apply it."""
+        import urllib.request
+        import urllib.error
+
+        self._update_status_var.set(f"Downloading v{tag} update...")
+
+        def _worker():
+            try:
+                updates_dir = os.path.join(BASE_DIR, "updates")
+                os.makedirs(updates_dir, exist_ok=True)
+                zip_path = os.path.join(updates_dir, f"FH6_Tracker-{tag}.zip")
+                req = urllib.request.Request(
+                    download_url, headers={"User-Agent": f"FH6-Tracker/{APP_VERSION}"})
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    with open(zip_path, "wb") as out:
+                        shutil.copyfileobj(resp, out)
+
+                extract_dir = os.path.join(updates_dir, "apply")
+                if os.path.exists(extract_dir):
+                    shutil.rmtree(extract_dir, ignore_errors=True)
+                os.makedirs(extract_dir, exist_ok=True)
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    for member in zf.namelist():
+                        resolved = os.path.realpath(os.path.join(extract_dir, member))
+                        if not resolved.startswith(os.path.realpath(extract_dir) + os.sep):
+                            raise ValueError("Update zip contains an unsafe path.")
+                    zf.extractall(extract_dir)
+
+                # The release zip wraps the app in a top-level folder.
+                app_root = extract_dir
+                for name in sorted(os.listdir(extract_dir)):
+                    full = os.path.join(extract_dir, name)
+                    if os.path.isdir(full):
+                        app_root = full
+                        break
+                if not os.path.exists(os.path.join(app_root, "FH6_Tracker.exe")):
+                    raise ValueError("Downloaded update is missing FH6_Tracker.exe.")
+                return app_root
+            except Exception as exc:
+                return exc
+
+        def _done(result):
+            if isinstance(result, Exception):
+                self._update_status_var.set(f"Update download failed: {result}")
+                logger.exception("Auto-update download failed")
+                return
+            self._update_status_var.set("Update downloaded.")
+            if messagebox.askyesno(
+                "Update ready",
+                "The new version has been downloaded.\n\n"
+                "Apply it now? The app will close and reopen automatically.",
+                parent=self,
+            ):
+                self._apply_update(result)
+
+        def _wrapped():
+            result = _worker()
+            self.after(0, lambda: _done(result))
+
+        threading.Thread(target=_wrapped, daemon=True).start()
+
+    def _apply_update(self, app_root):
+        """Hand off the file swap to a detached PowerShell updater, then exit.
+
+        The running exe is locked on Windows, so a separate process waits for
+        this one to exit, copies the new app files over (skipping user data),
+        and relaunches FH6_Tracker.exe.
+        """
+        protected = [
+            "owned_cars.json", "gui_settings.json", "session_state.json",
+            "methods_history.json", "credit_history.json", "credit_transactions.json",
+            "telemetry_log.csv", "races", "screenshots", "feedback", "ocr_debug",
+            "updates", "tracker.log", "fh6_tracker.log", "gui_settings.json.bak",
+        ]
+        protected_csv = ",".join("'%s'" % p for p in protected)
+        src = app_root.replace("'", "''")
+        dst = BASE_DIR.replace("'", "''")
+        script = f"""$ErrorActionPreference = 'SilentlyContinue'
+$src = '{src}'
+$dst = '{dst}'
+$protected = @({protected_csv})
+$proc = Get-Process -Name 'FH6_Tracker' -ErrorAction SilentlyContinue
+if ($proc) {{ $proc | Wait-Process }}
+Start-Sleep -Milliseconds 500
+Get-ChildItem -LiteralPath $src -Force | ForEach-Object {{
+    if ($protected -contains $_.Name) {{ return }}
+    if ($_.PSIsContainer) {{
+        Copy-Item -LiteralPath $_.FullName -Destination $dst -Recurse -Force
+    }} else {{
+        Copy-Item -LiteralPath $_.FullName -Destination $dst -Force
+    }}
+}}
+$exe = Join-Path $dst 'FH6_Tracker.exe'
+Start-Process -FilePath $exe -WorkingDirectory $dst
+"""
+        try:
+            updater_path = os.path.join(BASE_DIR, "updates", "apply_update.ps1")
+            os.makedirs(os.path.dirname(updater_path), exist_ok=True)
+            with open(updater_path, "w", encoding="utf-8") as fh:
+                fh.write(script)
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", updater_path],
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                close_fds=True,
+            )
+        except Exception as exc:
+            logger.exception("Could not launch updater")
+            messagebox.showerror("Update failed", f"Could not start the updater: {exc}")
+            return
+        self._on_close()
 
     def _restart_app(self):
         if getattr(sys, "frozen", False):

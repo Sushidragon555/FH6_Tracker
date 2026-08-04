@@ -190,8 +190,8 @@ race_car_name = "Unknown Vehicle"
 race_car_id = 0
 race_packet_count = 0
 race_manual_override = False  # True when user manually triggered recording
-last_live_write_time = 0.0    # throttle for .live_race.json writes
-last_live_chart_write_time = 0.0  # throttle for .live_chart.json writes
+last_live_write_time = time.monotonic()    # throttle for .live_race.json writes
+last_live_chart_write_time = time.monotonic()  # throttle for .live_chart.json writes
 last_signal_check = 0.0       # throttle for .record_start/.record_stop polling
 last_packet_mono = 0.0        # monotonic time of the last successfully parsed packet
 last_notice_write = 0.0       # throttle for .tracker_notice warnings
@@ -242,6 +242,21 @@ def save_race(buffer, car_name, car_id, start_time, end_time, duration):
     print(f"\n [🏁] Race saved: {filename} ({len(buffer)} samples, {duration:.1f}s)")
 
 
+def _atomic_write_json(path, data):
+    """Write JSON atomically so concurrent readers never see a partial file."""
+    import json as _json
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            _json.dump(data, fh)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def _write_live_race():
     """Write a compact live snapshot the GUI overlay polls continuously.
 
@@ -251,7 +266,6 @@ def _write_live_race():
     if not live_recent:
         return
     try:
-        import json as _json
         duration = (time.monotonic() - race_start_time_mono) if race_in_progress else 0.0
         data = {
             "recording": bool(race_in_progress),
@@ -261,8 +275,7 @@ def _write_live_race():
             "sample": live_recent[-1],
             "recent": live_recent[-90:],
         }
-        with open(LIVE_RACE_FILE, "w", encoding="utf-8") as fh:
-            _json.dump(data, fh)
+        _atomic_write_json(LIVE_RACE_FILE, data)
     except (OSError, TypeError, ValueError):
         pass
 
@@ -283,7 +296,6 @@ def _write_live_chart():
     if not race_in_progress:
         return
     try:
-        import json as _json
         data = {
             "recording": True,
             "car_name": race_car_name or "Unknown Vehicle",
@@ -291,8 +303,7 @@ def _write_live_chart():
             "duration_seconds": round(time.monotonic() - race_start_time_mono, 1),
             "samples": _decimate(race_buffer, 2400),
         }
-        with open(LIVE_CHART_FILE, "w", encoding="utf-8") as fh:
-            _json.dump(data, fh)
+        _atomic_write_json(LIVE_CHART_FILE, data)
     except (OSError, TypeError, ValueError):
         pass
 
