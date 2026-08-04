@@ -423,6 +423,7 @@ def load_settings():
         "window_geometry": settings.get("window_geometry"),
         "race_overlay_enabled": settings.get("race_overlay_enabled", False),
         "race_overlay_corner": settings.get("race_overlay_corner", "TL"),
+        "race_overlay_standalone": settings.get("race_overlay_standalone", False),
         "feedback_discord_webhook": settings.get("feedback_discord_webhook") or DISCORD_FEEDBACK_WEBHOOK,
         "chart_heights": settings.get("chart_heights", {
             "history_canvas": 150,
@@ -1282,11 +1283,18 @@ class FH6TrackerGUI(tk.Tk):
         overlay_frame.pack(fill="x", padx=4, pady=(2, 2))
         self.overlay_enabled_var = tk.BooleanVar(value=self.settings.get("race_overlay_enabled", False))
         self.overlay_corner_var = tk.StringVar(value=self.settings.get("race_overlay_corner", "TL"))
+        self.overlay_standalone_var = tk.BooleanVar(value=self.settings.get("race_overlay_standalone", False))
         ttk.Checkbutton(
             overlay_frame,
             text="Overlay live data on FH6 window while recording",
             variable=self.overlay_enabled_var,
             command=self._on_overlay_toggle,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            overlay_frame,
+            text="Overlay-only: close this window and show just the overlay",
+            variable=self.overlay_standalone_var,
+            command=self._on_overlay_standalone_toggle,
         ).pack(anchor="w")
         corner_row = ttk.Frame(overlay_frame)
         corner_row.pack(anchor="w", pady=(2, 0))
@@ -3741,10 +3749,51 @@ class FH6TrackerGUI(tk.Tk):
     def _on_overlay_toggle(self):
         """Show/hide the live overlay when its checkbox is toggled."""
         if self.overlay_enabled_var.get():
-            if self.tracker_running or self._recording:
+            if self.overlay_standalone_var.get():
+                self._launch_standalone_overlay()
+            elif self.tracker_running or self._recording:
                 self._create_race_overlay()
         else:
             self._destroy_race_overlay()
+
+    def _on_overlay_standalone_toggle(self):
+        """When overlay-only mode is switched on (and the overlay is on), hand off."""
+        if self.overlay_standalone_var.get() and self.overlay_enabled_var.get():
+            self._launch_standalone_overlay()
+
+    def _launch_standalone_overlay(self):
+        """Close the GUI and hand off to the standalone overlay process.
+
+        Stops the GUI's own tracker first so the standalone overlay can bind
+        the telemetry UDP port, saves the current overlay settings (the
+        standalone overlay reads them from gui_settings.json), then exits.
+        """
+        self.settings["race_overlay_enabled"] = True
+        self.settings["race_overlay_corner"] = self.overlay_corner_var.get() or "TL"
+        self.settings["race_overlay_standalone"] = True
+        save_settings(self.settings)
+        try:
+            if self.tracker_running:
+                self.stop_tracker()
+        except Exception:
+            pass
+        overlay_script = os.path.join(BASE_DIR, "overlay.py")
+        if not os.path.exists(overlay_script):
+            self.overlay_standalone_var.set(False)
+            messagebox.showinfo("Overlay-only",
+                                "Standalone overlay script not found (overlay.py is missing).")
+            return
+        pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = sys.executable
+        try:
+            subprocess.Popen([pythonw, overlay_script], cwd=BASE_DIR,
+                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        except Exception as exc:
+            self.overlay_standalone_var.set(False)
+            messagebox.showerror("Overlay failed", f"Could not start the overlay: {exc}")
+            return
+        self._on_close()
 
     def _create_race_overlay(self):
         if getattr(self, "_overlay", None) is not None and self._overlay.winfo_exists():
@@ -6337,6 +6386,7 @@ Start-Process -FilePath $exe -WorkingDirectory $dst
         self.settings["disable_popup_scan"] = bool(self.disable_popup_scan_var.get())
         self.settings["race_overlay_enabled"] = bool(self.overlay_enabled_var.get())
         self.settings["race_overlay_corner"] = self.overlay_corner_var.get() or "TL"
+        self.settings["race_overlay_standalone"] = bool(self.overlay_standalone_var.get())
         try:
             self.settings["forza_check_interval"] = max(5.0, min(60.0, float(self.forza_check_interval_var.get() or 10)))
         except (ValueError, TypeError):
