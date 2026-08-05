@@ -24,6 +24,9 @@ FH6_Tracker.exe
 ocr_debug/
 ocr_debug_capture.png
 
+# Raw telemetry packet capture (diagnostic, via FH6_DUMP_PACKETS=1)
+packet_dump.bin
+
 # Race telemetry data (generated per user)
 races/
 

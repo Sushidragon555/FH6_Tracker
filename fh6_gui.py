@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 import car_lookup
+import line_analysis
 
 
 # =============================================================================
@@ -81,6 +82,62 @@ LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
 LIVE_CHART_FILE = os.path.join(RACES_DIR, ".live_chart.json")
 OVERLAY_BG = "#ff00fe"  # chroma-key color: every pixel of this color is fully transparent on Windows
 APP_LOG_FILE = os.path.join(BASE_DIR, "fh6_tracker.log")
+
+# --- Race type auto-detection -------------------------------------------------
+# The detector scores EVERY race type from one feature vector (instead of a
+# first-match-wins rule cascade) and only assigns a type when the winner beats
+# the runner-up by AUTO_TYPE_MARGIN points AND clears AUTO_TYPE_MIN_SCORE.
+# Otherwise it stays "Road Racing" (the most common default) so the user
+# decides — a wrong guess is worse than no guess. Confirmed picks are stored in
+# TYPE_EXAMPLES_FILE and a nearest-neighbor lookup takes over as labeled
+# examples accumulate, so it personalizes to the user's driving style.
+TYPE_EXAMPLES_FILE = os.path.join(BASE_DIR, "race_type_examples.json")
+AUTO_TYPE_MIN_SCORE = 45
+AUTO_TYPE_MARGIN = 12
+NN_MIN_EXAMPLES = 3
+NN_MAX_DIST = 0.25
+NN_TYPE_MARGIN = 0.03
+# Feature weights for the nearest-neighbor distance. Air time, handbrake and
+# steering angle carry more weight because they are the most discriminative.
+_NN_WEIGHTS = {
+    "duration": 1.0,
+    "avg_speed": 1.0,
+    "max_speed": 1.0,
+    "speed_std": 1.0,
+    "air_time": 2.0,
+    "thr_pct": 1.0,
+    "brk_pct": 1.0,
+    "hb_pct": 2.0,
+    "avg_steer": 1.5,
+    "steer_jerk": 1.0,
+    "max_gear": 0.5,
+    "high_rpm_pct": 1.0,
+}
+
+
+def _load_type_examples():
+    """Return the list of labeled examples from race_type_examples.json."""
+    data = car_lookup.load_json_file(TYPE_EXAMPLES_FILE, {})
+    examples = data.get("examples") if isinstance(data, dict) else None
+    return examples if isinstance(examples, list) else []
+
+
+def _save_type_example(features, race_type):
+    """Append a labeled example (deterministic features -> type) to the store."""
+    if not features or not race_type:
+        return
+    try:
+        examples = _load_type_examples()
+        for ex in examples:
+            if ex.get("type") == race_type and ex.get("features") == features:
+                return  # already learned this exact race
+        examples.append({"type": race_type, "features": features})
+        if len(examples) > 600:
+            examples = examples[-600:]
+        with open(TYPE_EXAMPLES_FILE, "w", encoding="utf-8") as fh:
+            json.dump({"examples": examples}, fh, indent=2)
+    except Exception:
+        pass
 METHOD_NAMES = [
     "Wheelspins",
     "Super Wheelspins",
@@ -1254,13 +1311,15 @@ class FH6TrackerGUI(tk.Tk):
         left.grid(row=0, column=0, sticky="ns", padx=(8, 4), pady=8)
 
         ttk.Label(left, text="Past Races", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=4, pady=(0, 4))
-        self.race_list_tree = ttk.Treeview(left, columns=("date", "car", "duration"), show="headings", height=18, selectmode="browse")
+        self.race_list_tree = ttk.Treeview(left, columns=("date", "car", "duration", "type"), show="headings", height=18, selectmode="browse")
         self.race_list_tree.heading("date", text="Date")
         self.race_list_tree.heading("car", text="Car")
         self.race_list_tree.heading("duration", text="Time")
+        self.race_list_tree.heading("type", text="Type")
         self.race_list_tree.column("date", width=130)
         self.race_list_tree.column("car", width=160)
         self.race_list_tree.column("duration", width=50)
+        self.race_list_tree.column("type", width=90)
         self.race_list_tree.pack(fill="y", expand=True)
         self.race_list_tree.bind("<<TreeviewSelect>>", self._on_race_select)
 
@@ -1304,6 +1363,16 @@ class FH6TrackerGUI(tk.Tk):
         self._overlay_hint_var = tk.StringVar(value="Transparent & click-through — never blocks your screen.")
         ttk.Label(record_frame, textvariable=self._overlay_hint_var, style="Secondary.TLabel", wraplength=190).pack(padx=4, pady=(0, 4))
 
+        self.packet_capture_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            record_frame,
+            text="Record raw telemetry packets (diagnostic)",
+            variable=self.packet_capture_var,
+            command=self._on_packet_capture_toggle,
+        ).pack(anchor="w", padx=4, pady=(0, 2))
+        self._packet_capture_hint_var = tk.StringVar(value="Saves packet_dump.bin for offset analysis. Untick to flush.")
+        ttk.Label(record_frame, textvariable=self._packet_capture_hint_var, style="Secondary.TLabel", wraplength=190).pack(padx=4, pady=(0, 4))
+
         right = ttk.Frame(self.races_tab)
         right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         right.columnconfigure(0, weight=1)
@@ -1335,10 +1404,12 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_source = None      # start_time of the race auto-detect ran on
         self._race_type_overridden = False  # True once the user manually picks a type
         self._race_type_was_auto_detected = False  # True once auto-detect locked a result
+        self._selected_race_fpath = None   # saved race file backing the analysis panel
+        self._race_example_recorded = set()  # (start_time, type) already persisted/learned
         ttk.Label(race_type_frame, text="(Drift & PR Stunts are manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
         ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
         self._chart_toggle_vars = {}
-        chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear")]
+        chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear"), ("path", "Path")]
         for key, label in chart_toggle_keys:
             var = tk.BooleanVar(value=True)
             self._chart_toggle_vars[key] = var
@@ -1368,6 +1439,7 @@ class FH6TrackerGUI(tk.Tk):
         chart_frame.rowconfigure(3, minsize=chart_heights.get("race_rpm", 100))
         chart_frame.rowconfigure(4, minsize=chart_heights.get("race_power", 100))
         chart_frame.rowconfigure(5, minsize=chart_heights.get("race_gear", 80))
+        chart_frame.rowconfigure(6, minsize=chart_heights.get("race_path", 160))
         self._chart_frame = chart_frame
         self._chart_canvas = chart_canvas
 
@@ -1392,7 +1464,9 @@ class FH6TrackerGUI(tk.Tk):
         self._race_canvas_power = tk.Canvas(chart_frame, height=chart_heights.get("race_power", 100), highlightthickness=0)
         self._race_canvas_power.grid(row=4, column=0, sticky="ew", pady=(0, 4))
         self._race_canvas_gear = tk.Canvas(chart_frame, height=chart_heights.get("race_gear", 80), highlightthickness=0)
-        self._race_canvas_gear.grid(row=5, column=0, sticky="ew")
+        self._race_canvas_gear.grid(row=5, column=0, sticky="ew", pady=(0, 4))
+        self._race_canvas_path = tk.Canvas(chart_frame, height=chart_heights.get("race_path", 160), highlightthickness=0)
+        self._race_canvas_path.grid(row=6, column=0, sticky="ew")
 
         # Re-render charts when the frame is resized (e.g. window resize)
         self._chart_resize_after_id = None
@@ -1468,7 +1542,8 @@ class FH6TrackerGUI(tk.Tk):
                 start = data.get("start_time", "")[:16].replace("T", " ")
                 mins = int(dur) // 60
                 secs = int(dur) % 60
-                self.race_list_tree.insert("", "end", iid=fname, values=(start, car, f"{mins}:{secs:02d}"))
+                rtype = data.get("race_type", "") or ""
+                self.race_list_tree.insert("", "end", iid=fname, values=(start, car, f"{mins}:{secs:02d}", rtype))
             except Exception:
                 pass
 
@@ -1483,6 +1558,7 @@ class FH6TrackerGUI(tk.Tk):
                 data = json.load(fh)
         except Exception:
             return
+        self._selected_race_fpath = fpath
         samples = data.get("samples", [])
         max_samples = 3000
         if len(samples) > max_samples:
@@ -1502,64 +1578,261 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_overridden = True
         self._rerender_race_charts()
 
+    def _persist_race_type(self, fpath, race_type):
+        """Write ``race_type`` back into a saved race file.
+
+        The key is placed at the front of the JSON so the race list can read it
+        from a small head read without loading the (potentially large) samples
+        arrays.
+        """
+        try:
+            if not fpath or not os.path.exists(fpath):
+                return
+            with open(fpath, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if data.get("race_type") == race_type:
+                return
+            data["race_type"] = race_type
+            ordered = {"race_type": data.pop("race_type")}
+            ordered.update(data)
+            with open(fpath, "w", encoding="utf-8") as fh:
+                json.dump(ordered, fh)
+        except Exception:
+            pass
+
     @staticmethod
-    def _auto_detect_race_type(samples, duration):
+    def _extract_race_features(samples, duration):
+        """Reduce a race's samples to a fixed numeric feature vector.
+
+        Returns None when there aren't enough samples to classify. Deterministic
+        (same race -> same features), which is what lets us learn from examples
+        and dedupe them.
+        """
         if not samples or len(samples) < 20:
             return None
+        n = len(samples)
         speeds = [s.get("spd", 0) for s in samples]
         throttles = [s.get("thr", 0) for s in samples]
         brakes = [s.get("brk", 0) for s in samples]
         steers = [s.get("str", 0) for s in samples]
         hbrakes = [s.get("hbrk", 0) for s in samples]
-
+        rpms = [s.get("rpm", 0) for s in samples]
+        avg_speed = sum(speeds) / n
         max_speed = max(speeds)
-        avg_speed = sum(speeds) / len(speeds)
-        throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
-        braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
-        handbrake_pct = sum(1 for h in hbrakes if h > 0.1) / len(hbrakes) * 100
-        avg_steer = sum(abs(s) for s in steers) / len(steers)
-        steer_smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+        speed_std = (sum((v - avg_speed) ** 2 for v in speeds) / n) ** 0.5
+        air_time = sum(1 for i in range(1, n) if speeds[i] < 3 and speeds[i - 1] > 30)
+        max_rpm_obs = max(rpms) if rpms else 0
+        high_rpm_pct = (sum(1 for r in rpms if r >= max_rpm_obs * 0.8) / n * 100) if max_rpm_obs else 0
+        fwd_gears = [g for g in (s.get("gear") for s in samples) if g and g >= 1]
+        return {
+            "duration": float(duration or 0),
+            "avg_speed": avg_speed,
+            "max_speed": max_speed,
+            "speed_std": speed_std,
+            "air_time": air_time,
+            "thr_pct": sum(1 for t in throttles if t > 0.5) / n * 100,
+            "brk_pct": sum(1 for b in brakes if b > 0.1) / n * 100,
+            "hb_pct": sum(1 for h in hbrakes if h > 0.1) / n * 100,
+            "avg_steer": sum(abs(s) for s in steers) / n,
+            "steer_jerk": sum(abs(steers[i] - steers[i - 1]) for i in range(1, n)) / n,
+            "max_gear": max(fwd_gears) if fwd_gears else 0,
+            "high_rpm_pct": high_rpm_pct,
+        }
 
-        # Drag: short, full throttle, straight, minimal braking
-        if (throttle_pct > 70 and braking_pct < 5 and avg_steer < 0.12 and duration < 40):
-            return "Drag Racing"
-        if (max_speed > 140 and duration < 30 and throttle_pct > 75 and braking_pct < 8):
-            return "Drag Racing"
+    @staticmethod
+    def _score_race_types(fv):
+        """Bootstrap scoring: return a {race_type: match_score} for every type.
 
-        # Drift: handbrake usage, high steering angle.
-        # Require stronger evidence to avoid misclassifying road races.
-        if handbrake_pct > 8 and avg_steer > 0.35:
-            return "Drift"
-        if handbrake_pct > 12:
-            return "Drift"
-        if avg_steer > 0.45 and steer_smoothness > 0.10:
-            return "Drift"
+        Unlike the old first-match-wins cascade, every type is scored in
+        parallel, so overlapping signals (e.g. Cross Country vs Drift) don't
+        steal the label from each other. The caller picks the best type only
+        when it beats the runner-up by a margin and clears a floor.
+        """
+        dur = fv.get("duration", 0)
+        avg_s = fv.get("avg_speed", 0)
+        max_s = fv.get("max_speed", 0)
+        s_std = fv.get("speed_std", 0)
+        thr = fv.get("thr_pct", 0)
+        brk = fv.get("brk_pct", 0)
+        hb = fv.get("hb_pct", 0)
+        steer = fv.get("avg_steer", 0)
+        jerk = fv.get("steer_jerk", 0)
+        air = fv.get("air_time", 0)
+        hr = fv.get("high_rpm_pct", 0)
 
-        # Dirt Racing: circuit-like but more steering correction, lower avg speed
-        if (duration > 50 and avg_steer > 0.15 and avg_speed < 65 and throttle_pct > 45 and steer_smoothness > 0.04):
-            return "Dirt Racing"
+        scores = {}
 
-        # Cross Country: high speed variance, inconsistent traction
-        speed_std = (sum((s - avg_speed) ** 2 for s in speeds) / len(speeds)) ** 0.5 if speeds else 0
-        # Speed drops to near-zero (jumps)
-        air_time = sum(1 for i in range(1, len(speeds)) if speeds[i] < 3 and speeds[i - 1] > 30)
-        if (speed_std > 25 and avg_speed < 70 and throttle_pct > 40):
-            return "Cross Country"
-        if air_time > 3:
-            return "Cross Country"
-        if speed_std > 35 and throttle_pct > 50:
-            return "Cross Country"
+        sc = 0
+        if thr > 70:
+            sc += 28
+        if brk < 5:
+            sc += 22
+        if steer < 0.12:
+            sc += 20
+        if dur < 40:
+            sc += 20
+        if hr > 50:
+            sc += 10
+        if max_s > 140:
+            sc += 5
+        scores["Drag Racing"] = sc
 
-        # PR Stunts: very short, high speed
-        if duration < 25 and max_speed > 100:
-            return "PR Stunts"
+        sc = 0
+        if hb > 12:
+            sc += 30
+        elif hb > 8:
+            sc += 20
+        if steer > 0.45:
+            sc += 25
+        elif steer > 0.35:
+            sc += 15
+        if jerk > 0.10:
+            sc += 15
+        if avg_s < 65:
+            sc += 10
+        if hb > 5 and steer > 0.25:
+            sc += 10
+        scores["Drift"] = sc
 
-        # Circuit: longer, consistent patterns
-        if duration > 60:
-            return "Road Racing"
-        if avg_speed > 45 and duration > 30:
-            return "Street Racing"
+        sc = 0
+        if steer > 0.15:
+            sc += 20
+        if jerk > 0.04:
+            sc += 15
+        if avg_s < 65:
+            sc += 20
+        if dur > 50:
+            sc += 15
+        if thr > 45:
+            sc += 10
+        if hb <= 8 and steer > 0.12:
+            sc += 10
+        scores["Dirt Racing"] = sc
 
+        sc = 0
+        if air >= 3:
+            sc += 45
+        elif air == 2:
+            sc += 30
+        elif air == 1:
+            sc += 15
+        if s_std > 25:
+            sc += 20
+        if avg_s < 70:
+            sc += 10
+        if thr > 40:
+            sc += 10
+        scores["Cross Country"] = sc
+
+        sc = 0
+        if dur < 25:
+            sc += 25
+        if max_s > 100:
+            sc += 25
+        if thr > 60:
+            sc += 15
+        if avg_s > 45:
+            sc += 10
+        scores["PR Stunts"] = sc
+
+        sc = 0
+        if 30 <= dur <= 90:
+            sc += 20
+        if avg_s > 45:
+            sc += 20
+        if steer < 0.20:
+            sc += 15
+        if brk < 15:
+            sc += 10
+        if max_s > 90:
+            sc += 10
+        scores["Street Racing"] = sc
+
+        sc = 0
+        if dur > 60:
+            sc += 35
+        if 0.05 <= steer <= 0.30:
+            sc += 20
+        if brk >= 5:
+            sc += 15
+        if thr >= 40:
+            sc += 10
+        if s_std > 15:
+            sc += 10
+        scores["Road Racing"] = sc
+
+        return scores
+
+    @staticmethod
+    def _normalize_fv(fv):
+        """Scale features to 0-1 with fixed normalizers so distances compare."""
+        return {
+            "duration": min(1.0, fv.get("duration", 0) / 300.0),
+            "avg_speed": min(1.0, fv.get("avg_speed", 0) / 180.0),
+            "max_speed": min(1.0, fv.get("max_speed", 0) / 250.0),
+            "speed_std": min(1.0, fv.get("speed_std", 0) / 60.0),
+            "air_time": min(1.0, fv.get("air_time", 0) / 8.0),
+            "thr_pct": min(1.0, fv.get("thr_pct", 0) / 100.0),
+            "brk_pct": min(1.0, fv.get("brk_pct", 0) / 100.0),
+            "hb_pct": min(1.0, fv.get("hb_pct", 0) / 100.0),
+            "avg_steer": min(1.0, fv.get("avg_steer", 0) / 0.8),
+            "steer_jerk": min(1.0, fv.get("steer_jerk", 0) / 0.5),
+            "max_gear": min(1.0, fv.get("max_gear", 0) / 10.0),
+            "high_rpm_pct": min(1.0, fv.get("high_rpm_pct", 0) / 100.0),
+        }
+
+    @classmethod
+    def _learned_type(cls, fv):
+        """Classify via stored examples once enough are labeled.
+
+        Per-type nearest neighbor: the closest example of each type decides
+        that type's distance, so a single outlier can't hijack the vote. Only
+        returns a type when the best is a genuinely tight match AND clearly
+        beats the next-closest type.
+        """
+        examples = _load_type_examples()
+        if len(examples) < NN_MIN_EXAMPLES:
+            return None
+        target = cls._normalize_fv(fv)
+        per_type = {}
+        for ex in examples:
+            ef = ex.get("features")
+            if not ef or not ex.get("type"):
+                continue
+            try:
+                en = cls._normalize_fv(ef)
+            except Exception:
+                continue
+            dist = sum(_NN_WEIGHTS[k] * (target[k] - en[k]) ** 2 for k in _NN_WEIGHTS)
+            t = ex["type"]
+            if t not in per_type or dist < per_type[t]:
+                per_type[t] = dist
+        if len(per_type) < 2:
+            return None
+        ranked = sorted(per_type.items(), key=lambda kv: kv[1])
+        best_type, best_dist = ranked[0]
+        second_dist = ranked[1][1]
+        if best_dist < NN_MAX_DIST and (second_dist - best_dist) >= NN_TYPE_MARGIN:
+            return best_type
+        return None
+
+    @classmethod
+    def _auto_detect_race_type(cls, samples, duration, features=None):
+        """Return a confident race type, or None when it's too close to call."""
+        fv = features if features is not None else cls._extract_race_features(samples, duration)
+        if not fv:
+            return None
+        learned = cls._learned_type(fv)
+        if learned:
+            return learned
+        scores = cls._score_race_types(fv)
+        if not scores:
+            return None
+        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        best_type, best_score = ranked[0]
+        second_score = ranked[1][1] if len(ranked) > 1 else 0
+        if best_score >= AUTO_TYPE_MIN_SCORE and (best_score - second_score) >= AUTO_TYPE_MARGIN:
+            return best_type
         return None
 
     def _render_race_analysis(self, data):
@@ -1576,25 +1849,51 @@ class FH6TrackerGUI(tk.Tk):
         # never overwrite the user's manual pick, and switching to another race
         # resets the override.
         start_key = data.get("start_time", "")
-        if start_key != self._race_type_source:
+        features = self._extract_race_features(samples, dur)
+        stored_type = data.get("race_type") or None
+        if stored_type:
+            # A previously classified race: trust the stored type instead of
+            # re-guessing it on every open.
+            if hasattr(self, "_race_type_var"):
+                self._race_type_var.set(stored_type)
             self._race_type_source = start_key
             self._race_type_overridden = False
             self._race_type_was_auto_detected = False
-            auto_type = self._auto_detect_race_type(samples, dur)
-            if auto_type:
-                self._race_type_was_auto_detected = True
-                if hasattr(self, "_race_type_var"):
-                    self._race_type_var.set(auto_type)
-            elif hasattr(self, "_race_type_var"):
-                self._race_type_var.set("Road Racing")
-        elif not self._race_type_overridden and not self._race_type_was_auto_detected:
-            auto_type = self._auto_detect_race_type(samples, dur)
-            if auto_type:
-                self._race_type_was_auto_detected = True
-                if hasattr(self, "_race_type_var"):
-                    self._race_type_var.set(auto_type)
-        race_type = self._race_type_var.get() if hasattr(self, "_race_type_var") else "Road Racing"
+            race_type = stored_type
+        else:
+            if start_key != self._race_type_source:
+                self._race_type_source = start_key
+                self._race_type_overridden = False
+                self._race_type_was_auto_detected = False
+                auto_type = self._auto_detect_race_type(samples, dur, features)
+                if auto_type:
+                    self._race_type_was_auto_detected = True
+                    if hasattr(self, "_race_type_var"):
+                        self._race_type_var.set(auto_type)
+                elif hasattr(self, "_race_type_var"):
+                    self._race_type_var.set("Road Racing")
+            elif not self._race_type_overridden and not self._race_type_was_auto_detected:
+                auto_type = self._auto_detect_race_type(samples, dur, features)
+                if auto_type:
+                    self._race_type_was_auto_detected = True
+                    if hasattr(self, "_race_type_var"):
+                        self._race_type_var.set(auto_type)
+            race_type = self._race_type_var.get() if hasattr(self, "_race_type_var") else "Road Racing"
         self._race_info_var.set(f"{car}  |  {start}  |  {mins}:{secs:02d}  |  {len(samples)} samples  |  {race_type}")
+
+        # Persist the type back into the saved race file and remember it as a
+        # labeled example for the learned classifier, so future races benefit
+        # from this one. Only for saved races (not live charts), once per
+        # (start_time, type). The example is recorded for manual picks and
+        # confident auto-detections; "Road Racing" fallbacks (None) are not
+        # learned because they're guesses.
+        if self._selected_race_fpath and start_key:
+            recorded_key = (start_key, race_type)
+            if recorded_key not in self._race_example_recorded:
+                self._race_example_recorded.add(recorded_key)
+                self._persist_race_type(self._selected_race_fpath, race_type)
+                if self._race_type_overridden or self._race_type_was_auto_detected:
+                    _save_type_example(features, race_type)
 
         toggle = getattr(self, "_chart_toggle_vars", {})
         if "spd" not in toggle or toggle["spd"].get():
@@ -1627,6 +1926,11 @@ class FH6TrackerGUI(tk.Tk):
             self._draw_gear_chart(samples)
         else:
             self._race_canvas_gear.grid_remove()
+        if "path" not in toggle or toggle["path"].get():
+            self._race_canvas_path.grid()
+            self._draw_path_chart(samples)
+        else:
+            self._race_canvas_path.grid_remove()
         self._compute_race_stats(samples, dur, race_type)
         self._generate_driving_tips(samples, dur, race_type)
 
@@ -1722,6 +2026,139 @@ class FH6TrackerGUI(tk.Tk):
             y_min=0, y_max=max_gear + 1,
             title="Gear",
         )
+
+    def _draw_path_chart(self, samples):
+        """Draw a top-down trace of the driven line from recorded positions.
+
+        Uses X/Z (Forza's ground plane; Y is up). Points are filtered to those
+        near the race's median position so a teleport/glitch sample can't blow
+        out the scaling. When the position-return lap split finds multiple
+        laps, each lap is drawn in its own color with a legend and a white
+        start/finish marker; detected off-line events (corner cuts/wide exits)
+        are drawn as red X markers. If the game sends garbage (e.g. unverified
+        offset or old races without position data), this shows a friendly
+        placeholder. The off-line extras silently disable until
+        line_analysis.find_off_line_events is implemented.
+        """
+        canvas = self._race_canvas_path
+        canvas.delete("all")
+        w = canvas.winfo_width()
+        h = canvas.winfo_height()
+        if w < 50 or h < 50:
+            return
+        pad = 14
+        cw = w - pad * 2
+        ch = h - pad * 2
+        if cw < 10 or ch < 10:
+            return
+        pts = []
+        for s in samples:
+            p = s.get("pos")
+            if not isinstance(p, (list, tuple)) or len(p) < 3:
+                continue
+            x, z = p[0], p[2]
+            if isinstance(x, (int, float)) and isinstance(z, (int, float)):
+                pts.append((float(x), float(z)))
+        if len(pts) < 10:
+            canvas.create_text(w // 2, h // 2, text="No position data",
+                               fill="#888888")
+            return
+        xs = [p[0] for p in pts]
+        zs = [p[1] for p in pts]
+        med_x = sorted(xs)[len(xs) // 2]
+        med_z = sorted(zs)[len(zs) // 2]
+        kept = [(x, z) for x, z in pts if abs(x - med_x) < 5000 and abs(z - med_z) < 5000]
+        if len(kept) < 10:
+            canvas.create_text(w // 2, h // 2, text="No position data",
+                               fill="#888888")
+            return
+        min_x = min(p[0] for p in kept)
+        max_x = max(p[0] for p in kept)
+        min_z = min(p[1] for p in kept)
+        max_z = max(p[1] for p in kept)
+        span_x = max_x - min_x
+        span_z = max_z - min_z
+        if span_x < 0.5 and span_z < 0.5:
+            canvas.create_text(w // 2, h // 2, text="Car didn't move",
+                               fill="#888888")
+            return
+        scale = min(cw / max(span_x, 1e-6), ch / max(span_z, 1e-6))
+        draw_w = span_x * scale
+        draw_h = span_z * scale
+        off_x = pad + (cw - draw_w) / 2
+        off_y = pad + (ch - draw_h) / 2
+
+        def to_canvas(x, z):
+            return (off_x + (x - min_x) * scale,
+                    off_y + draw_h - (z - min_z) * scale)
+
+        def polyline(pxz):
+            flat = []
+            for x, z in pxz:
+                px, py = to_canvas(x, z)
+                flat.extend((px, py))
+            return flat
+
+        # Lap split + off-line events. NotImplementedError (stub not written
+        # yet) disables the per-lap extras but keeps the plain path chart.
+        laps = line_analysis.split_laps(samples)
+        events = None
+        if laps is not None:
+            try:
+                events = line_analysis.find_off_line_events(samples, laps)
+            except NotImplementedError:
+                events = None
+
+        groups = laps["laps"] if laps else None
+        usable = [g for g in groups if len(g) >= 3] if groups else []
+        if not usable:
+            flat = polyline(kept)
+            if len(flat) >= 4:
+                canvas.create_line(*flat, fill="#1f6feb", width=2, smooth=True)
+        else:
+            for gi, group in enumerate(groups):
+                if len(group) < 3:
+                    continue
+                color = line_analysis.LAP_COLORS[gi % len(line_analysis.LAP_COLORS)]
+                flat = polyline([(samples[i]["pos"][0], samples[i]["pos"][2])
+                                 for i in group])
+                if len(flat) >= 4:
+                    canvas.create_line(*flat, fill=color, width=2, smooth=True)
+            lx = w - pad
+            for gi, group in enumerate(groups):
+                if len(group) < 3:
+                    continue
+                color = line_analysis.LAP_COLORS[gi % len(line_analysis.LAP_COLORS)]
+                lx -= 18
+                canvas.create_line(lx - 12, pad + 3, lx - 2, pad + 3,
+                                   fill=color, width=3)
+                lx -= 8
+                canvas.create_text(lx, pad + 3, anchor="e", text=f"L{gi}",
+                                   fill="#aaaaaa", font=("Segoe UI", 7))
+                lx -= 10
+            if laps is not None:
+                rx, rz = laps["reference"]
+                px, py = to_canvas(rx, rz)
+                canvas.create_rectangle(px - 3, py - 3, px + 3, py + 3,
+                                        fill="#ffffff", outline="")
+
+        if events:
+            for ev in events:
+                ex, ey = to_canvas(ev["x"], ev["z"])
+                canvas.create_line(ex - 4, ey - 4, ex + 4, ey + 4,
+                                   fill="#f85149", width=3)
+                canvas.create_line(ex - 4, ey + 4, ex + 4, ey - 4,
+                                   fill="#f85149", width=3)
+
+        canvas.create_text(pad, pad - 4, text="Path (top-down X/Z)",
+                           anchor="nw", fill="#555555", font=("Segoe UI", 8))
+        if kept:
+            start_x, start_y = to_canvas(kept[0][0], kept[0][1])
+            canvas.create_oval(start_x - 3, start_y - 3, start_x + 3, start_y + 3,
+                               fill="#137333", outline="")
+            end_x, end_y = to_canvas(kept[-1][0], kept[-1][1])
+            canvas.create_oval(end_x - 3, end_y - 3, end_x + 3, end_y + 3,
+                               fill="#c5221f", outline="")
 
     def _rerender_race_charts(self):
         if self._live_chart_active and self._live_chart_data:
@@ -2022,6 +2459,28 @@ class FH6TrackerGUI(tk.Tk):
             sh_label, sh_color = self._race_rating(shift_data["under_shifts"], 0, 3)
             lines.append((f"Shifts: {shift_data['count']} upshifts, avg at {shift_data['avg_rpm']:.0f} RPM  —  {sh_label}", sh_color))
 
+        laps = line_analysis.split_laps(samples)
+        try:
+            events = line_analysis.find_off_line_events(samples, laps)
+        except NotImplementedError:
+            events = None
+        if events is not None:
+            cuts = sum(1 for e in events if e["kind"] in ("cut", "kink"))
+            wide = len(events) - cuts
+            if cuts or wide:
+                if cuts and wide:
+                    label = (f"{cuts} corner cut{'s' if cuts != 1 else ''}, "
+                             f"{wide} wide exit{'s' if wide != 1 else ''}")
+                elif cuts:
+                    label = f"{cuts} corner cut{'s' if cuts != 1 else ''}"
+                else:
+                    label = f"{wide} wide exit{'s' if wide != 1 else ''}"
+                color = ("#c5221f" if cuts >= 3
+                         else ("#b06000" if cuts or wide >= 3 else "#137333"))
+                lines.append((f"Line discipline: {label}  —  see Path chart", color))
+            else:
+                lines.append(("Line discipline: clean line all race", "#137333"))
+
         return lines
 
     def _compute_race_stats(self, samples, duration, race_type="Road Racing"):
@@ -2287,6 +2746,32 @@ class FH6TrackerGUI(tk.Tk):
                 tips.append((2, f"Average speed is only {avg_speed:.0f} MPH despite hitting {max_speed:.0f} MPH.",
                     "Big gap between avg and top speed suggests you're over-slowing for corners. "
                     "Focus on carrying more speed through turns rather than stopping and accelerating."))
+
+            laps = line_analysis.split_laps(samples)
+            try:
+                events = line_analysis.find_off_line_events(samples, laps)
+            except NotImplementedError:
+                events = None
+            if events:
+                cuts = [e for e in events if e["kind"] in ("cut", "kink")]
+                wide = [e for e in events if e["kind"] == "wide"]
+                if len(cuts) >= 2:
+                    spots = ", ".join(f"@{e['speed_mph']:.0f}mph" for e in cuts[:3])
+                    tips.append((2, f"You cut {len(cuts)} corners (fastest at {spots}).",
+                        "A corner cut shaves distance but scrubs speed and often "
+                        "loses more time than it saves. Rejoin the racing line at "
+                        "the apex — hold the wheel steady through the arc instead "
+                        "of snapping across the corner."))
+                elif cuts:
+                    tips.append((3, "You cut a corner mid-race.",
+                        "Find the apex on the Path chart (red marker) — aim to "
+                        "clip it rather than drive a chord across the corner. "
+                        "Cleaner arcs carry more exit speed."))
+                if wide:
+                    tips.append((3, f"Wide exit on {len(wide)} corner(s).",
+                        "Running wide onto the outside curb wastes the exit "
+                        "straight. Turn in a touch later so the car is unwinding "
+                        "and pointing down the straight at the exit."))
 
             if not tips:
                 tips.append((0, "Your driving looks solid!",
@@ -3646,6 +4131,30 @@ class FH6TrackerGUI(tk.Tk):
             # Refresh twice: once quickly to catch fast saves, once after a
             # longer delay in case the subprocess was still processing the stop.
             self.after(500, self.refresh_races_panel)
+
+    def _on_packet_capture_toggle(self):
+        """Enable/disable raw packet capture via a control file the tracker polls."""
+        os.makedirs(RACES_DIR, exist_ok=True)
+        ctrl = os.path.join(RACES_DIR, ".packet_capture")
+        if self.packet_capture_var.get():
+            if not self.tracker_running:
+                self.packet_capture_var.set(False)
+                self.show_tutorial_notice("tutorial_start_tracker_first", "Start the tracker first, then enable packet capture.")
+                return
+            try:
+                with open(ctrl, "w") as f:
+                    f.write(str(time.time()))
+                self.show_notice("Packet capture on — raw telemetry will be saved to packet_dump.bin")
+            except OSError as exc:
+                self.packet_capture_var.set(False)
+                self.show_notice(f"Could not enable packet capture: {exc}")
+        else:
+            try:
+                if os.path.exists(ctrl):
+                    os.remove(ctrl)
+                self.show_notice("Packet capture off — packet_dump.bin flushed")
+            except OSError:
+                pass
             self.after(3000, self._auto_select_latest_race)
 
     def _auto_select_latest_race(self):
@@ -3672,6 +4181,7 @@ class FH6TrackerGUI(tk.Tk):
             self.show_notice(f"Could not delete race: {exc}")
             return
         self._selected_race_data = None
+        self._selected_race_fpath = None
         self._race_info_var.set("Select a race from the list to analyze it.")
         self.refresh_races_panel()
         self.show_notice("Race deleted.")
@@ -3695,6 +4205,7 @@ class FH6TrackerGUI(tk.Tk):
             except OSError:
                 pass
         self._selected_race_data = None
+        self._selected_race_fpath = None
         self._race_info_var.set("Select a race from the list to analyze it.")
         self.refresh_races_panel()
         self.show_notice(f"Deleted {deleted} race(s).")
@@ -3706,6 +4217,7 @@ class FH6TrackerGUI(tk.Tk):
         self._live_chart_active = active
         if active:
             self._live_chart_data = None
+            self._selected_race_fpath = None  # live data has no saved file to persist to
             self._race_info_var.set("Recording... live charts will build here while you drive.")
             self._live_chart_after_id = self.after(400, self._update_live_charts)
         else:
@@ -3861,8 +4373,6 @@ class FH6TrackerGUI(tk.Tk):
         canvas.create_oval(8, 6, 16, 14, fill="#ff3333", outline="")  # LIVE dot
         self._ov_text(canvas, items, "car", 22, 5, "Waiting for telemetry...", ("Segoe UI", 10, "bold"), "#ffffff")
         self._ov_text(canvas, items, "time", 322, 5, "0:00", ("Segoe UI", 10, "bold"), "#ffffff", anchor="ne")
-        self._ov_text(canvas, items, "speed", 10, 24, "0", ("Segoe UI", 42, "bold"), "#ffffff")
-        self._ov_text(canvas, items, "mph", 14, 90, "MPH", ("Segoe UI", 9, "bold"), "#bbbbbb")
         self._ov_text(canvas, items, "gear", 322, 24, "-", ("Segoe UI", 30, "bold"), "#58a6ff", anchor="ne")
         self._ov_text(canvas, items, "rpm", 322, 70, "RPM -", ("Segoe UI", 10, "bold"), "#dddddd", anchor="ne")
 
@@ -3898,7 +4408,7 @@ class FH6TrackerGUI(tk.Tk):
         overlay = getattr(self, "_overlay", None)
         if overlay is None or not overlay.winfo_exists():
             return
-        w, h, margin = 330, 252, 8
+        w, h, margin = 330, 226, 8
 
         # Prefer the monitor the FH6 window is on, so the overlay follows the
         # game across displays. Fall back to the GUI's own monitor (then the
@@ -3994,7 +4504,6 @@ class FH6TrackerGUI(tk.Tk):
         if not data or not data.get("sample"):
             self._overlay_set("car", "Waiting for telemetry...")
             self._overlay_set("time", "")
-            self._overlay_set("speed", "-")
             self._overlay_set("gear", "-")
             self._overlay_set("rpm", "RPM -")
             for key in ("thr", "brk", "str", "hbrk"):
@@ -4014,7 +4523,6 @@ class FH6TrackerGUI(tk.Tk):
             self._overlay_set("time", f"{m}:{s:02d}")
         else:
             self._overlay_set("time", "LIVE")
-        self._overlay_set("speed", str(int(sample.get("spd", 0) or 0)))
         gear = sample.get("gear")
         self._overlay_set("gear", str(gear) if gear is not None else "-")
         self._overlay_set("rpm", "RPM " + f"{int(sample.get('rpm', 0) or 0):,}")
@@ -6421,7 +6929,7 @@ Start-Process -FilePath $exe -WorkingDirectory $dst
     # =====================================================================
     def _cleanup_record_signals(self):
         """Remove stale recording signal files so a restart can't auto-trigger them."""
-        for name in (".record_start", ".record_stop"):
+        for name in (".record_start", ".record_stop", ".packet_capture"):
             try:
                 path = os.path.join(RACES_DIR, name)
                 if os.path.exists(path):
@@ -6514,6 +7022,7 @@ Start-Process -FilePath $exe -WorkingDirectory $dst
         self._destroy_race_overlay()
         self.tracker_running = False
         self.last_status = "Stopped"
+        self.packet_capture_var.set(False)
         self.status_var.set("Status: Stopped")
         self._update_tracker_button()
 

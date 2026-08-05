@@ -71,6 +71,15 @@ HANDBRAKE_OFFSET = 318      # U8  (0-255) → normalise to 0.0-1.0
 GEAR_OFFSET = 319           # U8  (0=reverse, 1-10 forward)
 STEERING_OFFSET = 320       # S8  (-127..127) → normalise to -1.0..1.0
 
+# PositionX/Y/Z (F32) sit immediately before the verified Speed field (256),
+# matching the standard dash ordering (Position → Speed → Power → Torque).
+# All three are VERIFIED in meters against the speed field via a real race
+# capture (see scan_offsets.py). There is NO NormalizedDrivingLine in this
+# packet — confirmed by live capture — so that field is gone entirely.
+POSITION_X_OFFSET = 244
+POSITION_Y_OFFSET = 248
+POSITION_Z_OFFSET = 252
+
 # Legacy aliases kept for any code that still references the old names
 THROTTLE_OFFSET = ACCEL_OFFSET
 CURRENT_GEAR_OFFSET = GEAR_OFFSET
@@ -111,7 +120,7 @@ def parse_packet(data):
 
     Returns a dict with basic fields (rpm, speed_mph, car_ordinal) plus
     race-analysis fields (throttle, brake, steering, gear, is_race_on,
-    power, torque, etc.).
+    power, torque, boost, position x/y/z).
 
     Player inputs (throttle, brake, handbrake, steering) are normalised to
     the 0.0–1.0 / -1.0–1.0 range that the analysis and tips code expects,
@@ -124,7 +133,7 @@ def parse_packet(data):
     rpm = _unpack_f(data, RPM_OFFSET)
     speed_mps = _unpack_f(data, SPEED_OFFSET)
     car_ordinal = _unpack_i(data, CAR_ORDINAL_OFFSET)
-    return {
+    result = {
         "rpm": rpm,
         "speed_mph": speed_mps * MPS_TO_MPH,
         "car_ordinal": car_ordinal,
@@ -141,7 +150,11 @@ def parse_packet(data):
         "power": _unpack_f(data, POWER_OFFSET),
         "torque": _unpack_f(data, TORQUE_OFFSET),
         "boost": _unpack_f(data, BOOST_OFFSET),
+        "pos_x": _unpack_f(data, POSITION_X_OFFSET),
+        "pos_y": _unpack_f(data, POSITION_Y_OFFSET),
+        "pos_z": _unpack_f(data, POSITION_Z_OFFSET),
     }
+    return result
 
 
 def get_performance_preset(mode=None):

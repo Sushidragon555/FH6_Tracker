@@ -1,3 +1,4 @@
+import atexit
 import csv
 import ctypes
 import ctypes.wintypes
@@ -147,6 +148,51 @@ RACES_DIR = os.path.join(BASE_DIR, "races")
 LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
 LIVE_CHART_FILE = os.path.join(RACES_DIR, ".live_chart.json")
 TEST_MODE = os.environ.get("FH6_TEST_MODE", "0") == "1"
+
+# Raw packet capture (diagnostic). Records every raw UDP packet to
+# packet_dump.bin as (2-byte little-endian length + payload). Can be enabled
+# two ways: the GUI "Record raw telemetry packets" checkbox (writes/removes
+# PACKET_DUMP_CTRL_FILE in the races dir, polled by the tracker), or the env
+# var FH6_DUMP_PACKETS=1 before launch. scan_offsets.py analyzes the capture
+# offline, so offsets can be located from a normal driving session.
+PACKET_DUMP_FILE = os.path.join(BASE_DIR, "packet_dump.bin")
+PACKET_DUMP_CTRL_FILE = os.path.join(RACES_DIR, ".packet_capture")
+DUMP_PACKETS = os.environ.get("FH6_DUMP_PACKETS", "0") == "1"
+_dump_handle = None
+_dump_buf = bytearray()
+
+
+def _open_packet_dump():
+    global _dump_handle
+    if _dump_handle is not None:
+        return
+    try:
+        _dump_handle = open(PACKET_DUMP_FILE, "wb")
+        print(f" [✎] Capturing raw telemetry packets -> {PACKET_DUMP_FILE}")
+    except OSError as exc:
+        print(f" [⚠️] Could not open packet dump: {exc}")
+        _dump_handle = None
+
+
+def _close_packet_dump():
+    global _dump_handle, _dump_buf
+    if _dump_handle is None:
+        return
+    try:
+        if _dump_buf:
+            _dump_handle.write(_dump_buf)
+            _dump_buf = bytearray()
+        _dump_handle.close()
+    except OSError:
+        pass
+    _dump_handle = None
+    print(" [✎] Packet capture stopped -> packet_dump.bin saved")
+
+
+if DUMP_PACKETS:
+    _open_packet_dump()
+
+atexit.register(_close_packet_dump)
 
 # Race telemetry capture settings. Forza sends ~60 packets/sec. We sample every
 # RACE_SAMPLE_EVERY-th packet to get ~20Hz capture, keeping file sizes manageable
@@ -470,6 +516,14 @@ def _check_signal_files():
                 f"that no other tracker instance is running."
             )
 
+    # Raw packet capture toggle driven by the GUI checkbox. The GUI owns the
+    # control file (keeps it present while capture is on); the tracker just
+    # mirrors it into the dump handle. Both helpers are idempotent.
+    if os.path.exists(PACKET_DUMP_CTRL_FILE):
+        _open_packet_dump()
+    else:
+        _close_packet_dump()
+
 
 # Start global hotkey listener (F6 for recording) in a background thread
 _hotkey_thread = threading.Thread(target=_start_hotkey_listener, daemon=True)
@@ -537,6 +591,16 @@ else:
                     print(" Waiting for Forza telemetry...                     ", end="\r")
                     continue
 
+                if _dump_handle is not None:
+                    _dump_buf += struct.pack("<H", len(data))
+                    _dump_buf += data
+                    if len(_dump_buf) >= 65536:
+                        try:
+                            _dump_handle.write(_dump_buf)
+                            _dump_buf = bytearray()
+                        except OSError:
+                            pass
+
                 parsed = car_lookup.parse_packet(data)
                 if parsed is None:
                     continue
@@ -583,6 +647,9 @@ else:
                     "pwr": int(parsed["power"]),
                     "trq": int(parsed["torque"]),
                     "hbrk": round(parsed["handbrake"], 3),
+                    "pos": [round(parsed.get("pos_x", 0.0), 1),
+                            round(parsed.get("pos_y", 0.0), 1),
+                            round(parsed.get("pos_z", 0.0), 1)],
                 }
                 if race_in_progress:
                     race_packet_count += 1

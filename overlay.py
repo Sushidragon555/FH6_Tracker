@@ -29,7 +29,7 @@ RACES_DIR = os.path.join(BASE_DIR, "races")
 LIVE_RACE_FILE = os.path.join(RACES_DIR, ".live_race.json")
 AUTO_LOG_PATH = os.path.join(BASE_DIR, "auto_log.py")
 OVERLAY_BG = "#ff00fe"  # chroma-key color: every pixel of this color is transparent on Windows
-W, H, MARGIN = 330, 252, 8
+W, H, MARGIN = 330, 226, 8
 
 # Quit hotkey: Ctrl+Alt+Q
 WM_HOTKEY = 0x0312
@@ -230,8 +230,6 @@ class OverlayApp:
         canvas.create_oval(8, 6, 16, 14, fill="#ff3333", outline="")  # LIVE dot
         self._ov_text(canvas, items, "car", 22, 5, "Waiting for telemetry...", ("Segoe UI", 10, "bold"), "#ffffff")
         self._ov_text(canvas, items, "time", 322, 5, "0:00", ("Segoe UI", 10, "bold"), "#ffffff", anchor="ne")
-        self._ov_text(canvas, items, "speed", 10, 24, "0", ("Segoe UI", 42, "bold"), "#ffffff")
-        self._ov_text(canvas, items, "mph", 14, 90, "MPH", ("Segoe UI", 9, "bold"), "#bbbbbb")
         self._ov_text(canvas, items, "gear", 322, 24, "-", ("Segoe UI", 30, "bold"), "#58a6ff", anchor="ne")
         self._ov_text(canvas, items, "rpm", 322, 70, "RPM -", ("Segoe UI", 10, "bold"), "#dddddd", anchor="ne")
 
@@ -293,7 +291,6 @@ class OverlayApp:
         if not data or not data.get("sample"):
             self._overlay_set("car", "Waiting for telemetry...")
             self._overlay_set("time", "")
-            self._overlay_set("speed", "-")
             self._overlay_set("gear", "-")
             self._overlay_set("rpm", "RPM -")
             for key in ("thr", "brk", "str", "hbrk"):
@@ -313,7 +310,6 @@ class OverlayApp:
             self._overlay_set("time", f"{m}:{s:02d}")
         else:
             self._overlay_set("time", "LIVE")
-        self._overlay_set("speed", str(int(sample.get("spd", 0) or 0)))
         gear = sample.get("gear")
         self._overlay_set("gear", str(gear) if gear is not None else "-")
         self._overlay_set("rpm", "RPM " + f"{int(sample.get('rpm', 0) or 0):,}")
