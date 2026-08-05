@@ -92,6 +92,12 @@ APP_LOG_FILE = os.path.join(BASE_DIR, "fh6_tracker.log")
 # TYPE_EXAMPLES_FILE and a nearest-neighbor lookup takes over as labeled
 # examples accumulate, so it personalizes to the user's driving style.
 TYPE_EXAMPLES_FILE = os.path.join(BASE_DIR, "race_type_examples.json")
+# Race types the detector is never allowed to guess. They stay selectable in
+# the dropdown but must be picked by hand. Drag Racing is the worst false-
+# positive offender — any short, straight, full-throttle stretch scores like a
+# drag strip (a highway road race once got locked in as Drag) — and it's
+# obvious when the driver actually does one, so guessing adds risk, not value.
+MANUAL_RACE_TYPES = frozenset({"Drag Racing"})
 AUTO_TYPE_MIN_SCORE = 45
 AUTO_TYPE_MARGIN = 12
 NN_MIN_EXAMPLES = 3
@@ -1406,7 +1412,7 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_was_auto_detected = False  # True once auto-detect locked a result
         self._selected_race_fpath = None   # saved race file backing the analysis panel
         self._race_example_recorded = set()  # (start_time, type) already persisted/learned
-        ttk.Label(race_type_frame, text="(Drift & PR Stunts are manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
+        ttk.Label(race_type_frame, text="(Drag Racing is manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
         ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
         self._chart_toggle_vars = {}
         chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear"), ("path", "Path")]
@@ -1805,6 +1811,8 @@ class FH6TrackerGUI(tk.Tk):
                 continue
             dist = sum(_NN_WEIGHTS[k] * (target[k] - en[k]) ** 2 for k in _NN_WEIGHTS)
             t = ex["type"]
+            if t in MANUAL_RACE_TYPES:
+                continue
             if t not in per_type or dist < per_type[t]:
                 per_type[t] = dist
         if len(per_type) < 2:
@@ -1823,7 +1831,7 @@ class FH6TrackerGUI(tk.Tk):
         if not fv:
             return None
         learned = cls._learned_type(fv)
-        if learned:
+        if learned and learned not in MANUAL_RACE_TYPES:
             return learned
         scores = cls._score_race_types(fv)
         if not scores:
@@ -1831,7 +1839,9 @@ class FH6TrackerGUI(tk.Tk):
         ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
         best_type, best_score = ranked[0]
         second_score = ranked[1][1] if len(ranked) > 1 else 0
-        if best_score >= AUTO_TYPE_MIN_SCORE and (best_score - second_score) >= AUTO_TYPE_MARGIN:
+        if (best_type not in MANUAL_RACE_TYPES
+                and best_score >= AUTO_TYPE_MIN_SCORE
+                and (best_score - second_score) >= AUTO_TYPE_MARGIN):
             return best_type
         return None
 

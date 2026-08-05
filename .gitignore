@@ -40,5 +40,6 @@ credit_transactions.json
 credit_history.json
 methods_history.json
 owned_cars.json
+race_type_examples.json
 .last_update
 exports/
