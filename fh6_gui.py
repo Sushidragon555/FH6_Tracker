@@ -97,7 +97,7 @@ TYPE_EXAMPLES_FILE = os.path.join(BASE_DIR, "race_type_examples.json")
 # positive offender — any short, straight, full-throttle stretch scores like a
 # drag strip (a highway road race once got locked in as Drag) — and it's
 # obvious when the driver actually does one, so guessing adds risk, not value.
-MANUAL_RACE_TYPES = frozenset({"Drag Racing"})
+MANUAL_RACE_TYPES = frozenset({"Drag Racing", "Drift"})
 AUTO_TYPE_MIN_SCORE = 45
 AUTO_TYPE_MARGIN = 12
 NN_MIN_EXAMPLES = 3
@@ -1412,7 +1412,7 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_was_auto_detected = False  # True once auto-detect locked a result
         self._selected_race_fpath = None   # saved race file backing the analysis panel
         self._race_example_recorded = set()  # (start_time, type) already persisted/learned
-        ttk.Label(race_type_frame, text="(Drag Racing is manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
+        ttk.Label(race_type_frame, text="(Drag Racing & Drift are manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
         ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
         self._chart_toggle_vars = {}
         chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear"), ("path", "Path")]
@@ -1938,7 +1938,7 @@ class FH6TrackerGUI(tk.Tk):
             self._race_canvas_gear.grid_remove()
         if "path" not in toggle or toggle["path"].get():
             self._race_canvas_path.grid()
-            self._draw_path_chart(samples)
+            self._draw_path_chart(samples, race_type)
         else:
             self._race_canvas_path.grid_remove()
         self._compute_race_stats(samples, dur, race_type)
@@ -2037,7 +2037,7 @@ class FH6TrackerGUI(tk.Tk):
             title="Gear",
         )
 
-    def _draw_path_chart(self, samples):
+    def _draw_path_chart(self, samples, race_type="Road Racing"):
         """Draw a top-down trace of the driven line from recorded positions.
 
         Uses X/Z (Forza's ground plane; Y is up). Points are filtered to those
@@ -2111,7 +2111,9 @@ class FH6TrackerGUI(tk.Tk):
 
         # Lap split + off-line events. NotImplementedError (stub not written
         # yet) disables the per-lap extras but keeps the plain path chart.
-        laps = line_analysis.split_laps(samples)
+        # Drift/Drag (manual-only types) skip the extras entirely: a drift is
+        # deliberately off the racing line, and drag cars don't lap.
+        laps = line_analysis.split_laps(samples) if race_type not in MANUAL_RACE_TYPES else None
         events = None
         if laps is not None:
             try:
@@ -2439,7 +2441,7 @@ class FH6TrackerGUI(tk.Tk):
             parts.insert(0, f"Tough race. Score: {grade_score}/100 — the tips below will help a lot.")
         return " ".join(parts)
 
-    def _generate_performance_breakdown(self, samples, duration):
+    def _generate_performance_breakdown(self, samples, duration, race_type="Road Racing"):
         """Build a bullet-point performance breakdown with color ratings."""
         if len(samples) < 10:
             return [("Not enough data for a detailed breakdown.", "#888888")]
@@ -2447,12 +2449,40 @@ class FH6TrackerGUI(tk.Tk):
         throttles = [s.get("thr", 0) for s in samples]
         brakes = [s.get("brk", 0) for s in samples]
         steers = [s.get("str", 0) for s in samples]
+        hbrakes = [s.get("hbrk", 0) for s in samples]
         max_speed = max(speeds)
         avg_speed = sum(speeds) / len(speeds)
         throttle_pct = sum(1 for t in throttles if t > 0.5) / len(throttles) * 100
         braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
         brake_overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
         smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
+        handbrake_pct = sum(1 for h in hbrakes if h > 0.1) / len(hbrakes) * 100
+
+        if race_type == "Drift":
+            # Drift flips the usual ratings: handbrake, steering angle and
+            # throttle modulation are GOOD things here, and the line-discipline
+            # row would flag every intentional slide as a corner cut.
+            lines = []
+            h_label, h_color = self._race_rating(handbrake_pct, 6, 2)
+            lines.append((f"Handbrake: {handbrake_pct:.0f}% of the run  —  {h_label}", h_color))
+            avg_steer = sum(abs(s) for s in steers) / len(steers)
+            a_label, a_color = self._race_rating(avg_steer, 0.35, 0.15)
+            lines.append((f"Steer angle: {avg_steer:.2f} avg  —  {a_label}", a_color))
+            mod = sum(abs(throttles[i] - throttles[i - 1]) for i in range(1, len(throttles))) / len(throttles)
+            m_label, m_color = self._race_rating(mod, 0.08, 0.03)
+            lines.append((f"Throttle modulation: {mod:.3f} avg change  —  {m_label}", m_color))
+            drift = line_analysis.detect_drift_segments(samples)
+            if drift is None:
+                lines.append(("Slides: no position data — record a new run to track slides", "#888888"))
+            elif not drift:
+                lines.append(("Slides: none detected", "#888888"))
+            else:
+                durations = [d["duration_s"] for d in drift]
+                longest = max(durations)
+                avg_dur = sum(durations) / len(durations)
+                color = "#137333" if avg_dur >= 1.5 else "#b06000"
+                lines.append((f"Drift slides: {len(drift)}  —  longest {longest:.1f}s, avg {avg_dur:.1f}s", color))
+            return lines
 
         lines = []
         t_label, t_color = self._race_rating(throttle_pct, 65, 30)
@@ -2469,27 +2499,28 @@ class FH6TrackerGUI(tk.Tk):
             sh_label, sh_color = self._race_rating(shift_data["under_shifts"], 0, 3)
             lines.append((f"Shifts: {shift_data['count']} upshifts, avg at {shift_data['avg_rpm']:.0f} RPM  —  {sh_label}", sh_color))
 
-        laps = line_analysis.split_laps(samples)
-        try:
-            events = line_analysis.find_off_line_events(samples, laps)
-        except NotImplementedError:
-            events = None
-        if events is not None:
-            cuts = sum(1 for e in events if e["kind"] in ("cut", "kink"))
-            wide = len(events) - cuts
-            if cuts or wide:
-                if cuts and wide:
-                    label = (f"{cuts} corner cut{'s' if cuts != 1 else ''}, "
-                             f"{wide} wide exit{'s' if wide != 1 else ''}")
-                elif cuts:
-                    label = f"{cuts} corner cut{'s' if cuts != 1 else ''}"
+        if race_type not in MANUAL_RACE_TYPES:
+            laps = line_analysis.split_laps(samples)
+            try:
+                events = line_analysis.find_off_line_events(samples, laps)
+            except NotImplementedError:
+                events = None
+            if events is not None:
+                cuts = sum(1 for e in events if e["kind"] in ("cut", "kink"))
+                wide = len(events) - cuts
+                if cuts or wide:
+                    if cuts and wide:
+                        label = (f"{cuts} corner cut{'s' if cuts != 1 else ''}, "
+                                 f"{wide} wide exit{'s' if wide != 1 else ''}")
+                    elif cuts:
+                        label = f"{cuts} corner cut{'s' if cuts != 1 else ''}"
+                    else:
+                        label = f"{wide} wide exit{'s' if wide != 1 else ''}"
+                    color = ("#c5221f" if cuts >= 3
+                             else ("#b06000" if cuts or wide >= 3 else "#137333"))
+                    lines.append((f"Line discipline: {label}  —  see Path chart", color))
                 else:
-                    label = f"{wide} wide exit{'s' if wide != 1 else ''}"
-                color = ("#c5221f" if cuts >= 3
-                         else ("#b06000" if cuts or wide >= 3 else "#137333"))
-                lines.append((f"Line discipline: {label}  —  see Path chart", color))
-            else:
-                lines.append(("Line discipline: clean line all race", "#137333"))
+                    lines.append(("Line discipline: clean line all race", "#137333"))
 
         return lines
 
@@ -2531,7 +2562,7 @@ class FH6TrackerGUI(tk.Tk):
         summary = self._compute_race_summary(samples, duration, grade_score, grade_letter)
         self._race_summary_var.set(summary)
 
-        breakdown_lines = self._generate_performance_breakdown(samples, duration)
+        breakdown_lines = self._generate_performance_breakdown(samples, duration, race_type)
         breakdown_text = "\n".join(f"  {line}" for line, _ in breakdown_lines)
         self._race_breakdown_var.set(breakdown_text)
 
@@ -2640,6 +2671,33 @@ class FH6TrackerGUI(tk.Tk):
                 tips.append((2, "Throttle is very steady — try modulating it mid-drift.",
                     "Feathering the throttle mid-slide helps control your angle and speed. "
                     "Pulse the throttle to extend or tighten the drift."))
+            drift = line_analysis.detect_drift_segments(samples)
+            if drift is None:
+                tips.append((3, "Slide detection is off — no position data in this run.",
+                    "Older recordings have no position. Record a fresh drift session "
+                    "and pick Drift to get slide-by-slide feedback."))
+            elif not drift:
+                tips.append((3, "No sustained slides detected.",
+                    "Either the run wasn't really drifting, or the car never rotated "
+                    "fast enough while counter-steered. Try a firmer handbrake tap to "
+                    "break traction and hold a steady counter-steer angle."))
+            else:
+                durations = [d["duration_s"] for d in drift]
+                avg_dur = sum(durations) / len(durations)
+                longest = max(durations)
+                if avg_dur < 1.2:
+                    tips.append((1, f"Drifts average only {avg_dur:.1f}s (longest {longest:.1f}s) — hold the slide.",
+                        "A drift is one long constant rotation, not a flick-and-straighten. "
+                        "Keep the throttle on through the apex and feather it to hold the angle."))
+                if len(drift) < 3:
+                    tips.append((2, f"Only {len(drift)} sustained slide{'s' if len(drift) != 1 else ''} in this run.",
+                        "Chain corners — link drifts back-to-back instead of resetting "
+                        "to a straight line between each one."))
+                avg_spd = sum(d["avg_speed_mph"] for d in drift) / len(drift)
+                if avg_spd < 55:
+                    tips.append((2, f"Average drift speed is only {avg_spd:.0f} MPH.",
+                        "Drift zones reward speed x angle x time. Enter faster and use "
+                        "more throttle to carry momentum through the slide."))
             if not tips:
                 tips.append((0, "Solid drift technique!", "Try chaining longer drifts and linking corners for higher scores."))
 

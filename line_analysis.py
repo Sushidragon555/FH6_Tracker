@@ -356,6 +356,138 @@ def _find_kinks(groups, min_speed_mph, kink_deg, merge_gap):
 
 
 # --------------------------------------------------------------------------
+# Drift segment detection
+# --------------------------------------------------------------------------
+
+def _wrap_angle(a):
+    """Wrap an angle in radians to the range (-pi, pi]."""
+    while a > math.pi:
+        a -= 2 * math.pi
+    while a < -math.pi:
+        a += 2 * math.pi
+    return a
+
+
+def detect_drift_segments(samples, min_speed_mph=30.0, min_dur_s=0.5,
+                          merge_gap_s=0.35, yaw_deg_per_s=25.0,
+                          steer_deadband=0.12, hbrk_gate=0.5):
+    """Find contiguous drift slides from recorded telemetry.
+
+    The packet has no yaw-rate channel, so a slide is inferred from the path
+    the car carves out. The travel heading (from position) is computed over a
+    ~4-sample window to fight the 0.1 m position rounding; a sample counts as
+    drifting when the heading is rotating at >= yaw_deg_per_s while moving at
+    speed AND that rotation is NOT produced by the steering (counter-steer:
+    wheels opposed to the turn) or is handbrake-initiated. A gripped car's
+    heading follows the front wheels, so a fast rotation with the wheels
+    pointed away from it means the rear is sliding out.
+
+    Parameters
+    ----------
+    samples : list of dict
+        Same format as split_laps (each has "t", "spd", "str", "hbrk", "pos").
+    min_speed_mph : float
+        Slower than this isn't a slide, it's a slow turn.
+    min_dur_s : float
+        Slides shorter than this are dropped (a flick, not a drift).
+    merge_gap_s : float
+        Gaps between detections shorter than this are merged into one slide.
+    yaw_deg_per_s : float
+        Heading-rotation rate above which the car is clearly not driving in a
+        straight-ish, gripped fashion.
+    steer_deadband : float
+        Steering magnitude below which we treat the wheel as centered.
+    hbrk_gate : float
+        Handbrake above this counts as slide initiation regardless of steer.
+
+    Returns
+    -------
+    A list of segments sorted by start sample (or None when samples are
+    unusable / lack position data), each:
+        {"start", "end", "duration_s", "avg_speed_mph", "avg_steer",
+         "peak_yaw_deg_s"}
+    """
+    if not samples or len(samples) < 12:
+        return None
+    n = len(samples)
+    xs, zs = [], []
+    for s in samples:
+        p = s.get("pos")
+        if not isinstance(p, (list, tuple)) or len(p) < 3:
+            return None
+        xs.append(p[0])
+        zs.append(p[2])
+    ts = [s.get("t", 0) for s in samples]
+    if not any(ts) or (ts[-1] or 0) <= (ts[0] or 0):
+        ts = [i / 20.0 for i in range(n)]
+
+    heading = [0.0] * n
+    for i in range(2, n - 2):
+        dx = xs[i + 2] - xs[i - 2]
+        dz = zs[i + 2] - zs[i - 2]
+        if abs(dx) > 1e-9 or abs(dz) > 1e-9:
+            heading[i] = math.atan2(dz, dx)
+
+    flags = [False] * n
+    for i in range(2, n - 2):
+        spd = samples[i].get("spd", 0) or 0
+        if spd < min_speed_mph:
+            continue
+        d = _wrap_angle(heading[i + 2] - heading[i - 2])
+        dt = (ts[i + 2] - ts[i - 2]) or 0.4
+        if math.degrees(abs(d)) / dt < yaw_deg_per_s:
+            continue
+        steer = samples[i].get("str", 0) or 0
+        steer_sign = 1 if steer > steer_deadband else (-1 if steer < -steer_deadband else 0)
+        turn_sign = 1 if d > 0 else -1
+        counter = steer_sign != 0 and steer_sign != turn_sign
+        if counter or (samples[i].get("hbrk", 0) or 0) > hbrk_gate:
+            flags[i] = True
+
+    segs = []
+    start = None
+    for i in range(n):
+        if flags[i] and start is None:
+            start = i
+        elif not flags[i] and start is not None:
+            segs.append((start, i - 1))
+            start = None
+    if start is not None:
+        segs.append((start, n - 1))
+
+    merged = []
+    for seg in segs:
+        if merged and (ts[seg[0]] - ts[merged[-1][1]]) <= merge_gap_s:
+            merged[-1] = (merged[-1][0], seg[1])
+        else:
+            merged.append(seg)
+
+    out = []
+    for a, b in merged:
+        dur = ts[b] - ts[a]
+        if dur < min_dur_s:
+            continue
+        seg_speeds = [samples[i].get("spd", 0) or 0 for i in range(a, b + 1)]
+        seg_steers = [abs(samples[i].get("str", 0) or 0) for i in range(a, b + 1)]
+        yaws = []
+        for i in range(a, b + 1):
+            if 2 <= i < n - 2:
+                dd = _wrap_angle(heading[i + 2] - heading[i - 2])
+                dtt = (ts[i + 2] - ts[i - 2]) or 0.4
+                yaws.append(math.degrees(abs(dd)) / dtt)
+        out.append({
+            "start": a,
+            "end": b,
+            "duration_s": dur,
+            "avg_speed_mph": sum(seg_speeds) / max(len(seg_speeds), 1),
+            "avg_steer": sum(seg_steers) / max(len(seg_steers), 1),
+            "peak_yaw_deg_s": max(yaws) if yaws else 0.0,
+        })
+
+    return out
+
+
+# --------------------------------------------------------------------------
 # Synthetic fixtures + self-tests
 # --------------------------------------------------------------------------
 
@@ -468,6 +600,52 @@ def _loop_total():
         + 4.0 * math.pi * 40.0 / 2.0
 
 
+def _drift_path_samples(phases, dt=0.05):
+    """Integrate a 2D path from (seconds, speed_mph, turn_rate_deg_s, steer,
+    hbrk, thr) phases. Positions are rounded to 0.1 m like real recordings.
+    Positive turn rate = turning left; positive steer = steering left."""
+    samples = []
+    t = 0.0
+    x = z = 0.0
+    heading = 0.0
+    for secs, speed_mph, turn, steer, hbrk, thr in phases:
+        n = int(round(secs / dt))
+        v = speed_mph * 0.44704
+        for _ in range(n):
+            heading += math.radians(turn) * dt
+            x += math.cos(heading) * v * dt
+            z += math.sin(heading) * v * dt
+            samples.append({
+                "t": round(t, 3),
+                "spd": round(speed_mph, 1),
+                "thr": thr, "brk": 0.0, "str": steer,
+                "hbrk": hbrk, "rpm": 5000, "gear": 3,
+                "pos": [round(x, 1), 0.0, round(z, 1)],
+            })
+            t += dt
+    return samples
+
+
+def make_drift_session():
+    """Synthetic drift run: straight approach, a long counter-steered
+    left-hand slide (handbrake-initiated, wheels opposite the turn), exit."""
+    return _drift_path_samples([
+        (1.0, 40.0, 0.0, 0.0, 0.0, 0.8),       # approach straight
+        (2.5, 50.0, 60.0, -0.55, 1.0, 0.7),    # drifting: turn left, steer right
+        (1.0, 50.0, 0.0, 0.0, 0.0, 0.5),       # exit straight
+    ])
+
+
+def make_grip_corner_session():
+    """Synthetic clean corner: the same arc but the steering matches the turn
+    (gripped) and there is no handbrake — must NOT be flagged as a drift."""
+    return _drift_path_samples([
+        (1.0, 40.0, 0.0, 0.0, 0.0, 0.8),
+        (2.5, 50.0, 60.0, 0.55, 0.0, 0.5),     # steering INTO the left turn
+        (1.0, 50.0, 0.0, 0.0, 0.0, 0.5),
+    ])
+
+
 def _main():
     import sys
 
@@ -546,6 +724,27 @@ def _main():
               f"got {len(events)}")
     except NotImplementedError:
         print("  SKIP  stub not implemented yet")
+
+    print("== detect_drift_segments ==")
+    drift = detect_drift_segments(make_drift_session())
+    check("drift session returns segments", bool(drift))
+    if drift:
+        check("one merged slide", len(drift) == 1, f"got {len(drift)}")
+        check("slide lasts ~2.5s",
+              abs(drift[0]["duration_s"] - 2.5) < 0.5,
+              f"got {drift[0]['duration_s']:.1f}s")
+        check("slide speed ~50mph",
+              abs(drift[0]["avg_speed_mph"] - 50) < 10,
+              f"got {drift[0]['avg_speed_mph']:.0f}")
+
+    grip = detect_drift_segments(make_grip_corner_session())
+    check("gripped corner is not a drift", not grip,
+          f"got {len(grip) if grip else 0}")
+
+    no_pos = [{"t": 0.05 * i, "spd": 50.0, "str": 0.0, "hbrk": 0.0}
+              for i in range(100)]
+    check("no position data -> None",
+          detect_drift_segments(no_pos) is None)
 
     if state["fails"]:
         print(f"\n{state['fails']} test(s) FAILED")
