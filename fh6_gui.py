@@ -4,6 +4,7 @@ import ctypes.wintypes
 import importlib
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -717,6 +718,31 @@ def get_monitor_rect(x, y):
 # =============================================================================
 # =============================================================================
 
+def break_teleport_segments(pts, max_speed_mps=200.0):
+    """Split a (x, z, t) point list at teleport jumps so the drawn race line
+    doesn't streak across the map.
+
+    When recording starts before the race (menu / free roam), the game
+    teleports the car to the grid and that near-instant position change would
+    otherwise connect two distant parts of the track with one long straight
+    line.  A real car can't move faster than ~112 m/s (~250 mph), so any step
+    faster than *max_speed_mps* is a teleport, not driving.  Falls back to a
+    fixed 250m step check for points without usable timestamps.
+
+    Returns a list of contiguous sub-lists, each with >= 2 points.
+    """
+    if not pts:
+        return []
+    segs = [[pts[0]]]
+    for prev, cur in zip(pts, pts[1:]):
+        d = math.hypot(cur[0] - prev[0], cur[1] - prev[1])
+        dt = cur[2] - prev[2] if len(prev) >= 3 and len(cur) >= 3 else 0.0
+        if (dt > 0 and d / dt > max_speed_mps) or (dt <= 0 and d > 250.0):
+            segs.append([])
+        segs[-1].append(cur)
+    return [seg for seg in segs if len(seg) >= 2]
+
+
 class FH6TrackerGUI(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -758,6 +784,7 @@ class FH6TrackerGUI(tk.Tk):
         self._ocr_success_count = 0
         self._ocr_total_count = 0
         self._last_ocr_raw_text = ""
+        self._last_ocr_change = None
         self._last_ocr_scan_time = 0
         self._credit_rate_points = []
         self.forza_running_prev = None
@@ -2068,7 +2095,7 @@ class FH6TrackerGUI(tk.Tk):
                 continue
             x, z = p[0], p[2]
             if isinstance(x, (int, float)) and isinstance(z, (int, float)):
-                pts.append((float(x), float(z)))
+                pts.append((float(x), float(z), float(s.get("t", 0) or 0)))
         if len(pts) < 10:
             canvas.create_text(w // 2, h // 2, text="No position data",
                                fill="#888888")
@@ -2077,7 +2104,7 @@ class FH6TrackerGUI(tk.Tk):
         zs = [p[1] for p in pts]
         med_x = sorted(xs)[len(xs) // 2]
         med_z = sorted(zs)[len(zs) // 2]
-        kept = [(x, z) for x, z in pts if abs(x - med_x) < 5000 and abs(z - med_z) < 5000]
+        kept = [p for p in pts if abs(p[0] - med_x) < 5000 and abs(p[1] - med_z) < 5000]
         if len(kept) < 10:
             canvas.create_text(w // 2, h // 2, text="No position data",
                                fill="#888888")
@@ -2104,7 +2131,7 @@ class FH6TrackerGUI(tk.Tk):
 
         def polyline(pxz):
             flat = []
-            for x, z in pxz:
+            for x, z, *_ in pxz:
                 px, py = to_canvas(x, z)
                 flat.extend((px, py))
             return flat
@@ -2124,18 +2151,23 @@ class FH6TrackerGUI(tk.Tk):
         groups = laps["laps"] if laps else None
         usable = [g for g in groups if len(g) >= 3] if groups else []
         if not usable:
-            flat = polyline(kept)
-            if len(flat) >= 4:
-                canvas.create_line(*flat, fill="#1f6feb", width=2, smooth=True)
+            # Break at teleports so a pre-race position jump can't streak the
+            # plain (un-lapped) path across the map.
+            for seg in break_teleport_segments(kept):
+                flat = polyline(seg)
+                if len(flat) >= 4:
+                    canvas.create_line(*flat, fill="#1f6feb", width=2, smooth=True)
         else:
             for gi, group in enumerate(groups):
                 if len(group) < 3:
                     continue
                 color = line_analysis.LAP_COLORS[gi % len(line_analysis.LAP_COLORS)]
-                flat = polyline([(samples[i]["pos"][0], samples[i]["pos"][2])
-                                 for i in group])
-                if len(flat) >= 4:
-                    canvas.create_line(*flat, fill=color, width=2, smooth=True)
+                for seg in break_teleport_segments(
+                        [(samples[i]["pos"][0], samples[i]["pos"][2],
+                          float(samples[i].get("t", 0) or 0)) for i in group]):
+                    flat = polyline(seg)
+                    if len(flat) >= 4:
+                        canvas.create_line(*flat, fill=color, width=2, smooth=True)
             lx = w - pad
             for gi, group in enumerate(groups):
                 if len(group) < 3:
@@ -4459,7 +4491,6 @@ class FH6TrackerGUI(tk.Tk):
             items[key + "_fill"] = canvas.create_rectangle(10, y, 10, y + 12, fill=color, outline="")
             items[key + "_val"] = canvas.create_text(150, y - 15, anchor="ne", text="", fill="#eeeeee", font=("Segoe UI", 8, "bold"))
         items["bar_y"] = bar_y
-        items["spark"] = canvas.create_line(196, 122, 322, 122, fill="#58a6ff", width=2)
         return items
 
     def _overlay_set(self, key, text):
@@ -4578,11 +4609,9 @@ class FH6TrackerGUI(tk.Tk):
                 self._overlay_set(key + "_val", "")
                 y = self._overlay_items["bar_y"][key]
                 self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10, y + 12)
-            self._overlay_canvas.coords(self._overlay_items["spark"], 196, 122, 322, 122)
             return
 
         sample = data.get("sample") or {}
-        recent = data.get("recent") or []
         recording = bool(data.get("recording"))
         self._overlay_set("car", (data.get("car_name") or "Unknown")[:26])
         if recording:
@@ -4600,19 +4629,6 @@ class FH6TrackerGUI(tk.Tk):
             self._overlay_set(key + "_val", f"{int(round(value * 100))}%")
             y = self._overlay_items["bar_y"][key]
             self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10 + int(value * 140), y + 12)
-
-        speeds = [s.get("spd", 0) or 0 for s in recent]
-        if len(speeds) >= 2:
-            x0, y0, x1, y1 = 196, 122, 322, 218
-            high = max(60.0, max(speeds))
-            n = len(speeds)
-            pts = []
-            for i, spd in enumerate(speeds):
-                px = x0 + (x1 - x0) * (i / (n - 1))
-                py = y1 - (y1 - y0) * (min(spd, high) / high)
-                pts.append(px)
-                pts.append(py)
-            self._overlay_canvas.coords(self._overlay_items["spark"], *pts)
 
     def _force_popup_scan(self):
         """Triggered by F5 — immediately captures screen and runs OCR for credit popups."""
@@ -4720,13 +4736,19 @@ class FH6TrackerGUI(tk.Tk):
         image = self._grab_credit_image(region=region)
         if image is None:
             return False
-        return self._ocr_and_parse_image(image)
+        return self._ocr_and_parse_image(image, payout=True)
 
-    def _ocr_and_parse_image(self, image):
+    def _ocr_and_parse_image(self, image, payout=False):
         """Run OCR on *image* and check the resulting text for a credit change.
 
         Shared by the payout-region path and the full-screen fallback path.
         Returns True if a credit change was detected and handled, False otherwise.
+
+        When *payout* is True the captured region is the post-race payout banner
+        ("Credits: 150,000"), so the number shown is the reward *earned*, not the
+        running balance.  We record it as a positive gain instead of letting
+        ``detect_credit_change_from_text`` misread it as a balance and compute a
+        (hugely negative) delta against the last balance.
         """
         # Save original image for debug before any upscaling/modification
         self._save_debug_capture(image, "popup_raw")
@@ -4750,7 +4772,13 @@ class FH6TrackerGUI(tk.Tk):
         if not text:
             return False
 
-        change = detect_credit_change_from_text(text, self.last_credit_balance)
+        if payout:
+            amount = parse_credit_balance_from_text(text)
+            if amount is None:
+                amount = parse_balance_number_only(text)
+            change = amount if amount else detect_credit_change_from_text(text, self.last_credit_balance)
+        else:
+            change = detect_credit_change_from_text(text, self.last_credit_balance)
         if change is None or change == 0:
             for line in text.splitlines():
                 line = line.strip()
@@ -4775,6 +4803,15 @@ class FH6TrackerGUI(tk.Tk):
         self._last_ocr_raw_text = text[:80] or text
 
         if change is not None and change != 0:
+            # A popup/payout banner can linger on screen for several OCR cycles.
+            # Without this guard, the same amount would be re-applied every poll
+            # and the session total would silently inflate.  Suppress an exact
+            # repeat of the last recorded change within a short window.
+            now = time.monotonic()
+            last_change = getattr(self, "_last_ocr_change", None)
+            if last_change and last_change[0] == change and now - last_change[1] < 20.0:
+                return False
+            self._last_ocr_change = (change, now)
             if self.last_credit_balance is None:
                 self.last_credit_balance = max(0, self.get_session_credits())
             old_balance = self.last_credit_balance
@@ -5308,7 +5345,13 @@ class FH6TrackerGUI(tk.Tk):
             self._popup_test_var.set(f"OCR error: {exc}")
             return
         summary = text[:200].replace("\n", " | ")
-        change = detect_credit_change_from_text(text)
+        if payout_region is not None:
+            amount = parse_credit_balance_from_text(text)
+            if amount is None:
+                amount = parse_balance_number_only(text)
+            change = amount if amount else detect_credit_change_from_text(text)
+        else:
+            change = detect_credit_change_from_text(text)
         parts = [f"Raw: '{summary}'"]
         if payout_region is not None:
             parts.insert(0, "Using payout region")

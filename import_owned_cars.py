@@ -41,4 +41,5 @@ def save_owned_cars(cars, path=None):
                 os.remove(tmp)
         except OSError:
             pass
-    return target
+        return False
+    return True

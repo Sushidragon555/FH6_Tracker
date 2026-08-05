@@ -265,7 +265,13 @@ def load_owned():
 
 
 def add_owned_car(car_name):
-    """Add ``car_name`` to the owned list. Return True only if it was newly added."""
+    """Add ``car_name`` to the owned list.
+
+    Returns ``True`` only if it was newly added and the list was persisted.
+    The file is written atomically (temp file + ``os.replace``) so a crash
+    mid-write cannot corrupt ``owned_cars.json``; a failed write returns
+    ``False`` instead of raising into the GUI/tracker thread.
+    """
     car_name = (car_name or "").strip()
     if not car_name:
         return False
@@ -273,6 +279,16 @@ def add_owned_car(car_name):
     if car_name in data["owned"]:
         return False
     data["owned"].append(car_name)
-    with open(OWNED_FILE, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=4)
+    tmp = OWNED_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=4)
+        os.replace(tmp, OWNED_FILE)
+    except OSError:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        return False
     return True

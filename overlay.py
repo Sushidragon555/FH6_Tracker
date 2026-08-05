@@ -378,7 +378,31 @@ class OverlayApp:
                 pass
         self.tracker = None
 
+    def _persist_quit_settings(self):
+        """Uncheck the GUI's 'Overlay' checkbox when the overlay is exited.
+
+        The standalone overlay is launched from the GUI with
+        ``race_overlay_enabled`` / ``race_overlay_standalone`` saved as True.
+        If we quit without touching the settings file, the checkbox stays
+        checked and the GUI immediately re-creates the overlay on next launch.
+        """
+        try:
+            path = os.path.join(BASE_DIR, "gui_settings.json")
+            data = {}
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except Exception:
+                data = {}
+            data["race_overlay_enabled"] = False
+            data["race_overlay_standalone"] = False
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=4)
+        except Exception:
+            pass
+
     def _quit(self):
+        self._persist_quit_settings()
         self._stop_tracker()
         try:
             if os.path.exists(LIVE_RACE_FILE):
