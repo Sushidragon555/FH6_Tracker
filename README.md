@@ -27,7 +27,7 @@ I built this project to solve my own headacheto make tracking my garage seamless
 ---#If you wanna send feedback on it, theres a way in settings tab. 
 
 ## Quick Start
-
+_**FYI: Some Cars in collection tab aren't the right year**_
 ### Download & Run (Takes about 2 minutes)
 
 > **No Python required.** The release zip is a ready-to-run app with everything bundled.
