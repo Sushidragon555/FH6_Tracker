@@ -247,8 +247,7 @@ class OverlayApp:
             canvas.create_rectangle(10, y, 150, y + 12, fill="#101010", outline="#3f3f3f")
             items[key + "_fill"] = canvas.create_rectangle(10, y, 10, y + 12, fill=color, outline="")
             items[key + "_val"] = canvas.create_text(150, y - 15, anchor="ne", text="", fill="#eeeeee", font=("Segoe UI", 8, "bold"))
-        items["bar_y"] = bar_y
-        items["spark"] = canvas.create_line(196, 122, 322, 122, fill="#58a6ff", width=2)
+            items["bar_y"] = bar_y
         return items
 
     def _overlay_set(self, key, text):
@@ -297,11 +296,9 @@ class OverlayApp:
                 self._overlay_set(key + "_val", "")
                 y = self._overlay_items["bar_y"][key]
                 self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10, y + 12)
-            self._overlay_canvas.coords(self._overlay_items["spark"], 196, 122, 322, 122)
             return
 
         sample = data.get("sample") or {}
-        recent = data.get("recent") or []
         recording = bool(data.get("recording"))
         self._overlay_set("car", (data.get("car_name") or "Unknown")[:26])
         if recording:
@@ -319,19 +316,6 @@ class OverlayApp:
             self._overlay_set(key + "_val", f"{int(round(value * 100))}%")
             y = self._overlay_items["bar_y"][key]
             self._overlay_canvas.coords(self._overlay_items[key + "_fill"], 10, y, 10 + int(value * 140), y + 12)
-
-        speeds = [s.get("spd", 0) or 0 for s in recent]
-        if len(speeds) >= 2:
-            x0, y0, x1, y1 = 196, 122, 322, 218
-            high = max(60.0, max(speeds))
-            n = len(speeds)
-            pts = []
-            for i, spd in enumerate(speeds):
-                px = x0 + (x1 - x0) * (i / (n - 1))
-                py = y1 - (y1 - y0) * (min(spd, high) / high)
-                pts.append(px)
-                pts.append(py)
-            self._overlay_canvas.coords(self._overlay_items["spark"], *pts)
 
     # ------------------------------------------------------------- placement
     def _place(self):
