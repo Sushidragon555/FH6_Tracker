@@ -2824,9 +2824,18 @@ class FH6TrackerGUI(tk.Tk):
         # lap/where you went wrong is easier to act on than "brake more".
         if race_type not in MANUAL_RACE_TYPES:
             events = analysis.get("events") or []
+            # A mistake on the same corner across laps is a pattern worth
+            # promoting above one-offs, so cluster events by corner first.
+            clusters = line_analysis.group_events_by_corner(events)
+            repeat_clusters = [c for c in clusters if len(c) >= 2]
+            covered = set(id(e) for c in repeat_clusters for e in c)
+            for cluster in repeat_clusters:
+                head, adv = line_analysis.repeat_advice(cluster)
+                tips.append((1, head, adv))
             seen_laps = set()
             added = 0
-            for ev in sorted(events,
+            singles = [e for e in events if id(e) not in covered]
+            for ev in sorted(singles,
                              key=lambda e: e.get("mag", 0) or e.get("speed_mph", 0) or 0,
                              reverse=True):
                 if ev.get("lap") in seen_laps:

@@ -395,6 +395,9 @@ def _find_deviations(groups, min_speed_mph, lateral_m, min_run, merge_gap, kink_
                     j += 1
                 if j - i >= min_run:
                     best = max(range(i, j), key=lambda k: abs(devs[k][0]))
+                    w0 = max(0, best - 10)
+                    w1 = min(n, best + 10)
+                    corner_spd = min(pts[k][3] for k in range (w0, w1))
                     turn_sign = ref_turns[min(seg_idx[best], len(ref_turns) - 1)]
                     events.append({
                         "idx": pts[best][0],
@@ -402,6 +405,7 @@ def _find_deviations(groups, min_speed_mph, lateral_m, min_run, merge_gap, kink_
                         "x": pts[best][1],
                         "z": pts[best][2],
                         "speed_mph": pts[best][3],
+                        "corner_speed_mph": round(corner_spd, 1), 
                         "lap": gi,
                         "lateral_m": abs(devs[best][0]),
                         "mag": abs(devs[best][0]),
@@ -419,13 +423,18 @@ def _find_kinks(groups, min_speed_mph, kink_deg, merge_gap):
     """Single-lap method: sharp heading changes = corner cuts."""
     events = []
     for gi, pts in groups:
+        n = len(pts)
         for i, mag in _kinks_in_lap(pts, min_speed_mph, kink_deg):
+            w0 = max(0, i - 10)
+            w1 = min(n, i + 10)
+            corner_spd = min(pts[k][3] for k in range(w0, w1))
             events.append({
                 "idx": pts[i][0],
                 "t": pts[i][4],
                 "x": pts[i][1],
                 "z": pts[i][2],
                 "speed_mph": pts[i][3],
+                "corner_speed_mph": round(corner_spd, 1),
                 "lap": gi,
                 "lateral_m": 0.0,
                 "mag": mag,
@@ -704,8 +713,14 @@ def corner_advice(ev):
     spd = ev.get("speed_mph", 0) or 0
     lat = ev.get("lateral_m", 0) or 0
     lap = (ev.get("lap", 0) or 0) + 1
+    corner_spd = ev.get("corner_speed_mph") or 0
     if kind in ("cut", "kink"):
-        if spd >= 90:
+        if corner_spd and spd > 0 and corner_spd >= spd * 0.85:
+            head = f"Lap {lap}: cut a corner at {spd:.0f} mph — you never slowed for it."
+            adv = (f"You carried {corner_spd:.0f} mph right through the corner. Brake "
+                   "earlier, in a straight line, so the car has rotated and you can "
+                   "clip the apex instead of shortcutting across it.")
+        elif spd >= 90:
             head = f"Lap {lap}: cut a corner at {spd:.0f} mph."
             adv = ("At that speed a chord across the corner scrubs off more time "
                    "than it saves. Brake 10-15 mph earlier in a straight line, "
@@ -721,6 +736,57 @@ def corner_advice(ev):
                "outside curb. Turn in a touch later, wait for the apex, then "
                "feed throttle so the car is unwinding at the exit.")
     return head, adv
+
+
+def group_events_by_corner(events, same_corner_m=18.0):
+    """Group off-line events that happened at the same corner.
+
+    Events are clustered by position: an event joins the first cluster whose
+    centroid is within ``same_corner_m`` meters. A cluster with more than one
+    event means the same mistake repeated on multiple laps — a pattern that
+    deserves a stronger tip than a one-off (see repeat_advice).
+
+    Returns clusters sorted by size (most-repeated first); each cluster is a
+    list of events sorted by time.
+    """
+    clusters = []
+    for ev in sorted(events, key=lambda e: (e.get("x", 0) or 0,
+                                            e.get("z", 0) or 0)):
+        ex, ez = ev.get("x", 0) or 0, ev.get("z", 0) or 0
+        for c in clusters:
+            cx = sum(e.get("x", 0) or 0 for e in c) / len(c)
+            cz = sum(e.get("z", 0) or 0 for e in c) / len(c)
+            if math.hypot(ex - cx, ez - cz) <= same_corner_m:
+                c.append(ev)
+                break
+        else:
+            clusters.append([ev])
+    for c in clusters:
+        c.sort(key=lambda e: e.get("t", 0) or 0)
+    clusters.sort(key=len, reverse=True)
+    return clusters
+
+
+def repeat_advice(cluster):
+    """Advice for a corner the driver got wrong on multiple laps.
+
+    ``cluster`` is a group of events from group_events_by_corner. Returns
+    (headline, advice). The headline names the pattern; the advice carries the
+    specific fix from the worst event, framed as a habit rather than a fluke.
+    """
+    n = len(cluster)
+    laps = sorted({(e.get("lap", 0) or 0) + 1 for e in cluster})
+    laps_str = ", ".join(str(l) for l in laps)
+    head = f"You got this corner wrong on {n} lap{'s' if n != 1 else ''} (laps {laps_str})."
+    if n >= 3:
+        adv = ("That's a habit, not a fluke. Slow down 10-15 mph into the corner "
+               "and nail the apex once — then repeat that same line every lap. ")
+    else:
+        adv = ("It's a line problem, not bad luck. Brake a touch earlier and "
+               "commit to the same entry angle and apex every lap. ")
+    _, specific = corner_advice(max(cluster,
+                                    key=lambda e: e.get("mag", 0) or 0))
+    return head, adv + specific
 
 
 def crash_advice(crash):
@@ -805,9 +871,13 @@ def make_race(num_full_laps=3, cut_lap=None, dt=0.05):
     """Synthesize a race around the stadium loop.
 
     num_full_laps: full loops after the standing start.
-    cut_lap: which full lap (1-based) takes the BR-corner chord shortcut.
+    cut_lap: which full lap(s) (1-based, int or list) take the BR-corner chord
+             shortcut.
     Returns a list of samples in auto_log format.
     """
+    cut_laps = []
+    if cut_lap is not None:
+        cut_laps = cut_lap if isinstance(cut_lap, (list, tuple)) else [cut_lap]
     samples = []
     t = 0.0
     s = 0.0                                      # arc distance from loop start
@@ -830,8 +900,8 @@ def make_race(num_full_laps=3, cut_lap=None, dt=0.05):
         v = max(v, 0.0)
         x, z = pos[0], pos[1]
 
-        # Corner cut injection: on cut_lap, replace the BR arc with the chord.
-        if cut_lap is not None and lap == cut_lap - 1:
+        # Corner cut injection: on cut_lap(s), replace the BR arc with the chord.
+        if (lap + 1) in cut_laps:
             d = s % _loop_total()
             sx = 2.0 * (200.0 - 40.0)
             arc = math.pi * 40.0 / 2.0
@@ -1022,6 +1092,34 @@ def _main():
         events = find_off_line_events(single_cut, split_laps(single_cut))
         check(">=1 event on cut single lap", len(events) >= 1,
               f"got {len(events)}")
+    except NotImplementedError:
+        print("  SKIP  stub not implemented yet")
+
+    print("== group_events_by_corner + repeat_advice ==")
+    try:
+        rep_race = make_race(num_full_laps=3, cut_lap=[2, 3])
+        rep_laps = split_laps(rep_race)
+        rep_events = find_off_line_events(rep_race, rep_laps)
+        clusters = group_events_by_corner(rep_events)
+        check("2 cuts on the same corner -> one cluster of 2",
+              len(clusters) == 1 and len(clusters[0]) == 2,
+              f"got {len(clusters)} clusters: {[len(c) for c in clusters]}")
+        if clusters and len(clusters[0]) == 2:
+            head, adv = repeat_advice(clusters[0])
+            check("repeat advice names both laps", "laps 2, 3" in head, head)
+            check("2 repeats framed as a line problem",
+                  "line problem" in adv, adv)
+        habit_race = make_race(num_full_laps=4, cut_lap=[2, 3, 4])
+        habit_events = find_off_line_events(habit_race,
+                                            split_laps(habit_race))
+        habit_clusters = group_events_by_corner(habit_events)
+        check("3 cuts on the same corner -> one cluster of 3",
+              len(habit_clusters) == 1 and len(habit_clusters[0]) == 3,
+              f"got {len(habit_clusters)} clusters: {[len(c) for c in habit_clusters]}")
+        if habit_clusters and len(habit_clusters[0]) == 3:
+            _, habit_adv = repeat_advice(habit_clusters[0])
+            check("3 repeats framed as a habit", "habit" in habit_adv, habit_adv)
+        check("empty events -> no clusters", group_events_by_corner([]) == [])
     except NotImplementedError:
         print("  SKIP  stub not implemented yet")
 
