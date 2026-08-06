@@ -45,11 +45,12 @@ except Exception:  # pragma: no cover - optional OCR dependencies
     ImageOps = None
     ImageTk = None
 
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
 # Only these machine names get the dev-only tools (View Feedback, webhook field,
 # Capture Tab Screenshots, --capture-screenshots CLI). End users never see them.
 DEV_HOSTS = ["GAMINGPC"]
+IS_DEV_HOST = os.environ.get("COMPUTERNAME", "") in DEV_HOSTS
 
 # Paste your Discord webhook URL here to let every user send feedback with one
 # click (no GitHub login required). Create one at: Server Settings -> Integrations
@@ -925,13 +926,14 @@ class FH6TrackerGUI(tk.Tk):
         self.methods_tab = ttk.Frame(self.notebook)
         self.races_tab = ttk.Frame(self.notebook)
         self.recommendations_tab = ttk.Frame(self.notebook)
-        self.screenshots_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.garage_tab, text="Collection")
         self.notebook.add(self.live_tab, text="Live Data")
         self.notebook.add(self.methods_tab, text="Methods")
         self.notebook.add(self.races_tab, text="Race Analysis")
         self.notebook.add(self.recommendations_tab, text="Recommendations")
-        self.notebook.add(self.screenshots_tab, text="Screenshots")
+        if IS_DEV_HOST:
+            self.screenshots_tab = ttk.Frame(self.notebook)
+            self.notebook.add(self.screenshots_tab, text="Screenshots")
         self.notebook.add(self.settings_tab, text="Settings")
         self.notebook.add(self.logs_tab, text="Logs")
 
@@ -940,7 +942,8 @@ class FH6TrackerGUI(tk.Tk):
         self.build_methods_tab()
         self.build_races_tab()
         self.build_recommendations_tab()
-        self.build_screenshots_tab()
+        if IS_DEV_HOST:
+            self.build_screenshots_tab()
         self.build_settings_tab()
         self.build_logs_tab()
         self.populate_progress_manufacturers()
@@ -3885,8 +3888,9 @@ class FH6TrackerGUI(tk.Tk):
             self.methods_tab: (self.refresh_methods_panel, "_last_methods_refresh_time", 10.0),
             self.races_tab: (self.refresh_races_panel, "_last_races_refresh_time", 10.0),
             self.recommendations_tab: (self.refresh_recommendations, "_last_recs_refresh_time", 10.0),
-            self.screenshots_tab: (self.refresh_screenshots_panel, "_last_screenshots_refresh_time", 2.0),
         }
+        if IS_DEV_HOST:
+            throttled_tabs[self.screenshots_tab] = (self.refresh_screenshots_panel, "_last_screenshots_refresh_time", 2.0)
         try:
             selected = self.notebook.select()
             # Re-render race charts if they were deferred (tab wasn't mapped yet)
