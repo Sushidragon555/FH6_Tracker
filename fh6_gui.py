@@ -1443,17 +1443,20 @@ class FH6TrackerGUI(tk.Tk):
         self._race_type_source = None      # start_time of the race auto-detect ran on
         self._race_type_overridden = False  # True once the user manually picks a type
         self._race_type_was_auto_detected = False  # True once auto-detect locked a result
+        self._race_type_locked = None      # manual Drift/Drag pick: sticky for the session
         self._selected_race_fpath = None   # saved race file backing the analysis panel
         self._race_example_recorded = set()  # (start_time, type) already persisted/learned
         ttk.Label(race_type_frame, text="(Drag Racing & Drift are manual only)", font=("Segoe UI", 8, "italic"), foreground="#888888").pack(side="left", padx=(4, 0))
         ttk.Label(race_type_frame, text="  Show charts:").pack(side="left", padx=(8, 2))
         self._chart_toggle_vars = {}
-        chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear"), ("path", "Path")]
+        self._chart_toggle_cbs = {}
+        chart_toggle_keys = [("spd", "Speed"), ("inputs", "Inputs"), ("steer", "Steer"), ("rpm", "RPM"), ("pwr", "Power"), ("gear", "Gear"), ("yaw", "Yaw"), ("path", "Path")]
         for key, label in chart_toggle_keys:
             var = tk.BooleanVar(value=True)
             self._chart_toggle_vars[key] = var
             cb = ttk.Checkbutton(race_type_frame, text=label, variable=var, command=self._rerender_race_charts)
             cb.pack(side="left", padx=(1, 0))
+            self._chart_toggle_cbs[key] = cb
 
         chart_outer_frame = ttk.Frame(right)
         chart_outer_frame.grid(row=4, column=0, sticky="nsew")
@@ -1479,6 +1482,7 @@ class FH6TrackerGUI(tk.Tk):
         chart_frame.rowconfigure(4, minsize=chart_heights.get("race_power", 100))
         chart_frame.rowconfigure(5, minsize=chart_heights.get("race_gear", 80))
         chart_frame.rowconfigure(6, minsize=chart_heights.get("race_path", 160))
+        chart_frame.rowconfigure(7, minsize=chart_heights.get("race_yaw", 90))
         self._chart_frame = chart_frame
         self._chart_canvas = chart_canvas
 
@@ -1510,6 +1514,8 @@ class FH6TrackerGUI(tk.Tk):
         self._race_canvas_path.bind("<ButtonPress-1>", self._path_pan_start)
         self._race_canvas_path.bind("<B1-Motion>", self._path_pan)
         self._race_canvas_path.bind("<Double-Button-1>", self._path_reset)
+        self._race_canvas_yaw = tk.Canvas(chart_frame, height=chart_heights.get("race_yaw", 90), highlightthickness=0)
+        self._race_canvas_yaw.grid(row=7, column=0, sticky="ew", pady=(0, 4))
 
         # Re-render charts when the frame is resized (e.g. window resize)
         self._chart_resize_after_id = None
@@ -1619,6 +1625,12 @@ class FH6TrackerGUI(tk.Tk):
         """User manually picked a race type — lock it in so auto-detect can't
         overwrite it on the next re-render."""
         self._race_type_overridden = True
+        picked = self._race_type_var.get()
+        # Drift/Drag are manual-only: once picked, keep them for every race in
+        # the session so auto-detect can't flip a drift session back to Road
+        # Racing. Picking any other type releases the lock and re-enables
+        # auto-detection.
+        self._race_type_locked = picked if picked in MANUAL_RACE_TYPES else None
         self._rerender_race_charts()
 
     def _persist_race_type(self, fpath, race_type):
@@ -1938,7 +1950,15 @@ class FH6TrackerGUI(tk.Tk):
         if start_key != getattr(self, "_path_view_race", None):
             self._path_view_race = start_key
             self._path_view = None
-        if stored_type:
+        locked_type = getattr(self, "_race_type_locked", None)
+        if locked_type:
+            # User picked a manual type (Drift/Drag) for this session: it wins
+            # over stored types and auto-detection alike, for every race.
+            race_type = locked_type
+            if hasattr(self, "_race_type_var"):
+                self._race_type_var.set(locked_type)
+            self._race_type_source = start_key
+        elif stored_type:
             # A previously classified race: trust the stored type instead of
             # re-guessing it on every open.
             if hasattr(self, "_race_type_var"):
@@ -1983,41 +2003,39 @@ class FH6TrackerGUI(tk.Tk):
                     _save_type_example(features, race_type)
 
         toggle = getattr(self, "_chart_toggle_vars", {})
-        if "spd" not in toggle or toggle["spd"].get():
-            self._race_canvas_speed.grid()
-            self._draw_speed_chart(samples)
+        cbs = getattr(self, "_chart_toggle_cbs", {})
+        is_drift = race_type == "Drift"
+
+        def _chart(key, canvas, enabled, draw):
+            var = toggle.get(key)
+            if enabled and (var is None or var.get()):
+                canvas.grid()
+                draw()
+            else:
+                canvas.grid_remove()
+
+        # Drift gets its own chart set: steer/handbrake combo + yaw rate.
+        # Inputs/RPM/Power/Gear are meaningless mid-slide, so disable them.
+        for key in ("inputs", "rpm", "pwr", "gear"):
+            cb = cbs.get(key)
+            if cb is not None:
+                cb.config(state="disabled" if is_drift else "normal")
+        yaw_cb = cbs.get("yaw")
+        if yaw_cb is not None:
+            yaw_cb.config(state="normal" if is_drift else "disabled")
+
+        _chart("spd", self._race_canvas_speed, True, lambda: self._draw_speed_chart(samples))
+        if is_drift:
+            _chart("steer", self._race_canvas_steer, True,
+                   lambda: self._draw_steering_chart(samples, include_handbrake=True))
         else:
-            self._race_canvas_speed.grid_remove()
-        if "inputs" not in toggle or toggle["inputs"].get():
-            self._race_canvas_inputs.grid()
-            self._draw_inputs_chart(samples)
-        else:
-            self._race_canvas_inputs.grid_remove()
-        if "steer" not in toggle or toggle["steer"].get():
-            self._race_canvas_steer.grid()
-            self._draw_steering_chart(samples)
-        else:
-            self._race_canvas_steer.grid_remove()
-        if "rpm" not in toggle or toggle["rpm"].get():
-            self._race_canvas_rpm.grid()
-            self._draw_rpm_chart(samples)
-        else:
-            self._race_canvas_rpm.grid_remove()
-        if "pwr" not in toggle or toggle["pwr"].get():
-            self._race_canvas_power.grid()
-            self._draw_power_chart(samples)
-        else:
-            self._race_canvas_power.grid_remove()
-        if "gear" not in toggle or toggle["gear"].get():
-            self._race_canvas_gear.grid()
-            self._draw_gear_chart(samples)
-        else:
-            self._race_canvas_gear.grid_remove()
-        if "path" not in toggle or toggle["path"].get():
-            self._race_canvas_path.grid()
-            self._draw_path_chart(samples, race_type)
-        else:
-            self._race_canvas_path.grid_remove()
+            _chart("inputs", self._race_canvas_inputs, True, lambda: self._draw_inputs_chart(samples))
+            _chart("steer", self._race_canvas_steer, True, lambda: self._draw_steering_chart(samples))
+        _chart("rpm", self._race_canvas_rpm, not is_drift, lambda: self._draw_rpm_chart(samples))
+        _chart("pwr", self._race_canvas_power, not is_drift, lambda: self._draw_power_chart(samples))
+        _chart("gear", self._race_canvas_gear, not is_drift, lambda: self._draw_gear_chart(samples))
+        _chart("yaw", self._race_canvas_yaw, is_drift, lambda: self._draw_yaw_chart(samples))
+        _chart("path", self._race_canvas_path, True, lambda: self._draw_path_chart(samples, race_type))
         analysis = self._analyze_race(samples, race_type)
         self._compute_race_stats(samples, dur, race_type, analysis)
         self._generate_driving_tips(samples, dur, race_type, analysis)
@@ -2078,7 +2096,19 @@ class FH6TrackerGUI(tk.Tk):
             title="Throttle / Brake",
         )
 
-    def _draw_steering_chart(self, samples):
+    def _draw_steering_chart(self, samples, include_handbrake=False):
+        if include_handbrake:
+            # Drift mode: steer angle + handbrake share one axis so you can see
+            # the flick (steer) that breaks traction and the handbrake tap that
+            # kicks the rear out.
+            self._draw_chart(
+                self._race_canvas_steer, samples,
+                fields=["str", "hbrk"], colors=["#b06000", "#d29922"],
+                labels=["Steer", "Handbrake"],
+                y_min=-1.0, y_max=1.0,
+                title="Steer / Handbrake",
+            )
+            return
         max_steer = max((abs(s.get("str", 0)) for s in samples), default=1) * 1.2
         max_steer = max(max_steer, 0.5)
         self._draw_chart(
@@ -2086,6 +2116,49 @@ class FH6TrackerGUI(tk.Tk):
             fields=["str"], colors=["#b06000"], labels=["Steering"],
             y_min=-max_steer, y_max=max_steer,
             title="Steering",
+        )
+
+    def _draw_yaw_chart(self, samples):
+        """Rotation rate of the travel heading in deg/s, from consecutive
+        positions — the drift chart. A sustained high band is a slide (the car
+        is rotating faster than it travels); brief spikes are just corners.
+        Uses the same heading math as line_analysis.detect_drift_segments.
+        """
+        n = len(samples)
+        chart_data = []
+        if n >= 5:
+            xs = [0.0] * n
+            zs = [0.0] * n
+            for i, s in enumerate(samples):
+                p = s.get("pos")
+                if isinstance(p, (list, tuple)) and len(p) >= 3:
+                    xs[i], zs[i] = p[0], p[2]
+            ts = [s.get("t", 0) or 0 for s in samples]
+            if (ts[-1] or 0) <= (ts[0] or 0):
+                ts = [i / 20.0 for i in range(n)]
+            heading = [None] * n
+            for i in range(2, n - 2):
+                dx = xs[i + 2] - xs[i - 2]
+                dz = zs[i + 2] - zs[i - 2]
+                if abs(dx) > 1e-9 or abs(dz) > 1e-9:
+                    heading[i] = math.atan2(dz, dx)
+            series = [0.0] * n
+            for i in range(2, n - 2):
+                if heading[i + 2] is None or heading[i - 2] is None:
+                    continue
+                d = (heading[i + 2] - heading[i - 2] + math.pi) % (2 * math.pi) - math.pi
+                dt = (ts[i + 2] - ts[i - 2]) or 0.4
+                series[i] = abs(math.degrees(d)) / dt
+            for i, s in enumerate(samples):
+                c = dict(s)
+                c["yaw_deg_s"] = round(series[i], 1)
+                chart_data.append(c)
+        peak = max((s.get("yaw_deg_s", 0) for s in chart_data), default=0)
+        self._draw_chart(
+            self._race_canvas_yaw, chart_data,
+            fields=["yaw_deg_s"], colors=["#06b6d4"], labels=["deg/s"],
+            y_min=0, y_max=max(peak * 1.1, 50),
+            title="Yaw rate (deg/s)",
         )
 
     def _draw_rpm_chart(self, samples):
