@@ -787,6 +787,12 @@ class FH6TrackerGUI(tk.Tk):
         self._last_ocr_change = None
         self._last_ocr_scan_time = 0
         self._credit_rate_points = []
+        self._race_analysis_cache = (None, None)
+        self._path_view = None
+        self._path_view_race = None
+        self._path_transform = None
+        self._path_full_bounds = None
+        self._path_pan_start_xy = None
         self.forza_running_prev = None
         self._forza_running_cache = False
         self._forza_process_check_time = 0.0
@@ -1500,6 +1506,10 @@ class FH6TrackerGUI(tk.Tk):
         self._race_canvas_gear.grid(row=5, column=0, sticky="ew", pady=(0, 4))
         self._race_canvas_path = tk.Canvas(chart_frame, height=chart_heights.get("race_path", 160), highlightthickness=0)
         self._race_canvas_path.grid(row=6, column=0, sticky="ew")
+        self._race_canvas_path.bind("<MouseWheel>", self._path_zoom)
+        self._race_canvas_path.bind("<ButtonPress-1>", self._path_pan_start)
+        self._race_canvas_path.bind("<B1-Motion>", self._path_pan)
+        self._race_canvas_path.bind("<Double-Button-1>", self._path_reset)
 
         # Re-render charts when the frame is resized (e.g. window resize)
         self._chart_resize_after_id = None
@@ -1872,6 +1882,41 @@ class FH6TrackerGUI(tk.Tk):
             return best_type
         return None
 
+    def _analyze_race(self, samples, race_type="Road Racing"):
+        """Compute lap splits, off-line events and crashes once per data snapshot.
+
+        All three consumers (path chart, performance breakdown, driving tips)
+        used to run split_laps/find_off_line_events independently — 2-3x the
+        work per render, which is what made live chart updates lag. Results are
+        cached on (sample count, last sample time, race type) so a live poll
+        that hasn't grown since the last one reuses the previous analysis.
+        """
+        if not samples:
+            return {"laps": None, "events": None, "crashes": None}
+        key = (len(samples), round(samples[-1].get("t", 0) or 0, 2), race_type)
+        if self._race_analysis_cache and self._race_analysis_cache[0] == key:
+            return self._race_analysis_cache[1]
+        laps = None
+        if race_type not in MANUAL_RACE_TYPES:
+            try:
+                laps = line_analysis.split_laps(samples)
+            except Exception:
+                laps = None
+        events = None
+        crashes = None
+        if laps is not None:
+            try:
+                events = line_analysis.find_off_line_events(samples, laps)
+            except Exception:
+                events = None
+        try:
+            crashes = line_analysis.detect_crashes(samples, laps)
+        except Exception:
+            crashes = None
+        result = {"laps": laps, "events": events, "crashes": crashes}
+        self._race_analysis_cache = (key, result)
+        return result
+
     def _render_race_analysis(self, data):
         car = data.get("car_name", "Unknown")
         dur = data.get("duration_seconds", 0)
@@ -1888,6 +1933,11 @@ class FH6TrackerGUI(tk.Tk):
         start_key = data.get("start_time", "")
         features = self._extract_race_features(samples, dur)
         stored_type = data.get("race_type") or None
+        # Reset the path chart zoom/pan when the race being viewed changes
+        # (start_time is unique per recording).
+        if start_key != getattr(self, "_path_view_race", None):
+            self._path_view_race = start_key
+            self._path_view = None
         if stored_type:
             # A previously classified race: trust the stored type instead of
             # re-guessing it on every open.
@@ -1968,8 +2018,9 @@ class FH6TrackerGUI(tk.Tk):
             self._draw_path_chart(samples, race_type)
         else:
             self._race_canvas_path.grid_remove()
-        self._compute_race_stats(samples, dur, race_type)
-        self._generate_driving_tips(samples, dur, race_type)
+        analysis = self._analyze_race(samples, race_type)
+        self._compute_race_stats(samples, dur, race_type, analysis)
+        self._generate_driving_tips(samples, dur, race_type, analysis)
 
     def _draw_chart(self, canvas, data, fields, colors, labels, y_min=0.0, y_max=1.0, title=""):
         canvas.delete("all")
@@ -2064,21 +2115,26 @@ class FH6TrackerGUI(tk.Tk):
             title="Gear",
         )
 
-    def _draw_path_chart(self, samples, race_type="Road Racing"):
+    def _draw_path_chart(self, samples, race_type="Road Racing", analysis=None):
         """Draw a top-down trace of the driven line from recorded positions.
 
         Uses X/Z (Forza's ground plane; Y is up). Points are filtered to those
         near the race's median position so a teleport/glitch sample can't blow
         out the scaling. When the position-return lap split finds multiple
         laps, each lap is drawn in its own color with a legend and a white
-        start/finish marker; detected off-line events (corner cuts/wide exits)
-        are drawn as red X markers. If the game sends garbage (e.g. unverified
-        offset or old races without position data), this shows a friendly
-        placeholder. The off-line extras silently disable until
-        line_analysis.find_off_line_events is implemented.
+        start/finish marker. Off-line events (corner cuts/wide exits) are red
+        X markers; crashes are orange diamonds. If the game sends garbage
+        (e.g. unverified offset or old races without position data), this
+        shows a friendly placeholder.
+
+        Interactive viewport: mouse wheel zooms around the cursor, left-drag
+        pans, double-click resets to the auto-fit view. ``analysis`` comes
+        from ``_analyze_race`` so lap splits / events / crashes are only
+        computed once per render.
         """
         canvas = self._race_canvas_path
         canvas.delete("all")
+        self._path_chart_data = (samples, race_type)
         w = canvas.winfo_width()
         h = canvas.winfo_height()
         if w < 50 or h < 50:
@@ -2109,10 +2165,19 @@ class FH6TrackerGUI(tk.Tk):
             canvas.create_text(w // 2, h // 2, text="No position data",
                                fill="#888888")
             return
-        min_x = min(p[0] for p in kept)
-        max_x = max(p[0] for p in kept)
-        min_z = min(p[1] for p in kept)
-        max_z = max(p[1] for p in kept)
+        # Full data extent is remembered so zoom/pan can be clamped to it.
+        self._path_full_bounds = (
+            min(p[0] for p in kept), max(p[0] for p in kept),
+            min(p[1] for p in kept), max(p[1] for p in kept),
+        )
+        if self._path_view:
+            min_x, max_x, min_z, max_z = (
+                self._path_view["min_x"], self._path_view["max_x"],
+                self._path_view["min_z"], self._path_view["max_z"],
+            )
+        else:
+            min_x, max_x = self._path_full_bounds[0], self._path_full_bounds[1]
+            min_z, max_z = self._path_full_bounds[2], self._path_full_bounds[3]
         span_x = max_x - min_x
         span_z = max_z - min_z
         if span_x < 0.5 and span_z < 0.5:
@@ -2124,6 +2189,12 @@ class FH6TrackerGUI(tk.Tk):
         draw_h = span_z * scale
         off_x = pad + (cw - draw_w) / 2
         off_y = pad + (ch - draw_h) / 2
+        # Remember the transform so the zoom/pan handlers can convert mouse
+        # coordinates back to world coordinates between redraws.
+        self._path_transform = {
+            "scale": scale, "off_x": off_x, "off_y": off_y,
+            "min_x": min_x, "max_z": max_z,
+        }
 
         def to_canvas(x, z):
             return (off_x + (x - min_x) * scale,
@@ -2136,17 +2207,13 @@ class FH6TrackerGUI(tk.Tk):
                 flat.extend((px, py))
             return flat
 
-        # Lap split + off-line events. NotImplementedError (stub not written
-        # yet) disables the per-lap extras but keeps the plain path chart.
-        # Drift/Drag (manual-only types) skip the extras entirely: a drift is
-        # deliberately off the racing line, and drag cars don't lap.
-        laps = line_analysis.split_laps(samples) if race_type not in MANUAL_RACE_TYPES else None
-        events = None
-        if laps is not None:
-            try:
-                events = line_analysis.find_off_line_events(samples, laps)
-            except NotImplementedError:
-                events = None
+        # Lap split + off-line events + crashes. Drift/Drag (manual-only
+        # types) skip the lap extras entirely: a drift is deliberately off the
+        # racing line, and drag cars don't lap.
+        analysis = analysis or self._analyze_race(samples, race_type)
+        laps = analysis.get("laps") if race_type not in MANUAL_RACE_TYPES else None
+        events = analysis.get("events") or []
+        crashes = analysis.get("crashes") or []
 
         groups = laps["laps"] if laps else None
         usable = [g for g in groups if len(g) >= 3] if groups else []
@@ -2186,15 +2253,21 @@ class FH6TrackerGUI(tk.Tk):
                 canvas.create_rectangle(px - 3, py - 3, px + 3, py + 3,
                                         fill="#ffffff", outline="")
 
-        if events:
-            for ev in events:
-                ex, ey = to_canvas(ev["x"], ev["z"])
-                canvas.create_line(ex - 4, ey - 4, ex + 4, ey + 4,
-                                   fill="#f85149", width=3)
-                canvas.create_line(ex - 4, ey + 4, ex + 4, ey - 4,
-                                   fill="#f85149", width=3)
+        for ev in events:
+            ex, ey = to_canvas(ev["x"], ev["z"])
+            canvas.create_line(ex - 4, ey - 4, ex + 4, ey + 4,
+                               fill="#f85149", width=3)
+            canvas.create_line(ex - 4, ey + 4, ex + 4, ey - 4,
+                               fill="#f85149", width=3)
+        for crash in crashes:
+            if crash.get("x") is None or crash.get("z") is None:
+                continue
+            cx2, cy2 = to_canvas(crash["x"], crash["z"])
+            canvas.create_polygon(cx2, cy2 - 5, cx2 + 5, cy2, cx2, cy2 + 5,
+                                  cx2 - 5, cy2, fill="#f29900", outline="")
 
-        canvas.create_text(pad, pad - 4, text="Path (top-down X/Z)",
+        canvas.create_text(pad, pad - 4,
+                           text="Path (top-down X/Z)  •  wheel=zoom  drag=pan  double-click=reset",
                            anchor="nw", fill="#555555", font=("Segoe UI", 8))
         if kept:
             start_x, start_y = to_canvas(kept[0][0], kept[0][1])
@@ -2203,6 +2276,96 @@ class FH6TrackerGUI(tk.Tk):
             end_x, end_y = to_canvas(kept[-1][0], kept[-1][1])
             canvas.create_oval(end_x - 3, end_y - 3, end_x + 3, end_y + 3,
                                fill="#c5221f", outline="")
+
+    # ----------------------------------------------------------------- path viewport
+    def _path_zoom(self, event):
+        """Mouse-wheel zoom on the Path chart, anchored at the cursor."""
+        t = getattr(self, "_path_transform", None)
+        if not t:
+            return
+        view = self._path_view
+        if not view:
+            # First zoom: start from the auto-fit extent.
+            full = getattr(self, "_path_full_bounds", None)
+            if not full:
+                return
+            view = {"min_x": full[0], "max_x": full[1],
+                    "min_z": full[2], "max_z": full[3]}
+        factor = 0.8 if event.delta > 0 else 1.25
+        canvas = self._race_canvas_path
+        try:
+            cx = canvas.canvasx(event.x)
+            cy = canvas.canvasy(event.y)
+        except Exception:
+            return
+        scale = t["scale"] or 1.0
+        wx = t["min_x"] + (cx - t["off_x"]) / scale
+        wz = t["max_z"] - (cy - t["off_y"]) / scale
+        span_x = view["max_x"] - view["min_x"]
+        span_z = view["max_z"] - view["min_z"]
+        fx = (wx - view["min_x"]) / span_x if span_x else 0.5
+        fz = (wz - view["min_z"]) / span_z if span_z else 0.5
+        new_x = span_x * factor
+        new_z = span_z * factor
+        view = self._clamp_path_view({
+            "min_x": wx - fx * new_x,
+            "max_x": wx - fx * new_x + new_x,
+            "min_z": wz - fz * new_z,
+            "max_z": wz - fz * new_z + new_z,
+        })
+        self._path_view = view
+        self._redraw_path_chart()
+
+    def _path_pan_start(self, event):
+        self._path_pan_start_xy = (event.x, event.y)
+
+    def _path_pan(self, event):
+        if not self._path_pan_start_xy or not self._path_view:
+            return
+        t = getattr(self, "_path_transform", None)
+        if not t:
+            return
+        dx = event.x - self._path_pan_start_xy[0]
+        dy = event.y - self._path_pan_start_xy[1]
+        self._path_pan_start_xy = (event.x, event.y)
+        scale = t["scale"] or 1.0
+        view = self._path_view
+        view = self._clamp_path_view({
+            "min_x": view["min_x"] - dx / scale,
+            "max_x": view["max_x"] - dx / scale,
+            "min_z": view["min_z"] + dy / scale,
+            "max_z": view["max_z"] + dy / scale,
+        })
+        if view is None:
+            self._path_view = None
+        else:
+            self._path_view = view
+        self._redraw_path_chart()
+
+    def _path_reset(self, _event=None):
+        self._path_view = None
+        self._redraw_path_chart()
+
+    def _clamp_path_view(self, view):
+        """Keep a zoomed/panned viewport inside (plus a 10% slack) the data."""
+        full = getattr(self, "_path_full_bounds", None)
+        if not full:
+            return view
+        fx0, fx1, fz0, fz1 = full
+        slack_x = (fx1 - fx0) * 0.1
+        slack_z = (fz1 - fz0) * 0.1
+        min_x = max(fx0 - slack_x, view["min_x"])
+        max_x = min(fx1 + slack_x, view["max_x"])
+        min_z = max(fz0 - slack_z, view["min_z"])
+        max_z = min(fz1 + slack_z, view["max_z"])
+        if min_x >= max_x or min_z >= max_z:
+            return None
+        return {"min_x": min_x, "max_x": max_x, "min_z": min_z, "max_z": max_z}
+
+    def _redraw_path_chart(self):
+        """Re-render the Path chart with the current viewport (zoom/pan)."""
+        if getattr(self, "_path_chart_data", None) is not None:
+            self._draw_path_chart(self._path_chart_data[0], self._path_chart_data[1])
 
     def _rerender_race_charts(self):
         if self._live_chart_active and self._live_chart_data:
@@ -2473,7 +2636,7 @@ class FH6TrackerGUI(tk.Tk):
             parts.insert(0, f"Tough race. Score: {grade_score}/100 — the tips below will help a lot.")
         return " ".join(parts)
 
-    def _generate_performance_breakdown(self, samples, duration, race_type="Road Racing"):
+    def _generate_performance_breakdown(self, samples, duration, race_type="Road Racing", analysis=None):
         """Build a bullet-point performance breakdown with color ratings."""
         if len(samples) < 10:
             return [("Not enough data for a detailed breakdown.", "#888888")]
@@ -2489,7 +2652,7 @@ class FH6TrackerGUI(tk.Tk):
         brake_overlap = sum(1 for i in range(len(throttles)) if throttles[i] > 0.3 and brakes[i] > 0.3) / max(len(throttles), 1) * 100
         smoothness = sum(abs(steers[i] - steers[i - 1]) for i in range(1, len(steers))) / len(steers)
         handbrake_pct = sum(1 for h in hbrakes if h > 0.1) / len(hbrakes) * 100
-
+        analysis = analysis or self._analyze_race(samples, race_type)
         if race_type == "Drift":
             # Drift flips the usual ratings: handbrake, steering angle and
             # throttle modulation are GOOD things here, and the line-discipline
@@ -2514,6 +2677,11 @@ class FH6TrackerGUI(tk.Tk):
                 avg_dur = sum(durations) / len(durations)
                 color = "#137333" if avg_dur >= 1.5 else "#b06000"
                 lines.append((f"Drift slides: {len(drift)}  —  longest {longest:.1f}s, avg {avg_dur:.1f}s", color))
+            crashes = (analysis or {}).get("crashes") or []
+            if crashes:
+                worst = max(crashes, key=lambda c: c.get("speed_before_mph", 0) or 0)
+                color = "#f29900" if len(crashes) == 1 else "#c5221f"
+                lines.append((f"Crashes: {len(crashes)} (worst at {worst['speed_before_mph']:.0f} MPH)", color))
             return lines
 
         lines = []
@@ -2532,11 +2700,7 @@ class FH6TrackerGUI(tk.Tk):
             lines.append((f"Shifts: {shift_data['count']} upshifts, avg at {shift_data['avg_rpm']:.0f} RPM  —  {sh_label}", sh_color))
 
         if race_type not in MANUAL_RACE_TYPES:
-            laps = line_analysis.split_laps(samples)
-            try:
-                events = line_analysis.find_off_line_events(samples, laps)
-            except NotImplementedError:
-                events = None
+            events = analysis.get("events")
             if events is not None:
                 cuts = sum(1 for e in events if e["kind"] in ("cut", "kink"))
                 wide = len(events) - cuts
@@ -2553,10 +2717,15 @@ class FH6TrackerGUI(tk.Tk):
                     lines.append((f"Line discipline: {label}  —  see Path chart", color))
                 else:
                     lines.append(("Line discipline: clean line all race", "#137333"))
+        crashes = analysis.get("crashes") or []
+        if crashes and race_type != "Drag Racing":
+            worst = max(crashes, key=lambda c: c.get("speed_before_mph", 0) or 0)
+            color = "#f29900" if len(crashes) == 1 else "#c5221f"
+            lines.append((f"Crashes: {len(crashes)} (worst at {worst['speed_before_mph']:.0f} MPH)", color))
 
         return lines
 
-    def _compute_race_stats(self, samples, duration, race_type="Road Racing"):
+    def _compute_race_stats(self, samples, duration, race_type="Road Racing", analysis=None):
         if not samples:
             self._race_stats_var.set("No data")
             self._race_grade_var.set("")
@@ -2594,7 +2763,7 @@ class FH6TrackerGUI(tk.Tk):
         summary = self._compute_race_summary(samples, duration, grade_score, grade_letter)
         self._race_summary_var.set(summary)
 
-        breakdown_lines = self._generate_performance_breakdown(samples, duration, race_type)
+        breakdown_lines = self._generate_performance_breakdown(samples, duration, race_type, analysis)
         breakdown_text = "\n".join(f"  {line}" for line, _ in breakdown_lines)
         self._race_breakdown_var.set(breakdown_text)
 
@@ -2633,11 +2802,12 @@ class FH6TrackerGUI(tk.Tk):
             )
         self._race_stats_var.set(stats)
 
-    def _generate_driving_tips(self, samples, duration, race_type="Road Racing"):
+    def _generate_driving_tips(self, samples, duration, race_type="Road Racing", analysis=None):
         if not samples or len(samples) < 20:
             self._race_tips_var.set("Not enough data for tips — need a longer race for meaningful analysis.")
             return
 
+        analysis = analysis or self._analyze_race(samples, race_type)
         tips = []
         brakes = [s.get("brk", 0) for s in samples]
         throttles = [s.get("thr", 0) for s in samples]
@@ -2648,6 +2818,30 @@ class FH6TrackerGUI(tk.Tk):
         hbrakes = [s.get("hbrk", 0) for s in samples]
         max_speed = max(speeds)
         avg_speed = sum(speeds) / len(speeds)
+
+        # --- Corner + crash feedback (shared across all racing types) ---
+        # Specific events beat generic averages: a tip that says exactly which
+        # lap/where you went wrong is easier to act on than "brake more".
+        if race_type not in MANUAL_RACE_TYPES:
+            events = analysis.get("events") or []
+            seen_laps = set()
+            added = 0
+            for ev in sorted(events,
+                             key=lambda e: e.get("mag", 0) or e.get("speed_mph", 0) or 0,
+                             reverse=True):
+                if ev.get("lap") in seen_laps:
+                    continue
+                seen_laps.add(ev.get("lap"))
+                head, adv = line_analysis.corner_advice(ev)
+                tips.append((1, head, adv))
+                added += 1
+                if added >= 2:
+                    break
+        crashes = analysis.get("crashes") or []
+        if crashes and race_type != "Drag Racing":
+            worst = max(crashes, key=lambda c: c.get("speed_before_mph", 0) or 0)
+            head, adv = line_analysis.crash_advice(worst)
+            tips.append((1, head, adv))
 
         if race_type == "Dirt Racing":
             braking_pct = sum(1 for b in brakes if b > 0.1) / len(brakes) * 100
@@ -2846,32 +3040,6 @@ class FH6TrackerGUI(tk.Tk):
                 tips.append((2, f"Average speed is only {avg_speed:.0f} MPH despite hitting {max_speed:.0f} MPH.",
                     "Big gap between avg and top speed suggests you're over-slowing for corners. "
                     "Focus on carrying more speed through turns rather than stopping and accelerating."))
-
-            laps = line_analysis.split_laps(samples)
-            try:
-                events = line_analysis.find_off_line_events(samples, laps)
-            except NotImplementedError:
-                events = None
-            if events:
-                cuts = [e for e in events if e["kind"] in ("cut", "kink")]
-                wide = [e for e in events if e["kind"] == "wide"]
-                if len(cuts) >= 2:
-                    spots = ", ".join(f"@{e['speed_mph']:.0f}mph" for e in cuts[:3])
-                    tips.append((2, f"You cut {len(cuts)} corners (fastest at {spots}).",
-                        "A corner cut shaves distance but scrubs speed and often "
-                        "loses more time than it saves. Rejoin the racing line at "
-                        "the apex — hold the wheel steady through the arc instead "
-                        "of snapping across the corner."))
-                elif cuts:
-                    tips.append((3, "You cut a corner mid-race.",
-                        "Find the apex on the Path chart (red marker) — aim to "
-                        "clip it rather than drive a chord across the corner. "
-                        "Cleaner arcs carry more exit speed."))
-                if wide:
-                    tips.append((3, f"Wide exit on {len(wide)} corner(s).",
-                        "Running wide onto the outside curb wastes the exit "
-                        "straight. Turn in a touch later so the car is unwinding "
-                        "and pointing down the straight at the exit."))
 
             if not tips:
                 tips.append((0, "Your driving looks solid!",

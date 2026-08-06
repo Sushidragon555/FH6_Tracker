@@ -218,6 +218,16 @@ def _point_seg_signed(px, pz, poly):
     return math.sqrt(best_d2), best_side
 
 
+def _point_seg_signed_window(px, pz, poly, seg_idx, window=4):
+    """Signed distance to the reference polyline restricted to a small window
+    of segments around ``seg_idx``. ``poly`` entries are ``(idx, x, z, spd, t)``.
+    Used with arc-length alignment so each query point only tests ~2*window+2
+    segments instead of the whole reference (O(n) instead of O(n*m))."""
+    lo = max(0, seg_idx - window)
+    hi = min(len(poly) - 1, seg_idx + window + 1)
+    return _point_seg_signed(px, pz, poly[lo:hi])
+
+
 def _downsample(pts, step=2.0):
     """Keep points of a lap spaced roughly ``step`` meters apart."""
     if len(pts) < 2:
@@ -234,18 +244,53 @@ def _downsample(pts, step=2.0):
     return out
 
 
-def _avg_abs_dev(pts, ref_poly, min_speed_mph):
-    """Mean absolute distance of a lap's (fast) points to a reference polyline."""
-    total = 0.0
-    n = 0
-    for _, x, z, spd, _ in pts:
-        if spd < min_speed_mph:
-            continue
-        d = _point_seg_signed(x, z, ref_poly)[0]
-        if math.isfinite(d):
-            total += abs(d)
-            n += 1
-    return total / max(n, 1)
+def _cum_arc(pts):
+    """Cumulative arc length (m) along a polyline whose entries are
+    ``(idx, x, z, spd, t)``. Returns one value per point (first = 0)."""
+    cum = [0.0]
+    for a, b in zip(pts, pts[1:]):
+        cum.append(cum[-1] + math.hypot(b[1] - a[1], b[2] - a[2]))
+    return cum
+
+
+def _ref_turn_dirs(pts):
+    """Per-segment heading change (degrees) along a reference polyline.
+
+    Positive = turning left, negative = turning right, relative to the
+    direction of travel. Entries are ``(idx, x, z, spd, t)``; the returned
+    list has one value per segment (len(pts) - 1), with the first and any
+    wrap-around values zeroed.
+    """
+    n = len(pts)
+    if n < 3:
+        return [0.0] * max(n - 1, 0)
+    heads = [math.atan2(pts[i + 1][2] - pts[i][2], pts[i + 1][1] - pts[i][1])
+             for i in range(n - 1)]
+    turns = [0.0] * (n - 1)
+    for i in range(1, n - 1):
+        turns[i] = math.degrees(_wrap_angle(heads[i] - heads[i - 1]))
+    return turns
+
+
+def _seg_turn_signs(turns, kink_deg=8.0):
+    """Map per-segment heading changes to +1 (left) / -1 (right) / 0 (straight)."""
+    return [1 if t > kink_deg else (-1 if t < -kink_deg else 0) for t in turns]
+
+
+def _classify_deviation(side, turn_sign):
+    """Turn a signed lateral offset into a corner event kind.
+
+    ``side > 0`` means the point sits to the LEFT of the direction of travel.
+    Whether that is a cut (inside) or a wide exit (outside) depends on which
+    way the corner turns: in a left-hand corner the inside is to the left, in
+    a right-hand corner the inside is to the right. On a straight (turn_sign
+    == 0) the geometry is ambiguous, so we fall back to the old convention.
+    """
+    if turn_sign > 0:
+        return "cut" if side > 0 else "wide"
+    if turn_sign < 0:
+        return "wide" if side > 0 else "cut"
+    return "cut" if side > 0 else "wide"
 
 
 def _kinks_in_lap(pts, min_speed_mph, kink_deg):
@@ -265,20 +310,27 @@ def _kinks_in_lap(pts, min_speed_mph, kink_deg):
 
 
 def _pick_reference(groups, min_speed_mph, kink_deg):
-    """Pick the lap everything else is measured against: fewest kinks first
-    (a corner-cut lap has kinks), then least average deviation to the others."""
-    best = None
-    best_score = None
-    for gi, pts in groups:
-        kinks = len(_kinks_in_lap(pts, min_speed_mph, kink_deg))
-        others = [_downsample(o[1], 2.0) for o in groups if o[0] != gi]
-        dev = sum(_avg_abs_dev(pts, poly, min_speed_mph) for poly in others)
-        dev /= max(len(others), 1)
-        score = (kinks, dev)
-        if best_score is None or score < best_score:
-            best_score = score
-            best = (gi, pts)
-    return best
+    """Pick the lap everything else is measured against.
+
+    The lap whose total path length is closest to the median is the most
+    representative: a corner-cut lap is measurably shorter and a detour lap
+    measurably longer, so the median keeps the reference clean without the
+    cost of a full pairwise deviation comparison (which was O(groups^2 * n*m)
+    and a big chunk of the per-render lag). Ties are broken by fewest sharp
+    heading changes (a cut lap has kinks)."""
+    lengths = []
+    for _, pts in groups:
+        L = 0.0
+        for i in range(len(pts) - 1):
+            L += math.hypot(pts[i + 1][1] - pts[i][1], pts[i + 1][2] - pts[i][2])
+        lengths.append(L)
+    median_len = sorted(lengths)[len(lengths) // 2]
+    candidates = [g for g, L in zip(groups, lengths)
+                  if abs(L - median_len) <= 0.05 * median_len]
+    if not candidates:
+        candidates = groups
+    return min(candidates,
+               key=lambda g: len(_kinks_in_lap(g[1], min_speed_mph, kink_deg)))
 
 
 def _merge_events(events, merge_gap):
@@ -297,16 +349,42 @@ def _merge_events(events, merge_gap):
 
 
 def _find_deviations(groups, min_speed_mph, lateral_m, min_run, merge_gap, kink_deg):
-    """Multi-lap method: flag sustained lateral deviation from a reference lap."""
+    """Multi-lap method: flag sustained lateral deviation from a reference lap.
+
+    Each non-reference lap is aligned to the reference by arc-length fraction
+    (both are driven around the same track, so sample *i* of a lap maps to the
+    reference segment at the same fraction of total length), and each point
+    only tests the few reference segments around that fraction. That turns the
+    O(n*m) whole-reference search into an O(n) scan, which is what made live
+    chart updates laggy on long races. Cut/wide is then classified from the
+    corner's actual turn direction, so a left-hander and a right-hander are
+    judged with the correct inside/outside geometry.
+    """
     ref = _pick_reference(groups, min_speed_mph, kink_deg)
     ref_poly = _downsample(ref[1], 2.0)
+    ref_cum = _cum_arc(ref_poly)
+    ref_total = ref_cum[-1]
+    ref_turns = _seg_turn_signs(_ref_turn_dirs(ref_poly))
     events = []
     for gi, pts in groups:
         if gi == ref[0]:
             continue
-        devs = [_point_seg_signed(x, z, ref_poly) for _, x, z, _, _ in pts]
-        i = 0
+        cum = _cum_arc(pts)
+        total = cum[-1]
         n = len(pts)
+        # Monotonic arc-length alignment: each lap point maps to a reference
+        # segment at the same fraction along the lap.
+        seg_idx = [0] * n
+        ptr = 0
+        for i in range(n):
+            frac = cum[i] / total if total > 0 else 0.0
+            target = frac * ref_total
+            while ptr < len(ref_cum) - 2 and ref_cum[ptr + 1] < target:
+                ptr += 1
+            seg_idx[i] = ptr
+        devs = [_point_seg_signed_window(pts[i][1], pts[i][2], ref_poly, seg_idx[i])
+                for i in range(n)]
+        i = 0
         while i < n:
             if (pts[i][3] >= min_speed_mph and abs(devs[i][0]) > lateral_m
                     and math.isfinite(devs[i][0])):
@@ -317,6 +395,7 @@ def _find_deviations(groups, min_speed_mph, lateral_m, min_run, merge_gap, kink_
                     j += 1
                 if j - i >= min_run:
                     best = max(range(i, j), key=lambda k: abs(devs[k][0]))
+                    turn_sign = ref_turns[min(seg_idx[best], len(ref_turns) - 1)]
                     events.append({
                         "idx": pts[best][0],
                         "t": pts[best][4],
@@ -326,7 +405,7 @@ def _find_deviations(groups, min_speed_mph, lateral_m, min_run, merge_gap, kink_
                         "lap": gi,
                         "lateral_m": abs(devs[best][0]),
                         "mag": abs(devs[best][0]),
-                        "kind": "cut" if devs[best][1] > 0 else "wide",
+                        "kind": _classify_deviation(devs[best][1], turn_sign),
                     })
                 i = j
             else:
@@ -488,6 +567,179 @@ def detect_drift_segments(samples, min_speed_mph=30.0, min_dur_s=0.5,
 
 
 # --------------------------------------------------------------------------
+# Crash / hard-stop detection
+# --------------------------------------------------------------------------
+
+_MPH_PER_G = 21.94  # 1g in mph/s
+
+
+def detect_crashes(samples, laps=None, min_speed_mph=30.0, stop_mph=12.0,
+                   hard_drop_mph=45.0, decel_g=2.5, merge_gap_s=0.8,
+                   ignore_end_s=1.0):
+    """Detect crashes / violent hard stops from recorded telemetry.
+
+    A crash collapses speed far faster than braking can produce. Two signals
+    are used, and either flags a sample:
+
+    * Single-sample collapse: speed drops >= ``hard_drop_mph`` in one ~20Hz
+      step (a wall hit snaps from 100 to 20 in 0.05s).
+    * Sustained collapse: average deceleration over a ~0.5s window exceeds
+      ``decel_g`` and ends near a stop. Braking tops out around 1-1.5g, so
+      anything over 2.5g is not a brake stop.
+
+    ``laps`` (from split_laps) is optional and only used to tag which lap the
+    crash happened on. Events whose start falls in the last ``ignore_end_s``
+    of the recording are skipped so "turned the game off at the finish" isn't
+    counted as a crash.
+
+    Returns
+    -------
+    A list of crashes sorted by t (or None when samples are unusable), each:
+        {"start", "end", "t", "x", "z", "lap", "speed_before_mph",
+         "speed_after_mph", "decel_g", "duration_s", "recovery_s"}
+    ``x``/``z`` are the crash position in meters (None when no position data);
+    ``recovery_s`` is how long it took to regain 80% of the pre-crash speed
+    (None if the recording ended before recovery).
+    """
+    if not samples or len(samples) < 12:
+        return None
+    n = len(samples)
+    speeds = [s.get("spd", 0) or 0 for s in samples]
+    ts = [s.get("t", 0) for s in samples]
+    if not any(ts) or (ts[-1] or 0) <= (ts[0] or 0):
+        ts = [i / 20.0 for i in range(n)]
+
+    def pos_at(i):
+        p = samples[i].get("pos")
+        if isinstance(p, (list, tuple)) and len(p) >= 3:
+            x, z = p[0], p[2]
+            if isinstance(x, (int, float)) and isinstance(z, (int, float)):
+                return float(x), float(z)
+        return None
+
+    flags = [False] * n
+    for i in range(1, n):
+        drop = speeds[i - 1] - speeds[i]
+        if drop >= hard_drop_mph and speeds[i] < max(stop_mph, speeds[i - 1] * 0.5):
+            flags[i] = True
+    window = 10
+    for i in range(window, n):
+        drop = speeds[i - window] - speeds[i]
+        dt = ts[i] - ts[i - window]
+        if dt >= 0.3 and drop > 0:
+            decel_mph_s = drop / dt
+            if (decel_mph_s > decel_g * _MPH_PER_G
+                    and speeds[i] < stop_mph
+                    and speeds[i - window] >= min_speed_mph):
+                flags[i] = True
+
+    segs = []
+    start = None
+    for i in range(n):
+        if flags[i] and start is None:
+            start = i
+        elif not flags[i] and start is not None:
+            segs.append((start, i - 1))
+            start = None
+    if start is not None:
+        segs.append((start, n - 1))
+    if not segs:
+        return []
+
+    merged = []
+    for seg in segs:
+        if merged and (ts[seg[0]] - ts[merged[-1][1]]) <= merge_gap_s:
+            merged[-1] = (merged[-1][0], seg[1])
+        else:
+            merged.append(seg)
+
+    last_t = ts[-1]
+    out = []
+    for a, b in merged:
+        if ts[a] > last_t - ignore_end_s:
+            continue
+        peak = max(range(a, b + 1), key=lambda i: (speeds[i - 1] - speeds[i]) if i > a else 0.0)
+        speed_before = max(speeds[max(a - 1, 0): peak + 1])
+        speed_after = min(speeds[a:b + 1])
+        duration_s = ts[b] - ts[a]
+        drop = max(speed_before - speed_after, 0.0)
+        dt_drop = 0.05 * max(b - a + 1, 1)
+        decel_g = (drop / max(dt_drop, 0.05)) / _MPH_PER_G
+        recovery_s = None
+        target = speed_before * 0.8
+        for i in range(b + 1, n):
+            if speeds[i] >= target:
+                recovery_s = ts[i] - ts[b]
+                break
+        lap = None
+        if laps and laps.get("laps"):
+            for gi, group in enumerate(laps["laps"]):
+                if a >= group[0] and a <= group[-1]:
+                    lap = gi
+                    break
+        pos = pos_at(peak)
+        out.append({
+            "start": a,
+            "end": b,
+            "t": ts[peak],
+            "x": pos[0] if pos else None,
+            "z": pos[1] if pos else None,
+            "lap": lap,
+            "speed_before_mph": speed_before,
+            "speed_after_mph": speed_after,
+            "decel_g": round(decel_g, 1),
+            "duration_s": round(duration_s, 2),
+            "recovery_s": round(recovery_s, 2) if recovery_s is not None else None,
+        })
+    out.sort(key=lambda c: c["t"])
+    return out
+
+
+def corner_advice(ev):
+    """Plain-English, actionable advice for one off-line event.
+
+    Returns (headline, advice) so callers can render them as a tip pair.
+    """
+    kind = ev.get("kind")
+    spd = ev.get("speed_mph", 0) or 0
+    lat = ev.get("lateral_m", 0) or 0
+    lap = (ev.get("lap", 0) or 0) + 1
+    if kind in ("cut", "kink"):
+        if spd >= 90:
+            head = f"Lap {lap}: cut a corner at {spd:.0f} mph."
+            adv = ("At that speed a chord across the corner scrubs off more time "
+                   "than it saves. Brake 10-15 mph earlier in a straight line, "
+                   "turn in later and clip the apex, then unwind onto the "
+                   "throttle on the exit.")
+        else:
+            head = f"Lap {lap}: cut across a corner at {spd:.0f} mph."
+            adv = ("Aim for a slightly wider entry and touch the apex instead of "
+                   "shortcutting the arc — a clean line keeps more exit speed.")
+    else:
+        head = f"Lap {lap}: ran wide at {spd:.0f} mph (off by {lat:.0f} m)."
+        adv = ("You got on the power before the apex and drifted onto the "
+               "outside curb. Turn in a touch later, wait for the apex, then "
+               "feed throttle so the car is unwinding at the exit.")
+    return head, adv
+
+
+def crash_advice(crash):
+    """Plain-English, actionable advice for one crash. Returns (headline, advice)."""
+    spd = crash.get("speed_before_mph", 0) or 0
+    g = crash.get("decel_g", 0) or 0
+    t = crash.get("t", 0) or 0
+    rec = crash.get("recovery_s")
+    head = f"Crash at {t:.0f}s, hit while doing {spd:.0f} mph (~{g:.0f}g stop)."
+    rec_note = (f" It took {rec:.1f}s to get back up to speed — that's lost "
+                "time you could bank by not crashing." if rec is not None else
+                " The car never got back up to speed afterwards.")
+    adv = ("You arrived too fast for that corner. Brake earlier and in a "
+           "straight line, and turn in with a smoother, earlier input so the "
+           "rear stays planted through the apex.") + rec_note
+    return head, adv
+
+
+# --------------------------------------------------------------------------
 # Synthetic fixtures + self-tests
 # --------------------------------------------------------------------------
 
@@ -564,14 +816,18 @@ def make_race(num_full_laps=3, cut_lap=None, dt=0.05):
         pos, lap = _loop_point(s)
         if lap >= num_full_laps + 1:
             break
-        # Speed profile: slow through corners, fast on straights. Also ramp up
-        # from a standing start over the first ~3s so launch detection works.
+        # Speed profile: slow through corners, fast on straights. Ramp up from
+        # a standing start over the first ~3s so launch detection works, and
+        # lerp toward the target speed at ~1.5g so corner entries decelerate
+        # realistically instead of stepping 60 -> 25 m/s in one 20Hz sample
+        # (an instant speed step would alias as a crash in detect_crashes).
         _, _, heading = pos
         on_straight = heading in (0.0, 90.0, 180.0, 270.0)
         cruise = 60.0 if on_straight else 25.0
         if t < 3.0:
             cruise = min(cruise, 60.0 * t / 3.0)
-        v = cruise
+        v += max(-15.0 * dt, min(15.0 * dt, cruise - v))
+        v = max(v, 0.0)
         x, z = pos[0], pos[1]
 
         # Corner cut injection: on cut_lap, replace the BR arc with the chord.
@@ -644,6 +900,50 @@ def make_grip_corner_session():
         (2.5, 50.0, 60.0, 0.55, 0.0, 0.5),     # steering INTO the left turn
         (1.0, 50.0, 0.0, 0.0, 0.0, 0.5),
     ])
+
+
+def make_crash_session():
+    """Straight 90 mph approach, a wall hit (speed snap to ~0), recovery."""
+    samples = []
+    t = 0.0
+    x = z = 0.0
+
+    def add(secs, speed_mph, steer, hbrk, thr):
+        nonlocal t, x, z
+        v = speed_mph * 0.44704
+        for _ in range(int(round(secs / 0.05))):
+            x += math.cos(0.0) * v * 0.05
+            z += math.sin(0.0) * v * 0.05
+            samples.append({
+                "t": round(t, 3), "spd": round(speed_mph, 1),
+                "thr": thr, "brk": 0.0, "str": steer, "hbrk": hbrk,
+                "rpm": 5000, "gear": 3,
+                "pos": [round(x, 1), 0.0, round(z, 1)],
+            })
+            t += 0.05
+
+    add(1.0, 90.0, 0.0, 0.0, 1.0)      # approach
+    add(0.3, 0.0, 0.0, 0.0, 0.0)       # wall hit: 90 -> 0 in one sample
+    add(1.0, 45.0, 0.0, 0.0, 1.0)      # recovery to half speed
+    return samples
+
+
+def make_brake_stop_session():
+    """Normal ~1g braking to a stop — must NOT be flagged as a crash."""
+    samples = []
+    t = 0.0
+    x = 0.0
+    v = 60.0 * 0.44704
+    for _ in range(300):
+        v = max(0.0, v - 9.81 * 0.05)   # ~1g deceleration
+        x += v * 0.05
+        samples.append({
+            "t": round(t, 3), "spd": round(v / 0.44704, 1),
+            "thr": 0.0, "brk": 1.0, "str": 0.0, "hbrk": 0.0,
+            "rpm": 2000, "gear": 2, "pos": [round(x, 1), 0.0, 0.0],
+        })
+        t += 0.05
+    return samples
 
 
 def _main():
@@ -745,6 +1045,35 @@ def _main():
               for i in range(100)]
     check("no position data -> None",
           detect_drift_segments(no_pos) is None)
+
+    print("== detect_crashes ==")
+    crashes = detect_crashes(make_crash_session())
+    check("crash session returns crashes", bool(crashes))
+    if crashes:
+        crash = crashes[0]
+        check("one crash", len(crashes) == 1, f"got {len(crashes)}")
+        check("crash speed_before ~90 mph",
+              abs(crash["speed_before_mph"] - 90) < 15,
+              f"got {crash['speed_before_mph']:.0f}")
+        check("crash ends near a stop",
+              crash["speed_after_mph"] < 10, f"got {crash['speed_after_mph']:.0f}")
+        check("crash decel far above braking (>= 2.5g)",
+              crash["decel_g"] >= 2.5, f"got {crash['decel_g']:.1f}g")
+    check("brake stop is not a crash",
+          detect_crashes(make_brake_stop_session()) == [])
+    check("grip corner session has no crash",
+          detect_crashes(make_grip_corner_session()) == [])
+
+    print("== advice builders ==")
+    head, adv = corner_advice({"kind": "cut", "speed_mph": 95.0, "lap": 1,
+                               "lateral_m": 9.0})
+    check("cut advice mentions the lap", f"Lap 2" in head, head)
+    check("cut advice is actionable", len(adv) > 30, adv)
+    h2, a2 = crash_advice({"t": 42.0, "speed_before_mph": 110.0,
+                           "decel_g": 40.0, "recovery_s": 3.2})
+    check("crash advice mentions the impact speed",
+          f"110" in h2, h2)
+    check("crash advice mentions recovery", "3.2s" in a2, a2)
 
     if state["fails"]:
         print(f"\n{state['fails']} test(s) FAILED")
