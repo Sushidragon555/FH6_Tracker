@@ -46,6 +46,16 @@ whether to lock a fixed axis (e.g. 0-400) for cross-car comparison.
 ### Cross-race comparison (stretch)
 Two races, same track/car: "best lap 2.1 s faster, 3 fewer corner cuts."
 
+### Better lap indicator
+Lap boundaries are currently hard to see on the charts — make each lap clearly
+marked (e.g. colored segment bands or vertical divider lines with lap number /
+time labels on the speed & path charts).
+
+### Best lap vs worst lap compare
+Show the best lap and worst lap side by side (overlay on the path chart and/or
+stacked speed/input charts) so you can see where the time is lost. Reuses the
+arc-length alignment; natural follow-on to the track-comparison work above.
+
 ## Notes / gotchas
 
 - Races shorter than the minimum duration or < 10 samples are discarded on save.
