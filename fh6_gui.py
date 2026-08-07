@@ -836,6 +836,7 @@ class FH6TrackerGUI(tk.Tk):
         self._cleanup_old_races()
         self._run_startup_ocr_diagnostic()
         self.refresh_all()
+        self.after(50, self._autofit_window)
         self._refresh_after_id = self.after(self._refresh_interval_ms(), self.refresh_loop)
         if not self.settings.get("setup_complete", False):
             self.after(500, self._show_setup_wizard)
@@ -881,6 +882,7 @@ class FH6TrackerGUI(tk.Tk):
 
         controls = ttk.Frame(self)
         controls.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.controls = controls
         controls.columnconfigure(0, weight=0)
         controls.columnconfigure(1, weight=0)
         controls.columnconfigure(2, weight=0)
@@ -911,9 +913,31 @@ class FH6TrackerGUI(tk.Tk):
         self.performance_var = tk.StringVar(value=self.settings.get("performance_mode", car_lookup.DEFAULT_PERFORMANCE_MODE))
         ttk.Button(controls, text="Save Settings", command=self.save_all_settings).grid(row=0, column=2, padx=(8, 8), sticky="w")
 
-        self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=2, column=0, sticky="nsew")
+        # Wrap the notebook in a scrollable canvas so every tab's full content
+        # stays reachable on short screens / small windows (no full-screen needed).
+        scroll_holder = ttk.Frame(self)
+        scroll_holder.grid(row=2, column=0, sticky="nsew")
+        scroll_holder.rowconfigure(0, weight=1)
+        scroll_holder.columnconfigure(0, weight=1)
+
+        self.main_canvas = tk.Canvas(scroll_holder, highlightthickness=0)
+        self.main_vsb = ttk.Scrollbar(scroll_holder, orient="vertical", command=self.main_canvas.yview)
+        self.main_canvas.configure(yscrollcommand=self.main_vsb.set)
+        self.main_canvas.grid(row=0, column=0, sticky="nsew")
+        self.main_vsb.grid(row=0, column=1, sticky="ns")
+        self._main_vsb_shown = True
+
+        self.notebook = ttk.Notebook(self.main_canvas)
+        self.main_canvas.create_window((0, 0), window=self.notebook, anchor="nw", tags="nbwin")
         self.notebook.enable_traversal()
+
+        self._self_scroll_canvases = set()
+        self._main_target_h = 0
+
+        self.notebook.bind("<Configure>", self._sync_main_scroll)
+        self.main_canvas.bind("<Configure>", self._sync_main_scroll)
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_main_tab_changed)
+        self.bind("<MouseWheel>", self._main_mousewheel)
 
         self.watermark = tk.Label(self, text="Sushidragon555", font=("Bahnschrift", 9, "italic"),
                                   anchor="se", padx=8, pady=4)
@@ -949,6 +973,80 @@ class FH6TrackerGUI(tk.Tk):
         self.populate_progress_manufacturers()
         if self.launch_tracker_var.get():
             self.after(500, self.start_tracker)
+
+    def _main_mousewheel(self, event):
+        # Scroll the main notebook canvas, unless the pointer is over a widget
+        # that manages its own vertical scrolling (settings/race-chart/screenshot
+        # canvases), in which case let that one handle the wheel.
+        w = self.winfo_containing(event.x_root, event.y_root)
+        while w is not None:
+            if w in self._self_scroll_canvases:
+                return
+            w = w.master
+        try:
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except tk.TclError:
+            pass
+
+    def _selected_page_height(self):
+        # Requested height of the active tab so the scroll region matches the
+        # current page instead of always being the tallest tab.
+        try:
+            sel = self.notebook.select()
+            if not sel:
+                return None
+            return self.notebook.nametowidget(sel).winfo_reqheight()
+        except (tk.TclError, KeyError):
+            return None
+
+    def _sync_main_scroll(self, _event=None):
+        cw = self.main_canvas.winfo_width()
+        if cw > 1:
+            self.main_canvas.itemconfig("nbwin", width=cw)
+        page_h = self._selected_page_height()
+        if page_h is not None:
+            self._main_target_h = page_h
+            self.main_canvas.configure(scrollregion=(0, 0, max(cw, 1), max(page_h, 1)))
+        else:
+            bbox = self.main_canvas.bbox("all")
+            self.main_canvas.configure(scrollregion=bbox or (0, 0, max(cw, 1), 1))
+            self._main_target_h = bbox[3] if bbox else 1
+        needs = self._main_target_h > self.main_canvas.winfo_height() + 1
+        if needs and not self._main_vsb_shown:
+            self.main_vsb.grid()
+            self._main_vsb_shown = True
+        elif not needs and self._main_vsb_shown:
+            self.main_vsb.grid_remove()
+            self._main_vsb_shown = False
+
+    def _on_main_tab_changed(self, _event=None):
+        try:
+            self.main_canvas.yview_moveto(0.0)
+        except tk.TclError:
+            pass
+        self._sync_main_scroll()
+
+    def _autofit_window(self):
+        # Size the window to fit all tab content, clamped to the screen. If the
+        # content is taller than the screen, the main scrollbar takes over.
+        try:
+            self.update_idletasks()
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            nb_w = self.notebook.winfo_reqwidth()
+            nb_h = self.notebook.winfo_reqheight()
+            chrome_h = (self._header_frame.winfo_reqheight()
+                        + self.controls.winfo_reqheight()
+                        + self.watermark.winfo_reqheight())
+            pad = 28  # window padding (14 each side)
+            w = min(nb_w + pad, sw)
+            h = min(nb_h + chrome_h + pad + 8, sh - 40)
+            w = max(w, 1000)
+            h = max(h, 680)
+            x = max((sw - w) // 2, 0)
+            y = max((sh - h) // 2, 0)
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            logger.exception("Auto-fit failed")
 
     def build_garage_tab(self):
         self.garage_tab.columnconfigure(0, weight=1)
@@ -1472,6 +1570,7 @@ class FH6TrackerGUI(tk.Tk):
         chart_canvas = tk.Canvas(chart_outer_frame, highlightthickness=0, yscrollcommand=chart_scrollbar.set)
         chart_canvas.grid(row=0, column=0, sticky="nsew")
         chart_scrollbar.configure(command=chart_canvas.yview)
+        self._self_scroll_canvases.add(chart_canvas)
 
         chart_frame = ttk.Frame(chart_canvas)
         chart_canvas.create_window((0, 0), window=chart_frame, anchor="nw", tags="chart_inner")
@@ -3145,6 +3244,7 @@ class FH6TrackerGUI(tk.Tk):
         # Wrap everything in a canvas+scrollbar so content always fits
         settings_canvas = tk.Canvas(self.settings_tab, highlightthickness=0, width=700)
         settings_scroll = ttk.Scrollbar(self.settings_tab, orient="vertical", command=settings_canvas.yview)
+        self._self_scroll_canvases.add(settings_canvas)
         settings_canvas.configure(yscrollcommand=settings_scroll.set)
         settings_canvas.grid(row=0, column=0, sticky="nsew")
         settings_scroll.grid(row=0, column=1, sticky="ns")
@@ -3388,6 +3488,7 @@ class FH6TrackerGUI(tk.Tk):
 
         self.screenshots_canvas = tk.Canvas(self.screenshots_tab, highlightthickness=0)
         self.screenshots_canvas.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self._self_scroll_canvases.add(self.screenshots_canvas)
         vsb = ttk.Scrollbar(self.screenshots_tab, orient="vertical", command=self.screenshots_canvas.yview)
         vsb.grid(row=1, column=1, sticky="ns", pady=(0, 8))
         self.screenshots_canvas.configure(yscrollcommand=vsb.set)
