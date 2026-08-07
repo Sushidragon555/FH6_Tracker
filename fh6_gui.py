@@ -45,7 +45,7 @@ except Exception:  # pragma: no cover - optional OCR dependencies
     ImageOps = None
     ImageTk = None
 
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 GITHUB_REPO = "Sushidragon555/FH6_Tracker"
 # Only these machine names get the dev-only tools (View Feedback, webhook field,
 # Capture Tab Screenshots, --capture-screenshots CLI). End users never see them.
@@ -989,15 +989,42 @@ class FH6TrackerGUI(tk.Tk):
             pass
 
     def _selected_page_height(self):
-        # Requested height of the active tab so the scroll region matches the
-        # current page instead of always being the tallest tab.
+        # Height of the active tab so the scroll region matches the current
+        # page instead of always being the tallest tab. The notebook is as tall
+        # as the tallest tab and stretches the active tab to fill it, so a
+        # weighted row above fixed rows (e.g. the Race Analysis chart area
+        # above the stats/tips rows) pushes those rows below the requested
+        # height. Measure the deepest real content so nothing is cut off.
         try:
             sel = self.notebook.select()
             if not sel:
                 return None
-            return self.notebook.nametowidget(sel).winfo_reqheight()
+            tab = self.notebook.nametowidget(sel)
         except (tk.TclError, KeyError):
             return None
+        try:
+            base_y = tab.winfo_rooty()
+            if not base_y:
+                return tab.winfo_reqheight()
+        except (tk.TclError, TypeError):
+            return tab.winfo_reqheight()
+        bottom = tab.winfo_reqheight()
+        stack = list(tab.winfo_children())
+        while stack:
+            w = stack.pop()
+            if w in self._self_scroll_canvases:
+                continue
+            try:
+                stack.extend(w.winfo_children())
+            except tk.TclError:
+                continue
+            try:
+                wbottom = (w.winfo_rooty() - base_y) + w.winfo_reqheight()
+            except (tk.TclError, TypeError):
+                continue
+            if wbottom > bottom:
+                bottom = wbottom
+        return bottom
 
     def _sync_main_scroll(self, _event=None):
         cw = self.main_canvas.winfo_width()
