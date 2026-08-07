@@ -20,6 +20,9 @@ dist/
 _internal/
 FH6_Tracker.exe
 
+# Release zip (uploaded to GitHub Releases, not kept in the repo)
+*-windows.zip
+
 # OCR debug captures (generated at runtime when debug logging is enabled)
 ocr_debug/
 ocr_debug_capture.png
